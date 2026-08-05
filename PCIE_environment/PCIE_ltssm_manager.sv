@@ -1,9 +1,9 @@
-class PCIE_ltssm_manager extends uvm_object;
+class PCIE_ltssm_manager extends uvm_component;
 
-  `uvm_object_utils(PCIE_ltssm_manager)
+  `uvm_component_utils(PCIE_ltssm_manager)
 
-    function new(string name="PCIE_ltssm_manager");
-      super.new(name);
+    function new(string name="PCIE_ltssm_manager",uvm_component parent);
+      super.new(name,parent);
     endfunction
 
 
