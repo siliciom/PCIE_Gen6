@@ -1,24 +1,13 @@
 # ** Note: (vsim-220) 'modelsim.ini' is used as the ini file.
-# vsim PCIE_top "+UVM_TESTNAME=PCIE_base_test" -l file12a0c3c0 -ngflow 
-# Start time: 11:34:39 on Aug 04,2026
+# vsim PCIE_top "+UVM_TESTNAME=PCIE_base_test" -l file128f2500 -ngflow 
+# Start time: 15:20:04 on Aug 07,2026
 # Loading Siemens Visualizer shared object 'C:/questasim64_2025.2_1/win64/VisualizerRls/bin/libqvisualizer.dll'
-# ** Note: (vsim-3813) Design is being optimized due to module recompilation...
+# ** Note: (vsim-3812) Design is being optimized...
 # ** Note: (vopt-220) 'modelsim.ini' is used as the ini file.
-# //  Questa Sim-64
-# //  Version 2025.2_1 win64 Jun 25 2025
-# //
-# // Unpublished work. Copyright 2025 Siemens
-# //
-# // This material contains trade secrets or otherwise confidential information
-# // owned by Siemens Industry Software Inc. or its affiliates (collectively,
-# // "SISW"), or its licensors. Access to and use of this information is strictly
-# // limited as set forth in the Customer's applicable agreements with SISW.
-# //
-# // This material may not be copied, distributed, or otherwise disclosed outside
-# // of the Customer's facilities without the express written permission of SISW,
-# // and may not be used in any way not expressly authorized by SISW.
-# //
+# ** Warning: PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(26): (vopt-2875) Task "reset_scrambler" is being called in function "build_phase".
+# ** Note: (vsim-12126) Error and warning message counts have been restored: Errors=0, Warnings=1.
 # Loading sv_std.std
+# Loading work.typedef_enums(fast)
 # Loading mtiUvm.uvm_pkg(fast)
 # Loading work.PCIE_pkg(fast)
 # Loading mtiUvm.questa_uvm_pkg(fast)
@@ -53,155 +42,26 @@
 # UVM_INFO verilog_src/questa_uvm_pkg-1.2/src/questa_uvm_pkg.sv(277) @ 0: reporter [Questa UVM] QUESTA_UVM-1.2.3
 # UVM_INFO verilog_src/questa_uvm_pkg-1.2/src/questa_uvm_pkg.sv(278) @ 0: reporter [Questa UVM]  questa_uvm::init(+struct)
 # UVM_INFO @ 0: reporter [RNTST] Running test PCIE_base_test...
-# UVM_INFO PCIE_top/../PCIE_tests/PCIE_base_test.sv(16) @ 0: uvm_test_top [PCIE_TEST] ENTERED_INTO_TEST_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_tests/PCIE_base_test.sv(23) @ 0: uvm_test_top [PCIE_TEST] EXIT_FROM_TEST_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_environment/PCIE_environment.sv(26) @ 0: uvm_test_top.pcie_environment [PCIE_ENV] ENTERED_INTO_ENV_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_environment/PCIE_environment.sv(39) @ 0: uvm_test_top.pcie_environment [PCIE_ENV] EXIT_FROM_ENV_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_top_agent.sv(13) @ 0: uvm_test_top.pcie_environment.ep_top_agent [EP_CONTROLLER] ENTERED_INTO_EP_TOP_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_top_agent.sv(17) @ 0: uvm_test_top.pcie_environment.ep_top_agent [EP_CONTROLLER] EXIT_FROM_EP_TOP_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_agent.sv(14) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent [EP_CONTROLLER] ENTERED_INTO_EP_CONTROLLER_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_agent.sv(19) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent [EP_CONTROLLER] EXIT_FROM_EP_CONTROLLER_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_driver.sv(17) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_driver [EP_CONTROLLER] ENTERED_INTO_EP_CONTROLLER_DRIVER_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_driver.sv(20) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_driver [EP_CONTROLLER] EXIT_FROM_EP_CONTROLLER_DRIVER_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_monitor.sv(15) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_monitor [EP_CONTROLLER] ENTERED_INTO_EP_CONTROLLER_MONITOR_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_monitor.sv(18) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_monitor [EP_CONTROLLER] EXIT_FROM_EP_CONTROLLER_MONITOR_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_agent.sv(14) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent [EP_PHY] ENTERED_INTO_EP_PHY_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_agent.sv(19) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent [EP_PHY] EXIT_FROM_EP_PHY_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_driver.sv(12) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_driver [EP_PHY] ENTERED_INTO_EP_PHY_DRIVER_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_driver.sv(15) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_driver [EP_PHY] EXIT_FROM_EP_PHY_DRIVER_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_monitor.sv(12) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_monitor [EP_PHY] ENTERED_INTO_EP_PHY_MONITOR_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_monitor.sv(15) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_monitor [EP_PHY] EXIT_FROM_EP_PHY_MONITOR_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_environment/PCIE_scoreboard.sv(11) @ 0: uvm_test_top.pcie_environment.pcie_scoreboard [PCIE_SCOREBOARD] ENTERED_INTO_SB_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_environment/PCIE_scoreboard.sv(13) @ 0: uvm_test_top.pcie_environment.pcie_scoreboard [PCIE_SCOREBOARD] EXIT_FROM_SB_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_environment/PCIE_subscriber.sv(12) @ 0: uvm_test_top.pcie_environment.pcie_subscriber [PCIE_SUBSCRIBER] ENTERED_INTO_SUB_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_environment/PCIE_subscriber.sv(14) @ 0: uvm_test_top.pcie_environment.pcie_subscriber [PCIE_SUBSCRIBER] EXIT_FROM_SUB_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_top_agent.sv(13) @ 0: uvm_test_top.pcie_environment.rc_top_agent [RC_CONTROLLER] ENTERED_INTO_RC_TOP_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_top_agent.sv(17) @ 0: uvm_test_top.pcie_environment.rc_top_agent [RC_CONTROLLER] EXIT_FROM_RC_TOP_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_agent.sv(14) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent [RC_CONTROLLER] ENTERED_INTO_RC_CONTROLLER_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_agent.sv(19) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent [RC_CONTROLLER] EXIT_FROM_RC_CONTROLLER_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_driver.sv(16) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_driver [RC_CONTROLLER] ENTERED_INTO_RC_CONTROLLER_DRIVER_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_driver.sv(19) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_driver [RC_CONTROLLER] EXIT_FROM_RC_CONTROLLER_DRIVER_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_monitor.sv(13) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_monitor [RC_CONTROLLER] ENTERED_INTO_RC_CONTROLLER_MONITOR_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_monitor.sv(16) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_monitor [RC_CONTROLLER] EXIT_FROM_RC_CONTROLLER_MONITOR_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_agent.sv(14) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent [RC_PHY] ENTERED_INTO_RC_PHY_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_agent.sv(19) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent [RC_PHY] EXIT_FROM_RC_PHY_AGENT_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_driver.sv(12) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_driver [RC_PHY] ENTERED_INTO_RC_PHY_DRIVER_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_driver.sv(15) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_driver [RC_PHY] EXIT_FROM_RC_PHY_DRIVER_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_monitor.sv(12) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_monitor [RC_PHY] ENTERED_INTO_RC_PHY_MONITOR_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_monitor.sv(15) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_monitor [RC_PHY] EXIT_FROM_RC_PHY_MONITOR_BUILD_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_agent.sv(23) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent [EP_CONTROLLER] ENTERED_INTO_EP_CONTROLLER_AGENT_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_agent.sv(26) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent [EP_CONTROLLER] EXIT_FROM_EP_CONTROLLER_AGENT_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_agent.sv(23) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent [EP_PHY] ENTERED_INTO_EP_PHY_AGENT_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_agent.sv(26) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent [EP_PHY] EXIT_FROM_EP_PHY_AGENT_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_agent.sv(23) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent [RC_CONTROLLER] ENTERED_INTO_RC_CONTROLLER_AGENT_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_agent.sv(26) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent [RC_CONTROLLER] EXIT_FROM_RC_CONTROLLER_AGENT_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_agent.sv(23) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent [RC_PHY] ENTERED_INTO_RC_PHY_AGENT_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_agent.sv(26) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent [RC_PHY] EXIT_FROM_RC_PHY_AGENT_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_environment/PCIE_environment.sv(43) @ 0: uvm_test_top.pcie_environment [PCIE_ENV] ENTERED_INTO_ENV_CONNECT_PHASE
-# UVM_INFO PCIE_top/../PCIE_environment/PCIE_environment.sv(53) @ 0: uvm_test_top.pcie_environment [PCIE_ENV] EXIT_FROM_ENV_CONNECT_PHASE
-# UVM_INFO @ 0: reporter [UVMTOP] UVM testbench topology:
-# --------------------------------------------------------------------------
-# Name                             Type                          Size  Value
-# --------------------------------------------------------------------------
-# uvm_test_top                     PCIE_base_test                -     @481 
-#   pcie_environment               PCIE_environment              -     @488 
-#     ep_top_agent                 PCIE_EP_top_agent             -     @518 
-#       ep_controller_agent        PCIE_EP_controller_agent      -     @554 
-#         ep_controller_driver     PCIE_EP_controller_driver     -     @569 
-#           rsp_port               uvm_analysis_port             -     @584 
-#           seq_item_port          uvm_seq_item_pull_port        -     @576 
-#         ep_controller_monitor    PCIE_EP_controller_monitor    -     @592 
-#         ep_controller_sequencer  PCIE_EP_controller_sequencer  -     @599 
-#           rsp_export             uvm_analysis_export           -     @606 
-#           seq_item_export        uvm_seq_item_pull_imp         -     @700 
-#           arbitration_queue      array                         0     -    
-#           lock_queue             array                         0     -    
-#           num_last_reqs          integral                      32    'd1  
-#           num_last_rsps          integral                      32    'd1  
-#       ep_phy_agent               PCIE_EP_phy_agent             -     @561 
-#         ep_phy_driver            PCIE_EP_phy_driver            -     @722 
-#           rsp_port               uvm_analysis_port             -     @737 
-#           seq_item_port          uvm_seq_item_pull_port        -     @729 
-#         ep_phy_monitor           PCIE_EP_phy_monitor           -     @745 
-#         ep_phy_sequencer         PCIE_EP_phy_sequencer         -     @752 
-#           rsp_export             uvm_analysis_export           -     @759 
-#           seq_item_export        uvm_seq_item_pull_imp         -     @853 
-#           arbitration_queue      array                         0     -    
-#           lock_queue             array                         0     -    
-#           num_last_reqs          integral                      32    'd1  
-#           num_last_rsps          integral                      32    'd1  
-#     pcie_scoreboard              PCIE_scoreboard               -     @525 
-#     pcie_subscriber              PCIE_subscriber               -     @532 
-#       analysis_imp               uvm_analysis_imp              -     @539 
-#     rc_top_agent                 PCIE_RC_top_agent             -     @511 
-#       rc_controller_agent        PCIE_RC_controller_agent      -     @874 
-#         rc_controller_driver     PCIE_RC_controller_driver     -     @889 
-#           rsp_port               uvm_analysis_port             -     @904 
-#           seq_item_port          uvm_seq_item_pull_port        -     @896 
-#         rc_controller_monitor    PCIE_RC_controller_monitor    -     @912 
-#         rc_controller_sequencer  PCIE_RC_controller_sequencer  -     @919 
-#           rsp_export             uvm_analysis_export           -     @926 
-#           seq_item_export        uvm_seq_item_pull_imp         -     @1020
-#           arbitration_queue      array                         0     -    
-#           lock_queue             array                         0     -    
-#           num_last_reqs          integral                      32    'd1  
-#           num_last_rsps          integral                      32    'd1  
-#       rc_phy_agent               PCIE_RC_phy_agent             -     @881 
-#         rc_phy_driver            PCIE_RC_phy_driver            -     @1042
-#           rsp_port               uvm_analysis_port             -     @1057
-#           seq_item_port          uvm_seq_item_pull_port        -     @1049
-#         rc_phy_monitor           PCIE_RC_phy_monitor           -     @1065
-#         rc_phy_sequencer         PCIE_RC_phy_sequencer         -     @1072
-#           rsp_export             uvm_analysis_export           -     @1079
-#           seq_item_export        uvm_seq_item_pull_imp         -     @1173
-#           arbitration_queue      array                         0     -    
-#           lock_queue             array                         0     -    
-#           num_last_reqs          integral                      32    'd1  
-#           num_last_rsps          integral                      32    'd1  
-# --------------------------------------------------------------------------
-# 
-# UVM_INFO PCIE_top/../PCIE_tests/PCIE_base_test.sv(31) @ 0: uvm_test_top [PCIE_TEST] ENTERED_INTO_TEST_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_monitor.sv(19) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_monitor [RC_PHY] ENTERED_INTO_RC_PHY_MONITOR_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_phy_agent/PCIE_RC_phy_driver.sv(19) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_driver [RC_PHY] ENTERED_INTO_RC_PHY_DRIVER_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_monitor.sv(20) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_monitor [RC_CONTROLLER] ENTERED_INTO_RC_CONTROLLER_MONITOR_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_RC_controller_agent/PCIE_RC_controller_driver.sv(23) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_driver [RC_CONTROLLER] ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_monitor.sv(19) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_monitor [EP_PHY] ENTERED_INTO_EP_PHY_MONITOR_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_phy_agent/PCIE_EP_phy_driver.sv(19) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_driver [EP_PHY] ENTERED_INTO_EP_PHY_DRIVER_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_monitor.sv(22) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_monitor [EP_CONTROLLER] ENTERED_INTO_EP_CONTROLLER_MONITOR_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_agents/PCIE_EP_controller_agent/PCIE_EP_controller_driver.sv(24) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_driver [EP_CONTROLLER] ENTERED_INTO_EP_CONTROLLER_DRIVER_RUN_PHASE
-# UVM_INFO PCIE_top/../PCIE_sequences/PCIE_RC_controller_base_sequence.sv(12) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_sequencer@@rc_controller_sequence [RC_CONTROLLER] ENTERED_INTO_RC_CONTROLLER_BASE_SEQUENCE_TASK_BODY
-# UVM_INFO PCIE_top/../PCIE_sequences/PCIE_RC_controller_base_sequence.sv(15) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_sequencer@@rc_controller_sequence [RC_CONTROLLER] EXIT_FROM_RC_CONTROLLER_BASE_SEQUENCE_TASK_BODY
-# UVM_INFO PCIE_top/../PCIE_sequences/PCIE_EP_controller_base_sequence.sv(12) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_sequencer@@ep_controller_sequence [EP_CONTROLLER] ENTERED_INTO_EP_CONTROLLER_BASE_SEQUENCE_TASK_BODY
-# UVM_INFO PCIE_top/../PCIE_sequences/PCIE_EP_controller_base_sequence.sv(15) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_sequencer@@ep_controller_sequence [EP_CONTROLLER] EXIT_FROM_EP_CONTROLLER_BASE_SEQUENCE_TASK_BODY
-# UVM_INFO PCIE_top/../PCIE_sequences/PCIE_RC_phy_base_sequence.sv(12) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_sequencer@@rc_phy_sequence [RC_PHY] ENTERED_INTO_RC_PHY_BASE_SEQUENCE_TASK_BODY
-# UVM_INFO PCIE_top/../PCIE_sequences/PCIE_RC_phy_base_sequence.sv(15) @ 0: uvm_test_top.pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_sequencer@@rc_phy_sequence [RC_PHY] EXIT_FROM_RC_PHY_BASE_SEQUENCE_TASK_BODY
-# UVM_INFO PCIE_top/../PCIE_sequences/PCIE_EP_phy_base_sequence.sv(12) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_sequencer@@ep_phy_sequence [EP_PHY] ENTERED_INTO_EP_PHY_BASE_SEQUENCE_TASK_BODY
-# UVM_INFO PCIE_top/../PCIE_sequences/PCIE_EP_phy_base_sequence.sv(15) @ 0: uvm_test_top.pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_sequencer@@ep_phy_sequence [EP_PHY] EXIT_FROM_EP_PHY_BASE_SEQUENCE_TASK_BODY
-# UVM_INFO PCIE_top/../PCIE_tests/PCIE_base_test.sv(38) @ 0: uvm_test_top [PCIE_TEST] EXIT_FROM_TEST_RUN_PHASE
-# UVM_INFO verilog_src/uvm-1.1d/src/base/uvm_objection.svh(1267) @ 0: reporter [TEST_DONE] 'run' phase is ready to proceed to the 'extract' phase
+# UVM_INFO PCIE_top/../PCIE_tests/PCIE_base_test.sv(17) @ 0: uvm_test_top [PCIE_TEST] ENTERED_INTO_TEST_BUILD_PHASE
+# UVM_INFO PCIE_top/../PCIE_tests/PCIE_base_test.sv(28) @ 0: uvm_test_top [PCIE_TEST] EXIT_FROM_TEST_BUILD_PHASE
+# UVM_INFO PCIE_top/../PCIE_environment/PCIE_environment.sv(36) @ 0: uvm_test_top.pcie_environment [PCIE_environment] ENTER_BUILD_PHASE
+# UVM_FATAL PCIE_top/../PCIE_environment/PCIE_environment.sv(39) @ 0: uvm_test_top.pcie_environment [PCIE_ENV] Cannot_get_ENV_CONFIG
 # 
 # --- UVM Report Summary ---
 # 
 # ** Report counts by severity
-# UVM_INFO :   69
+# UVM_INFO :    6
 # UVM_WARNING :    0
 # UVM_ERROR :    0
-# UVM_FATAL :    0
+# UVM_FATAL :    1
 # ** Report counts by id
-# [EP_CONTROLLER]    14
-# [EP_PHY]    12
-# [PCIE_ENV]     4
-# [PCIE_SCOREBOARD]     2
-# [PCIE_SUBSCRIBER]     2
-# [PCIE_TEST]     4
+# [PCIE_ENV]     1
+# [PCIE_TEST]     2
+# [PCIE_environment]     1
 # [Questa UVM]     2
-# [RC_CONTROLLER]    14
-# [RC_PHY]    12
 # [RNTST]     1
-# [TEST_DONE]     1
-# [UVMTOP]     1
-# ** Note: $finish    : C:/questasim64_2025.2_1/win64/../verilog_src/uvm-1.1d/src/base/uvm_root.svh(430)
-#    Time: 0 ns  Iteration: 257  Instance: /PCIE_top
+# ** Note: $finish    : C:/questasim64_2025.2_1/win64/../verilog_src/uvm-1.1d/src/base/uvm_report_object.svh(292)
+#    Time: 0 ns  Iteration: 7  Region: /uvm_pkg::uvm_phase::m_run_phases
 # Siemens software version 2025.2_1 (Build number 0)
 # Unpublished work. Copyright 2026 Siemens
 # qwavedb_dumpvars: Initiating qwavedb waveform capturing
@@ -212,5 +72,5 @@
 # qwavedb_dumpvars : Simulation ending at [0 0] 0
 # 
 # 
-# End time: 11:34:47 on Aug 04,2026, Elapsed time: 0:00:08
-# Errors: 0, Warnings: 0
+# End time: 15:20:54 on Aug 07,2026, Elapsed time: 0:00:50
+# Errors: 0, Warnings: 1
