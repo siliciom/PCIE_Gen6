@@ -1,8 +1,8 @@
 # ** Note: (vsim-220) 'modelsim.ini' is used as the ini file.
-# vsim PCIE_top "+UVM_TESTNAME=PCIE_base_test" -l file129530f0 -ngflow 
-# Start time: 15:32:33 on Aug 07,2026
+# vsim PCIE_top "+UVM_TESTNAME=PCIE_base_test" -l file12ab1b80 -ngflow 
+# Start time: 16:10:14 on Aug 07,2026
 # Loading Siemens Visualizer shared object 'C:/questasim64_2025.2_1/win64/VisualizerRls/bin/libqvisualizer.dll'
-# ** Note: (vsim-3813) Design is being optimized due to module recompilation...
+# ** Note: (vsim-3812) Design is being optimized...
 # ** Note: (vopt-220) 'modelsim.ini' is used as the ini file.
 # //  Questa Sim-64
 # //  Version 2025.2_1 win64 Jun 25 2025
@@ -21,7 +21,6 @@
 # Loading sv_std.std
 # Loading work.PCIE_RC_interface(fast)
 # Loading work.PCIE_PHY_interface(fast)
-# Loading work.typedef_enums(fast)
 # Loading work.PCIE_EP_interface(fast)
 # Loading mtiUvm.uvm_pkg(fast)
 # Loading work.PCIE_pkg(fast)
@@ -226,5 +225,5 @@
 # qwavedb_dumpvars : Simulation ending at [0 0] 0
 # 
 # 
-# End time: 15:32:37 on Aug 07,2026, Elapsed time: 0:00:04
+# End time: 16:10:20 on Aug 07,2026, Elapsed time: 0:00:06
 # Errors: 0, Warnings: 0

@@ -1,0 +1,54 @@
+# do run.do
+# PCIE_base_test
+# QuestaSim-64 vmap 2025.2_1 Lib Mapping Utility 2025.06 Jun 25 2025
+# vmap work work 
+# ** Note: (vmap-220) 'C:/questasim64_2025.2_1/win64/../modelsim.ini' is used as the ini file.
+# Copying C:/questasim64_2025.2_1/win64/../modelsim.ini to modelsim.ini
+# Modifying modelsim.ini
+# QuestaSim-64 vlog 2025.2_1 Compiler 2025.06 Jun 25 2025
+# Start time: 16:10:12 on Aug 07,2026
+# vlog -work work -sv PCIE_top/PCIE_PHY_interface.sv 
+# ** Note: (vlog-220) 'modelsim.ini' is used as the ini file.
+# -- Compiling interface PCIE_PHY_interface
+# 
+# Top level modules:
+# 	--none--
+# End time: 16:10:12 on Aug 07,2026, Elapsed time: 0:00:00
+# Errors: 0, Warnings: 0
+# QuestaSim-64 vlog 2025.2_1 Compiler 2025.06 Jun 25 2025
+# Start time: 16:10:12 on Aug 07,2026
+# vlog -work work -sv PCIE_top/PCIE_PIPE_interface.sv 
+# ** Note: (vlog-220) 'modelsim.ini' is used as the ini file.
+# -- Compiling interface PCIE_RC_interface
+# -- Compiling interface PCIE_EP_interface
+# 
+# Top level modules:
+# 	--none--
+# End time: 16:10:12 on Aug 07,2026, Elapsed time: 0:00:00
+# Errors: 0, Warnings: 0
+# QuestaSim-64 vlog 2025.2_1 Compiler 2025.06 Jun 25 2025
+# Start time: 16:10:13 on Aug 07,2026
+# vlog -work work -sv PCIE_top/PCIE_pkg.sv 
+# ** Note: (vlog-220) 'modelsim.ini' is used as the ini file.
+# -- Compiling package PCIE_pkg
+# ** Note: (vlog-2286) PCIE_top/PCIE_pkg.sv(3): Using implicit +incdir+C:/questasim64_2025.2_1/uvm-1.1d/../verilog_src/uvm-1.1d/src from import uvm_pkg
+# -- Importing package mtiUvm.uvm_pkg (uvm-1.1d Built-in)
+# 
+# Top level modules:
+# 	--none--
+# End time: 16:10:13 on Aug 07,2026, Elapsed time: 0:00:00
+# Errors: 0, Warnings: 0
+# QuestaSim-64 vlog 2025.2_1 Compiler 2025.06 Jun 25 2025
+# Start time: 16:10:13 on Aug 07,2026
+# vlog -work work -sv PCIE_top/PCIE_top.sv 
+# ** Note: (vlog-220) 'modelsim.ini' is used as the ini file.
+# ** Note: (vlog-2286) PCIE_top/PCIE_top.sv(1): Using implicit +incdir+C:/questasim64_2025.2_1/uvm-1.1d/../verilog_src/uvm-1.1d/src from import uvm_pkg
+# -- Compiling module PCIE_top
+# -- Importing package PCIE_pkg
+# -- Importing package mtiUvm.uvm_pkg (uvm-1.1d Built-in)
+# 
+# Top level modules:
+# 	PCIE_top
+# End time: 16:10:14 on Aug 07,2026, Elapsed time: 0:00:01
+# Errors: 0, Warnings: 0
+# file12ab1b80

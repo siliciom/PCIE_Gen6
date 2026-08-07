@@ -1,4 +1,3 @@
-import typedef_enums::*;
 
 class PCIE_env_config extends uvm_object;
 
@@ -31,11 +30,8 @@ class PCIE_env_config extends uvm_object;
    //----------------------------------------
    bit has_subscriber             = 1;
 
-   pcie_mode_e mode;
-
    function new(string name="PCIE_env_config");
      super.new(name);
-     mode = FLIT_MODE; //by_default_nothing_is_config
    endfunction
    
 endclass
