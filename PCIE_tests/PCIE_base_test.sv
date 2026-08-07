@@ -7,6 +7,7 @@ class PCIE_base_test extends uvm_test;
     PCIE_EP_controller_base_sequence     ep_controller_sequence;
     PCIE_RC_phy_base_sequence            rc_phy_sequence;
     PCIE_EP_phy_base_sequence            ep_phy_sequence;
+    PCIE_env_config       env_cfg;
 
     function new(string name="PCIE_base_test",uvm_component parent = null);
         super.new(name,parent);
@@ -15,6 +16,10 @@ class PCIE_base_test extends uvm_test;
     function void build_phase(uvm_phase phase);
       `uvm_info("PCIE_TEST","ENTERED_INTO_TEST_BUILD_PHASE",UVM_LOW)
        super.build_phase(phase);
+         env_cfg = PCIE_env_config::type_id::create("env_cfg");
+
+      uvm_config_db#(PCIE_env_config)::set( this, "*", "PCIE_ENV_CONFIG",
+           env_cfg);
          pcie_environment = PCIE_environment::type_id::create("pcie_environment",this);
          rc_controller_sequence = PCIE_RC_controller_base_sequence::type_id::create("rc_controller_sequence",this);
          ep_controller_sequence = PCIE_EP_controller_base_sequence::type_id::create("ep_controller_sequence",this);
