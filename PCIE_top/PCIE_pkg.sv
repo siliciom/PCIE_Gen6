@@ -4,6 +4,8 @@ package PCIE_pkg;
      import uvm_pkg::*;
        
 	`include "../PCIE_agents/PCIE_sequence_item.sv"
+	`include "../PCIE_config/PCIE_env_config.sv"
+	//`include "../PCIE_config/enum_defs.sv"
         `include "../PCIE_environment/PCIE_RC_TL_model.sv"
         `include "../PCIE_environment/PCIE_RC_DL_model.sv"
         `include "../PCIE_environment/PCIE_RC_PL_model.sv"

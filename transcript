@@ -1,0 +1,66 @@
+# do run.do
+# PCIE_base_test
+# QuestaSim-64 vmap 2025.2_1 Lib Mapping Utility 2025.06 Jun 25 2025
+# vmap work work 
+# ** Note: (vmap-220) 'C:/questasim64_2025.2_1/win64/../modelsim.ini' is used as the ini file.
+# Copying C:/questasim64_2025.2_1/win64/../modelsim.ini to modelsim.ini
+# Modifying modelsim.ini
+# QuestaSim-64 vlog 2025.2_1 Compiler 2025.06 Jun 25 2025
+# Start time: 15:00:18 on Aug 07,2026
+# vlog -work work -sv PCIE_top/PCIE_PHY_interface.sv 
+# ** Note: (vlog-220) 'modelsim.ini' is used as the ini file.
+# -- Compiling interface PCIE_PHY_interface
+# 
+# Top level modules:
+# 	--none--
+# End time: 15:00:18 on Aug 07,2026, Elapsed time: 0:00:00
+# Errors: 0, Warnings: 0
+# QuestaSim-64 vlog 2025.2_1 Compiler 2025.06 Jun 25 2025
+# Start time: 15:00:19 on Aug 07,2026
+# vlog -work work -sv PCIE_top/PCIE_PIPE_interface.sv 
+# ** Note: (vlog-220) 'modelsim.ini' is used as the ini file.
+# -- Compiling interface PCIE_RC_interface
+# -- Compiling interface PCIE_EP_interface
+# 
+# Top level modules:
+# 	--none--
+# End time: 15:00:19 on Aug 07,2026, Elapsed time: 0:00:00
+# Errors: 0, Warnings: 0
+# QuestaSim-64 vlog 2025.2_1 Compiler 2025.06 Jun 25 2025
+# Start time: 15:00:19 on Aug 07,2026
+# vlog -work work -sv PCIE_top/PCIE_pkg.sv 
+# ** Note: (vlog-220) 'modelsim.ini' is used as the ini file.
+# -- Compiling package PCIE_pkg
+# ** Note: (vlog-2286) PCIE_top/PCIE_pkg.sv(3): Using implicit +incdir+C:/questasim64_2025.2_1/uvm-1.1d/../verilog_src/uvm-1.1d/src from import uvm_pkg
+# -- Importing package mtiUvm.uvm_pkg (uvm-1.1d Built-in)
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(1): (vlog-13006) Could not find the package (typedef_enums).  Design read will continue, but expect a cascade of errors after this failure.  Furthermore if you experience a vopt-7 error immediately before this error then please check the package names or the library search paths on the command line.
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(6): Invalid type 'pcie_mode_e'. Please check the type of the variable 'mode'.
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(7): Invalid type 'PCIE_env_config'. Please check the type of the variable 'pcie_ecfg'.
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(20): (vlog-2730) Undefined variable: 'PCIE_env_config'.
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(24): (vlog-2730) Undefined variable: 'mode'.
+# ** Warning: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(25): (vlog-2600) [RDGN] - Redundant digits in numeric literal.
+# ** Warning: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(25): (vlog-13562) Size of the numeric literal '101000010000000100100101' is bigger than the specified number of bits '23'. 
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(38): (vlog-2730) Undefined variable: 'mode'.
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(42): (vlog-2730) Undefined variable: 'NON_FLIT_MODE'.
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(9)
+# ** at PCIE_top/../PCIE_environment/PCIE_RC_PL_model.sv(56): (vlog-2730) Undefined variable: 'FLIT_MODE'.
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(45)
+# ** at PCIE_top/../PCIE_environment/PCIE_environment.sv(10): Invalid type 'PCIE_env_config'. Please check the type of the variable 'pcie_ecfg'.
+# ** Error: ** while parsing file included at PCIE_top/PCIE_pkg.sv(45)
+# ** at PCIE_top/../PCIE_environment/PCIE_environment.sv(37): (vlog-2730) Undefined variable: 'PCIE_env_config'.
+# End time: 15:00:20 on Aug 07,2026, Elapsed time: 0:00:01
+# Errors: 10, Warnings: 2
+# ** Error: C:/questasim64_2025.2_1/win64/vlog failed.
+# Error in macro ./run.do line 7
+# C:/questasim64_2025.2_1/win64/vlog failed.
+#     while executing
+# "vlog -work work -sv PCIE_top/PCIE_pkg.sv"

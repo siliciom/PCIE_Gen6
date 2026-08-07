@@ -1,0 +1,89 @@
+m255
+K4
+z2
+!s11f vlog 2025.2_1 2025.06, Jun 25 2025
+13
+!s112 1.1
+!i10d 8192
+!i10e 25
+!i10f 100
+cModel Technology
+Z0 dC:/PCIE_Gen6
+YPCIE_EP_interface
+Z1 2PCIE_top/PCIE_PIPE_interface.sv
+Z2 DXx6 sv_std 3 std 0 22 @5XbY]_OacJl=`ToSm<M^0
+Z3 !s110 1786095019
+!i10b 1
+!s100 B_T;MTo_8^Q@Y=;A8kZ@D1
+Ig;0;XiS_5BBaH5D<[9W<<3
+S1
+R0
+Z4 w1785936330
+Z5 8PCIE_top/PCIE_PIPE_interface.sv
+Z6 FPCIE_top/PCIE_PIPE_interface.sv
+!i122 1
+L0 75 0
+Z7 VDg1SIo80bB@j0V0VzS_@n1
+Z8 OL;L;2025.2_1;82
+r1
+!s85 0
+31
+Z9 !s108 1786095019.000000
+!s107 PCIE_top/PCIE_PIPE_interface.sv|
+Z10 !s90 -work|work|-sv|PCIE_top/PCIE_PIPE_interface.sv|
+!i113 0
+Z11 o-work work -sv -L mtiAvm -L mtiRnm -L mtiOvm -L mtiUvm -L mtiUPF -L infact
+Z12 tCvgOpt 0 defaultOptions 1085333752
+n@p@c@i@e_@e@p_interface
+YPCIE_PHY_interface
+2PCIE_top/PCIE_PHY_interface.sv
+R2
+!s110 1786095018
+!i10b 1
+!s100 zC1TOgAgB:LEP9`YbcfaD1
+I<bhW5ZlFNXMLoj:CNmWWX0
+S1
+R0
+R4
+8PCIE_top/PCIE_PHY_interface.sv
+FPCIE_top/PCIE_PHY_interface.sv
+!i122 0
+Z13 L0 1 0
+R7
+R8
+r1
+!s85 0
+31
+!s108 1786095018.000000
+!s107 PCIE_top/PCIE_PHY_interface.sv|
+!s90 -work|work|-sv|PCIE_top/PCIE_PHY_interface.sv|
+!i113 0
+R11
+R12
+n@p@c@i@e_@p@h@y_interface
+YPCIE_RC_interface
+R1
+R2
+R3
+!i10b 1
+!s100 YHE4z`571WIT7>A9J_W=03
+In24WTPgNK7NG6mLn2o0d50
+S1
+R0
+R4
+R5
+R6
+!i122 1
+R13
+R7
+R8
+r1
+!s85 0
+31
+R9
+Z14 !s107 PCIE_top/PCIE_PIPE_interface.sv|
+R10
+!i113 0
+R11
+R12
+n@p@c@i@e_@r@c_interface

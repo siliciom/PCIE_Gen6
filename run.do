@@ -4,6 +4,7 @@ vlib work
 vmap work work
 vlog -work work -sv PCIE_top/PCIE_PHY_interface.sv
 vlog -work work -sv PCIE_top/PCIE_PIPE_interface.sv
+vlog -work work -sv PCIE_config/enum_defs.sv
 vlog -work work -sv PCIE_top/PCIE_pkg.sv
 vlog -work work -sv PCIE_top/PCIE_top.sv
 
