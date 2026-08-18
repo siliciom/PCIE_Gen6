@@ -22,7 +22,6 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
         PCIe_EP_TL_model              ep_tl_model;
         PCIe_EP_DL_model              ep_dl_model;
         PCIe_EP_PL_model              ep_pl_model;
-        PCIe_ltssm_manager            ltssm_dri;
     
  
 	function new(string name="PCIe_EP_controller_driver", uvm_component parent);

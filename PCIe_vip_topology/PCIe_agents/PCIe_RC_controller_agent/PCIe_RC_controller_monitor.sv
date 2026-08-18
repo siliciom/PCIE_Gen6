@@ -19,7 +19,6 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
        `uvm_component_utils(PCIe_RC_controller_monitor)
   
  	PCIe_sequence_item            pcie_seq_item;
-        PCIe_ltssm_manager            ltssm_mon;
  
 	function new(string name="PCIe_RC_controller_monitor", uvm_component parent);
            super.new(name,parent);
