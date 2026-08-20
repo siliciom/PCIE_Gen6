@@ -1,7 +1,7 @@
 //=========================================================================================
-// File         : PCIe_RC_PL_model.sv
+// File         : PCIe_EP_PL_model.sv
 // Project      : PCIE_Gen6
-// Description  : PCIe_environment\PCIe_RC_PL_model.sv
+// Description  : PCIe_environment\PCIe_EP_PL_model.sv
 // Author       : 
 // Date         : 2026-08-17
 //=========================================================================================
@@ -14,11 +14,10 @@
 * All other rights reserved.
 ***********************************************************************************************************************/
 
-import typedef_enums::*;
+class PCIe_EP_PL_model extends uvm_component;
 
-class PCIe_RC_PL_model extends uvm_component;
-   
-  `uvm_component_utils(PCIe_RC_PL_model)
+  `uvm_component_utils(PCIe_EP_PL_model)
+
    pcie_mode_e mode;
    PCIe_env_config   pcie_ecfg;
 
@@ -179,43 +178,9 @@ class PCIe_RC_PL_model extends uvm_component;
       `uvm_info("PCIe_PL_MODEL","EXIT_FROM_TX_PROCESS_TASK",  UVM_LOW)
    endtask
 
+
+
 endclass
-
-
- /*task tx_parity_generate(input  bit [31:0] gray_data, output bit   parity_bit);
-      parity_bit = 0;
-      `uvm_info("PCIe_PL_MODEL",$sformatf("ENTERED_INTO_PARITY_GENERATE_TASK"),UVM_LOW)
-      `uvm_info("PCIe_PL_MODEL",$sformatf("PARITY_GENERATE_INPUT =%b",gray_data),UVM_LOW)
-      for(int i=31;i>=0;i--) begin
-         parity_bit ^= gray_data[i];
-        `uvm_info("PCIe_PL_MODEL",$sformatf("BIT[%0d]=%0b RUNNING_PARITY =%b",i,gray_data[i],parity_bit),UVM_LOW)
-      end
-      `uvm_info("PCIe_PL_MODEL",$sformatf("PARITY_GENERATE_OUTPUT =%b",parity_bit),UVM_LOW)
-      `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_PARITY_GENERATE_TASK"),UVM_LOW)
-   endtask*/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  
+  
 

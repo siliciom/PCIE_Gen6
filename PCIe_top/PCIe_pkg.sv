@@ -24,13 +24,12 @@ package PCIe_pkg;
 	`include "../PCIe_agents/PCIe_sequence_item.sv"
 	`include "../PCIe_config/PCIe_env_config.sv"
 	//`include "../PCIe_config/enum_defs.sv"
-        `include "../PCIe_environment/PCIe_RC_TL_model.sv"
-        `include "../PCIe_environment/PCIe_RC_DL_model.sv"
-        `include "../PCIe_environment/PCIe_RC_PL_model.sv"
-        `include "../PCIe_environment/PCIe_EP_TL_model.sv"
-        `include "../PCIe_environment/PCIe_EP_DL_model.sv"
-        `include "../PCIe_environment/PCIe_EP_PL_model.sv"
-        `include "../PCIe_environment/PCIe_ltssm_manager.sv"
+	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_TL_model.sv"
+	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv"
+	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_PL_model.sv"
+	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_TL_model.sv"
+	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_DL_model.sv"
+	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_PL_model.sv"
        
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_controller_sequencer.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_controller_sequencer.sv"
@@ -47,8 +46,7 @@ package PCIe_pkg;
 	`include "../PCIe_agents/PCIe_RC_phy_agent/PCIe_RC_phy_monitor.sv"
 	`include "../PCIe_agents/PCIe_EP_phy_agent/PCIe_EP_phy_monitor.sv"
 
-	
-        `include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_controller_agent.sv"
+    `include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_controller_agent.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_controller_agent.sv"
 	`include "../PCIe_agents/PCIe_RC_phy_agent/PCIe_RC_phy_agent.sv"
 	`include "../PCIe_agents/PCIe_EP_phy_agent/PCIe_EP_phy_agent.sv"
@@ -60,11 +58,11 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_phy_base_sequence.sv"
 	`include "../PCIe_sequences/PCIe_EP_phy_base_sequence.sv"
 
-     `include "../PCIe_environment/PCIe_scoreboard.sv"
-     `include "../PCIe_environment/PCIe_subscriber.sv"
-     `include "../PCIe_environment/PCIe_environment.sv"
+    `include "../PCIe_environment/PCIe_scoreboard.sv"
+    `include "../PCIe_environment/PCIe_subscriber.sv"
+    `include "../PCIe_environment/PCIe_environment.sv"
 
-     `include "../PCIe_tests/PCIe_base_test.sv"
+    `include "../PCIe_tests/PCIe_base_test.sv"
 
 
 endpackage

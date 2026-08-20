@@ -22,7 +22,6 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
     PCIe_RC_TL_model              rc_tl_model;
     PCIe_RC_DL_model              rc_dl_model;
     PCIe_RC_PL_model              rc_pl_model;
-    PCIe_ltssm_manager            ltssm_dri;
 
     virtual PCIe_RC_interface     rc_pipe_intf_tx, rc_pipe_intf_rx;	
 

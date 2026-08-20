@@ -19,8 +19,10 @@ class PCIe_sequence_item extends uvm_sequence_item;
    `uvm_object_utils(PCIe_sequence_item)
       
   //RC_and_Ep_phy_monitor_signals 
-   bit [31:0] data_q_ep_mon[$];
-   bit [31:0] data_q_rc_mon[$];
+   bit [31:0] data_q_ep_mon_rx[$];
+   bit [31:0] data_q_ep_mon_tx[$];
+   bit [31:0] data_q_rc_mon_tx[$];
+   bit [31:0] data_q_rc_mon_rx[$];
   
   //RC_controller_monitor_signals 
    bit        tx_valid; 
@@ -28,14 +30,16 @@ class PCIe_sequence_item extends uvm_sequence_item;
    bit        tx_detect_rx; 
    bit        powerdown; 
    bit        rate; 
-   bit [31:0] data_q_rc_mon_con[$];
+   bit [31:0] data_q_rc_mon_con_tx[$];
+   bit [31:0] data_q_rc_mon_con_rx[$];
 
   //EP_controller_monitor_signals 
    bit        rx_valid; 
    bit        rx_elec_idle; 
    bit        rx_status; 
    bit        phy_status; 
-   bit [31:0] data_q_ep_mon_con[$];
+   bit [31:0] data_q_ep_mon_con_tx[$];
+   bit [31:0] data_q_ep_mon_con_rx[$];
 
    function new(string name="PCIe_sequence_item");
      super.new(name);
