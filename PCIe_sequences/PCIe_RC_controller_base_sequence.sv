@@ -3,7 +3,7 @@
 // Project      : PCIE_Gen6
 // Description  : PCIe_sequences\PCIe_RC_controller_base_sequence.sv
 // Author       : 
-// Date         : 2026-08-17
+// Date         : 2026-08-14
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -16,20 +16,26 @@
 
 class PCIe_RC_controller_base_sequence extends uvm_sequence#(PCIe_sequence_item);
   
-	`uvm_object_utils(PCIe_RC_controller_base_sequence)
-  	 PCIe_sequence_item  pcie_seq_item;
-
-       function new(string name="PCIe_RC_controller_base_sequence");
-            super.new(name);
-       endfunction
-
-    task body();
-            pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
-           `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_BASE_SEQUENCE_TASK_BODY",UVM_LOW)
-          start_item(pcie_seq_item);
-          finish_item(pcie_seq_item);
-           `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_BASE_SEQUENCE_TASK_BODY",UVM_LOW)
-    endtask
+  `uvm_object_utils(PCIe_RC_controller_base_sequence)
+   PCIe_sequence_item  pcie_seq_item;
+  
+   function new(string name="PCIe_RC_controller_base_sequence");
+     super.new(name);
+   endfunction
+  
+   task body();
+      pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
+     `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_BASE_SEQUENCE_TASK_BODY",UVM_LOW)
+      repeat(1)
+      begin
+       start_item(pcie_seq_item);
+         pcie_seq_item.randomize();
+         pcie_seq_item.is_payload=1;
+       finish_item(pcie_seq_item);
+      end
+     `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_BASE_SEQUENCE_TASK_BODY",UVM_LOW)
+   endtask
+   
 endclass
 
 

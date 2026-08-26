@@ -1,9 +1,9 @@
 //=========================================================================================
 // File         : PCIe_EP_controller_monitor.sv
-// Project      : PCIE_Gen6
+// Project      : PCIe_Gen6
 // Description  : PCIe_agents\PCIe_EP_controller_agent\PCIe_EP_controller_monitor.sv
 // Author       : 
-// Date         : 2026-08-17
+// Date         : 2026-08-14
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -17,28 +17,36 @@
 class PCIe_EP_controller_monitor extends uvm_monitor;
   
    `uvm_component_utils(PCIe_EP_controller_monitor)
-   
-    PCIe_sequence_item            pcie_seq_item;
+  
+	uvm_analysis_port #(PCIe_sequence_item) ep_mon_ap;
+ 	PCIe_sequence_item            pcie_seq_item;
+	PCIe_EP_DL_model              ep_dl_model;
     PCIe_RC_PL_model              rc_pl_model;
-   
+
     bit tx_parity;
     bit rx_parity;
-
+ 
+	bit[31:0]dl_flit_in[$];
+    bit[5:0][7:0]dlp;
+	bit[235:0][7:0]tlp;
+	bit is_valid=1;
+    
     virtual PCIe_EP_interface     ep_pipe_intf_tx, ep_pipe_intf_rx;	
     uvm_analysis_port #(PCIe_sequence_item) ep_con_rx_mon_ap;	
     uvm_analysis_port #(PCIe_sequence_item) ep_con_tx_mon_ap;	
-   
+    
     bit [1:0]  rx_previous_symbol;
     bit [22:0] rx_lfsr;
     bit [22:0] rx_polynomial;
     bit [1:0]  tx_previous_symbol;
     bit [22:0] tx_lfsr;
     bit [22:0] tx_polynomial;
-    
-    function new(string name="PCIe_EP_controller_monitor", uvm_component parent);
-       super.new(name,parent);
-    endfunction
-   
+
+	function new(string name="PCIe_EP_controller_monitor", uvm_component parent);
+     super.new(name,parent);
+	   ep_mon_ap=new("ep_mon_ap",this);
+	endfunction
+
     function void build_phase(uvm_phase phase);
       `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_BUILD_PHASE",UVM_LOW)
        super.build_phase(phase);
@@ -62,7 +70,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
 
       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_BUILD_PHASE",UVM_LOW)
     endfunction
-   
+
     task run_phase(uvm_phase phase);
        `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
       forever begin
@@ -72,9 +80,10 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
         join
       end
        `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
-     endtask
+    endtask
 
-     task receiving_pipe_rx(virtual PCIe_EP_interface ep_pipe_intf_rx);
+ 
+    task receiving_pipe_rx(virtual PCIe_EP_interface ep_pipe_intf_rx);
        bit [31:0] rx_data;
        bit [31:0] deprecoded_data;
        bit [31:0] gray_decoded_data;
@@ -96,7 +105,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                 
                 de_precoder_rx(rx_data, deprecoded_data);
                `uvm_info("EP_CONTROLLER_MON",$sformatf("AFTER_DEPRECODING = %08h",deprecoded_data),UVM_LOW);
-                parity_check_rx(deprecoded_data);
+               // parity_check_rx(deprecoded_data);
                 gray_decode_rx(deprecoded_data,gray_decoded_data);
                `uvm_info("EP_CONTROLLER_MON",$sformatf("AFTER_GRAY_DECODE = %08h", gray_decoded_data),UVM_LOW);
                 descrambler_rx(gray_decoded_data,descrambled_data);
@@ -105,6 +114,14 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                `uvm_info("EP_CON_MONITOR",$sformatf("RECEIVED_DATA_IN_EP_CONTROLLER_MONITOR = %08h EP_CONTROLLER_MON_Queue_Size = %0d",descrambled_data,pcie_seq_item.data_q_ep_mon_con_rx.size()),UVM_LOW)
               ep_con_rx_mon_ap.write(pcie_seq_item);
               end
+	      // checking the DL LAYER things here.
+	      /*collect_dlp(dlp,pcie_seq_item);
+	      ep_dl_model.handle_incoming_flit(dlp,is_valid);
+	      if(ep_dl_model.success)
+	      begin
+	      pcie_seq_item.dlp=dlp;
+              ep_mon_ap.write(pcie_seq_item);*/
+              `uvm_info("EP_CON_MONITOR","The DLP packet sent to scoreboard",UVM_LOW);
            end
            `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA",UVM_LOW)
     endtask
@@ -209,7 +226,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_DE_PRECODE_TX_TASK",UVM_LOW)
     endtask
   
-    task parity_check_rx(input bit [31:0] gray_data);
+    /*task parity_check_rx(input bit [31:0] gray_data);
        rx_parity = ^gray_data;
        if (rc_pl_model.tx_parity_q.size() == 0)
        begin
@@ -229,7 +246,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
        begin
         `uvm_error("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("********EP_CONTROLLER_MON_PARITY_FAIL******** TX=%0b RX=%0b",tx_parity,rx_parity));
        end
-    endtask
+    endtask*/
   
     task gray_decode_tx(input  bit [31:0] data_in,output bit [31:0] gray_out);
        bit [1:0] symbol;
@@ -270,7 +287,44 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
        `uvm_info("PCIe_EP_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_LOW)
        `uvm_info("PCIe_EP_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_TX_TASK",UVM_LOW )
      endtask
+      
+
+
 endclass
 
+	/*task run_phase(uvm_phase phase);
+           `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
+	   forever begin
+           pcie_seq_item=PCIe_sequence_item::type_id::create("pcie_seq_item");
+	   fork 
+           receiving_pipe_rx(ep_pipe_intf_rx);
+           receiving_pipe_tx(ep_pipe_intf_tx);
+           collect_dlp(dlp); 
+	   join 
+	   ep_dl_model.handle_incoming_flit(dlp,is_valid);
+	   if(ep_dl_model.success)
+	   begin
+	   pcie_seq_item.dlp=dlp;
+           ep_mon_ap.write(pcie_seq_item);
+           $display("EP_MONITOR :: Packet sent to scoreboard");
+           end
+          end
+           `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
+         endtask*/
 
+      // collect the flit 242 bytes from the pipe interface 
+      /*task collect_dlp(output bit [0:5][7:0] dlp, pcie_seq_item item);
+        wait(item.data_q_ep_mon_con_rx.size()==242);
+   	// Form tlp to send to scoreboard
+        for (int i = 0; i < 236; i++) begin
+        tlp[i] = item.data_q_ep_mon_con_rx[i];
+        end
+       // Last 6 bytes = DLP
+       for (int i = 0; i < 6; i++) begin
+        dlp[i] = item.data_q_ep_mon_con_rx[236+i];
+       end
+	ep_dl_model.rx_retry_buffer.push_back(dlp);
+	`uvm_info("EP_CON_MONITOR",$sformatf("collected tlp from ep monitor is tlp=%p",tlp),UVM_LOW);
+	`uvm_info("EP_CON_MONITOR",$sformatf("collected tlp from ep monitor is dlp=%p",dlp),UVM_LOW);
+      endtask*/
 

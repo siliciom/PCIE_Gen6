@@ -1,9 +1,9 @@
 //=========================================================================================
 // File         : PCIe_RC_PL_model.sv
-// Project      : PCIE_Gen6
+// Project      : PCIe_Gen6
 // Description  : PCIe_environment\PCIe_RC_PL_model.sv
 // Author       : 
-// Date         : 2026-08-17
+// Date         : 2026-08-14
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -13,23 +13,30 @@
 * you agree to be and are bound to the terms of the SILICIOM TECHNOLOGIES PVT LTD license agreement.
 * All other rights reserved.
 ***********************************************************************************************************************/
-
-import typedef_enums::*;
-
+import typedef_enums :: *;
 class PCIe_RC_PL_model extends uvm_component;
    
   `uvm_component_utils(PCIe_RC_PL_model)
+   
    pcie_mode_e mode;
    PCIe_env_config   pcie_ecfg;
 
-   bit [22:0] lfsr;
-   bit [22:0] polynomial;
-   bit [1:0]  previous_symbol;
-   bit        tx_parity_q[$];
+   bit[0:241][7:0] dl_flit_out;
+   bit[7:0]        pl_qu[$];
+   bit [22:0]      lfsr;
+   bit [22:0]      polynomial;
+   bit [1:0]       previous_symbol;
+   bit             tx_parity_q[$];
+   bit	           pl_sent;
+
+  // Input from RC DL model.
+  uvm_analysis_imp #(PCIe_sequence_item, PCIe_RC_PL_model) pl_imp;
 
    function new(string name="PCIe_RC_PL_model",uvm_component parent);
       super.new(name,parent);
+      pl_imp=new("pl_imp",this);
    endfunction
+
 
    function void build_phase(uvm_phase phase);
       `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_PL_MODEL_BUILD_PHASE",UVM_LOW)
@@ -143,6 +150,7 @@ class PCIe_RC_PL_model extends uvm_component;
       bit [31:0] pre_data;
       bit        parity;
       `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_TX_PROCESS_TASK", UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("The data_in_from PL inside tx_prpcess is %d",data_in), UVM_LOW)
 
       case(mode)
          // NON-FLIT MODE
@@ -179,27 +187,25 @@ class PCIe_RC_PL_model extends uvm_component;
       `uvm_info("PCIe_PL_MODEL","EXIT_FROM_TX_PROCESS_TASK",  UVM_LOW)
    endtask
 
+   // PL model receives the 242-byte DL result.
+   function void write(PCIe_sequence_item item);
+     bit [31:0] temp;
+     `uvm_info("RC_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",item.dlp_flit_out),UVM_MEDIUM)
+      dl_flit_out=item.dlp_flit_out;
+      pl_qu.delete();
+      for (int i = 0; i < 242; i += 4) begin
+        temp = '0;
+        for (int j = 0; j < 4; j++) begin
+          if ((i+j) < 242)
+             temp[j*8 +: 8] = dl_flit_out[i+j];
+          end
+          pl_qu.push_back(temp);
+      end
+      `uvm_info("RC_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",pl_qu),UVM_MEDIUM)
+       pl_sent=1;
+    endfunction
+
 endclass
-
-
- 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

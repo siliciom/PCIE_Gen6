@@ -3,7 +3,7 @@
 // Project      : PCIE_Gen6
 // Description  : PCIe_tests\PCIe_base_test.sv
 // Author       : 
-// Date         : 2026-08-17
+// Date         : 2026-08-14
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -13,8 +13,6 @@
 * you agree to be and are bound to the terms of the SILICIOM TECHNOLOGIES PVT LTD license agreement.
 * All other rights reserved.
 ***********************************************************************************************************************/
-
-import typedef_enums::*;
 
 class PCIe_base_test extends uvm_test;
   
@@ -35,8 +33,9 @@ class PCIe_base_test extends uvm_test;
       `uvm_info("PCIe_TEST","ENTERED_INTO_TEST_BUILD_PHASE",UVM_LOW)
        super.build_phase(phase);
          pcie_env_config = PCIe_env_config::type_id::create("pcie_env_config");
+         //------------------------------------------
          // Set into Config DB
-         pcie_env_config.mode = FLIT_MODE;
+         //------------------------------------------
          uvm_config_db#(PCIe_env_config)::set(this,"*","PCIe_env_config", pcie_env_config);
 
          pcie_environment = PCIe_environment::type_id::create("pcie_environment",this);
@@ -54,18 +53,44 @@ class PCIe_base_test extends uvm_test;
      task run_phase(uvm_phase phase);
       `uvm_info("PCIe_TEST","ENTERED_INTO_TEST_RUN_PHASE",UVM_LOW)
        phase.raise_objection(this);
-       //begin
-         fork
-            rc_controller_sequence.start(pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_sequencer);
-            rc_phy_sequence.start(pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_sequencer);
-            ep_phy_sequence.start(pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_sequencer);
-         join
-           ep_controller_sequence.start(pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_sequencer);
-           #200;
+          rc_controller_sequence.start(pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_sequencer);
+          //rc_phy_sequence.start(pcie_environment.rc_top_agent.rc_phy_agent.rc_phy_sequencer);
+          //ep_phy_sequence.start(pcie_environment.ep_top_agent.ep_phy_agent.ep_phy_sequencer);
+	      ep_controller_sequence.start(pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_sequencer);
+       #2000;
        phase.drop_objection(this);   
       `uvm_info("PCIe_TEST","EXIT_FROM_TEST_RUN_PHASE",UVM_LOW)
      endtask
-     
+    
+   virtual function void report_phase(uvm_phase phase);
+    uvm_report_server svr;
+    super.report_phase(phase);
+    svr = uvm_report_server::get_server();
+    if(svr.get_severity_count(UVM_FATAL) + svr.get_severity_count(UVM_ERROR) > 0) begin
+     `uvm_info(get_type_name(), "----------------------------------------------------------------------------------- ", UVM_NONE)    
+     `uvm_info(get_type_name(), "  ######## ########  ######  ########    ########    ###    #### ##       ", UVM_NONE) 
+     `uvm_info(get_type_name(), "	   ##    ##       ##    ##    ##       ##         ## ##    ##  ##       ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ##       ##          ##       ##        ##   ##   ##  ##       ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ######    ######     ##       ######   ##     ##  ##  ##       ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ##             ##    ##       ##       #########  ##  ##       ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ##       ##    ##    ##       ##       ##     ##  ##  ##       ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ########  ######     ##       ##       ##     ## #### ######## ", UVM_NONE)
+     `uvm_info(get_type_name(), "----------------------------------------------------------------------------------- ", UVM_NONE) 
+    end
+    else begin
+     `uvm_info(get_type_name(), "----------------------------------------------------------------------------------- ", UVM_NONE)                                                              
+     `uvm_info(get_type_name(), "	######## ########  ######  ########    ########     ###     ######   ######     ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ##       ##    ##    ##       ##     ##   ## ##   ##    ## ##    ##    ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ##       ##          ##       ##     ##  ##   ##  ##       ##          ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ######    ######     ##       ########  ##     ##  ######   ######     ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ##             ##    ##       ##        #########       ##       ##    ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ##       ##    ##    ##       ##        ##     ## ##    ## ##    ##    ", UVM_NONE)
+     `uvm_info(get_type_name(), "	   ##    ########  ######     ##       ##        ##     ##  ######   ######     ", UVM_NONE)
+     `uvm_info(get_type_name(), "----------------------------------------------------------------------------------- ", UVM_NONE) 
+    end
+
+endfunction
+ 
   
 endclass
    

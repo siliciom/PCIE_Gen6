@@ -16,40 +16,8 @@ vsim PCIe_top +UVM_TESTNAME=${testname} -l $infile
 
 view wave
 add wave -r /PCIe_top/*
-add log -r /*
 
-#add wave -r /PCIe_top/rc_pipe_intf/pclk 
-#add wave -r /PCIe_top/rc_pipe_intf/tx_data 
-#add wave -r /PCIe_top/rc_pipe_intf/tx_valid 
-#add wave -r /PCIe_top/rc_pipe_intf/tx_elec_idle 
-#add wave -r /PCIe_top/rc_pipe_intf/tx_detect_rx 
-#add wave -r /PCIe_top/rc_pipe_intf/powerdown
-#add wave -r /PCIe_top/rc_pipe_intf/rate
-#add wave -r /PCIe_top/rc_pipe_intf/rx_data
-#add wave -r /PCIe_top/rc_pipe_intf/rx_valid 
-#add wave -r /PCIe_top/rc_pipe_intf/phy_status 
-#add wave -r /PCIe_top/rc_pipe_intf/rx_elec_idle 
-#add wave -r /PCIe_top/rc_pipe_intf/rx_status 
-#add wave -r /PCIe_top/ep_pipe_intf/pclk 
-#add wave -r /PCIe_top/ep_pipe_intf/tx_data 
-#add wave -r /PCIe_top/ep_pipe_intf/tx_valid 
-#add wave -r /PCIe_top/ep_pipe_intf/tx_elec_idle 
-#add wave -r /PCIe_top/ep_pipe_intf/tx_detect_rx 
-#add wave -r /PCIe_top/ep_pipe_intf/powerdown 
-#add wave -r /PCIe_top/ep_pipe_intf/rate 
-#add wave -r /PCIe_top/ep_pipe_intf/rx_data 
-#add wave -r /PCIe_top/ep_pipe_intf/rx_valid 
-#add wave -r /PCIe_top/ep_pipe_intf/phy_status 
-#add wave -r /PCIe_top/ep_pipe_intf/rx_elec_idle 
-#add wave -r /PCIe_top/ep_pipe_intf/rx_status 
-#add wave -r /PCIe_top/pcie_rc_phy_intf/tx_plus 
-#add wave -r /PCIe_top/pcie_rc_phy_intf/tx_minus 
-#add wave -r /PCIe_top/pcie_rc_phy_intf/rx_plus 
-#add wave -r /PCIe_top/pcie_rc_phy_intf/rx_minus 
-#add wave -r /PCIe_top/pcie_ep_phy_intf/tx_plus 
-#add wave -r /PCIe_top/pcie_ep_phy_intf/tx_minus 
-#add wave -r /PCIe_top/pcie_ep_phy_intf/rx_plus 
-#add wave -r /PCIe_top/pcie_ep_phy_intf/rx_minus 
+add log -r /*
 run -all
 
 

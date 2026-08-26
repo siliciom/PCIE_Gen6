@@ -36,9 +36,9 @@ class PCIe_EP_phy_monitor extends uvm_monitor;
        super.build_phase(phase);
         ep_phy_rx_mon_ap =new("ep_phy_rx_mon_ap",this);
         ep_phy_tx_mon_ap =new("ep_phy_tx_mon_ap",this);
-	pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
+	    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
           
-	if (!uvm_config_db#(virtual PCIe_EP_PHY_interface)::get(this, "", "PCIe_EP_PHY_INTERFACE", ep_phy_intf_tx))
+	    if (!uvm_config_db#(virtual PCIe_EP_PHY_interface)::get(this, "", "PCIe_EP_PHY_INTERFACE", ep_phy_intf_tx))
           `uvm_fatal("NO_VIF", "RC_PHY_INTERFACE_not_found")
 
         if (!uvm_config_db#(virtual PCIe_EP_PHY_interface)::get(this, "", "PCIe_EP_PHY_INTERFACE", ep_phy_intf_rx))

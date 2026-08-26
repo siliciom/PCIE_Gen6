@@ -107,8 +107,8 @@ class PCIe_RC_phy_driver extends uvm_driver #(PCIe_sequence_item);
     endtask
 
     task tx_piso(input bit [31:0] data_in);
-      bit piso_data_out;
-      `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_PISO_TASK",  UVM_LOW)
+       bit piso_data_out;
+       `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_PISO_TASK",  UVM_LOW)
          // Serialize_each_32-bit_word
           for (int i = 0; i < 32; i++) begin
              piso_data_out = data_in[i];
@@ -124,47 +124,46 @@ class PCIe_RC_phy_driver extends uvm_driver #(PCIe_sequence_item);
     endtask
 
     task rx_sipo(virtual PCIe_RC_PHY_interface rc_phy_intf_rx);
-          bit [31:0] rx_data;
-          bit        rx_bit;
-          `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_RX_SIPO_RC_PHY_DRIVER", UVM_LOW)
-           forever
+       bit [31:0] rx_data;
+       bit        rx_bit;
+       `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_RX_SIPO_RC_PHY_DRIVER", UVM_LOW)
+        forever
+        begin
+           for(int i = 0; i < 32; i++)
            begin
-              for(int i = 0; i < 32; i++)
-              begin
-                  @ep_to_rc_bit_event;		  
-                  #15.625ps;
-                  rx_bit = rc_phy_intf_rx.rx_plus;
-                  rx_data[i] = rx_bit;
-                  `uvm_info("EP_PHY_DRIVER",$sformatf("RC_PHY_DRIVER_RX_BIT[%0d] = %0b TIME=%0.5f",i, rx_bit,$realtime), UVM_LOW);
-              end
-               ep_data_q.push_back(rx_data);
-              `uvm_info("RC_PHY_DRIVER",$sformatf("RC_PHY_DRIVER_RX_32_BIT_PARALLEL_DATA = %08h QUEUE_SIZE=%d", rx_data,ep_data_q.size()),UVM_LOW);
-          end
-          `uvm_info("RC_PHY_DRIVER","RC_PHY_DRIVER_EXIT_FROM_RX_SIPO", UVM_LOW)
-        endtask
+               @ep_to_rc_bit_event;		  
+               #15.625ps;
+               rx_bit = rc_phy_intf_rx.rx_plus;
+               rx_data[i] = rx_bit;
+               `uvm_info("EP_PHY_DRIVER",$sformatf("RC_PHY_DRIVER_RX_BIT[%0d] = %0b TIME=%0.5f",i, rx_bit,$realtime), UVM_LOW);
+           end
+            ep_data_q.push_back(rx_data);
+           `uvm_info("RC_PHY_DRIVER",$sformatf("RC_PHY_DRIVER_RX_32_BIT_PARALLEL_DATA = %08h QUEUE_SIZE=%d", rx_data,ep_data_q.size()),UVM_LOW);
+       end
+       `uvm_info("RC_PHY_DRIVER","RC_PHY_DRIVER_EXIT_FROM_RX_SIPO", UVM_LOW)
+    endtask
 
 	task sending_pipe_rx(virtual PCIe_RC_interface rc_pipe_intf_rx);
-          bit [31:0] rx_parallel_data;
+       bit [31:0] rx_parallel_data;
           
-          `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_SENDING_PARALLEL_DATA_TO_PIPE_RX_RC_PHY_DRIVER", UVM_LOW)
+      `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_SENDING_PARALLEL_DATA_TO_PIPE_RX_RC_PHY_DRIVER", UVM_LOW)
 	   rc_pipe_intf_rx.phy_status   <= 1'b0;
-           rc_pipe_intf_rx.rx_elec_idle <= 1'b0;
-           rc_pipe_intf_rx.rx_status    <= 3'b000;
-
+       rc_pipe_intf_rx.rx_elec_idle <= 1'b0;
+       rc_pipe_intf_rx.rx_status    <= 3'b000;
 	  forever begin
-              @(posedge rc_pipe_intf_rx.pclk);
+         @(posedge rc_pipe_intf_rx.pclk);
 	      if(ep_data_q.size() > 0)begin
-                rx_parallel_data = ep_data_q.pop_front();
-                rc_pipe_intf_rx.rx_data  <= rx_parallel_data;
-                rc_pipe_intf_rx.rx_valid <= 1'b1;
-                `uvm_info("RC_PHY_DRIVER",$sformatf("DRIVING_RC_PIPE_RX_DATA = %08h", rx_parallel_data),UVM_LOW);
+             rx_parallel_data = ep_data_q.pop_front();
+             rc_pipe_intf_rx.rx_data  <= rx_parallel_data;
+             rc_pipe_intf_rx.rx_valid <= 1'b1;
+            `uvm_info("RC_PHY_DRIVER",$sformatf("DRIVING_RC_PIPE_RX_DATA = %08h", rx_parallel_data),UVM_LOW);
 	      end
 	      else begin
-                  rc_pipe_intf_rx.rx_valid <= 1'b0;
-              end
-              `uvm_info("RC_PHY_DRIVER","EXIT_FROM_SENDING_PARALLEL_DATA_TO_PIPE_RX_RC", UVM_LOW)
-           end
-        endtask
+             rc_pipe_intf_rx.rx_valid <= 1'b0;
+          end
+         `uvm_info("RC_PHY_DRIVER","EXIT_FROM_SENDING_PARALLEL_DATA_TO_PIPE_RX_RC", UVM_LOW)
+       end
+   endtask
 
 
 endclass
