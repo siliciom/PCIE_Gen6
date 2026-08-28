@@ -1,0 +1,18 @@
+# ** Note: (vsim-220) 'modelsim.ini' is used as the ini file.
+# vsim PCIe_top "+UVM_TESTNAME=PCIe_base_test" -l fileae50a80 -ngflow 
+# Start time: 10:56:39 on Aug 28,2026
+# Loading Siemens Visualizer shared object 'C:/questasim64_2025.2_1/win64/VisualizerRls/bin/libqvisualizer.dll'
+# ** Note: (vsim-3812) Design is being optimized...
+# ** Note: (vopt-220) 'modelsim.ini' is used as the ini file.
+# ** Warning: PCIe_top/../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv(581): (vopt-2240) Treating stand-alone use of function 'pop_front' as an implicit VOID cast.
+# ** Warning: PCIe_top/../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv(646): (vopt-2875) Task "form_dl_packet" is being called in function "write".
+# ** Warning: PCIe_top/../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_PL_model.sv(66): (vopt-2875) Task "reset_scrambler" is being called in function "build_phase".
+# ** Warning: PCIe_top/../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_DL_model.sv(538): (vopt-2240) Treating stand-alone use of function 'pop_front' as an implicit VOID cast.
+# ** Warning: PCIe_top/../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_DL_model.sv(615): (vopt-2875) Task "form_dl_packet" is being called in function "write".
+# ** Warning: PCIe_top/../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_PL_model.sv(59): (vopt-2875) Task "reset_scrambler" is being called in function "build_phase".
+# ** Warning: PCIe_top/../PCIe_environment/PCIe_scoreboard.sv(247): (vopt-2240) Treating stand-alone use of function 'compare_rc_ep_dl' as an implicit VOID cast.
+# ** Warning: PCIe_top/../PCIe_environment/PCIe_scoreboard.sv(256): (vopt-2240) Treating stand-alone use of function 'compare_rc_ep_dl' as an implicit VOID cast.
+# ** Warning: PCIe_top/../PCIe_sequences/PCIe_RC_controller_base_sequence.sv(32): (vopt-2240) Treating stand-alone use of function 'randomize' as an implicit VOID cast.
+# ** Warning: PCIe_top/../PCIe_sequences/PCIe_EP_controller_base_sequence.sv(32): (vopt-2240) Treating stand-alone use of function 'randomize' as an implicit VOID cast.
+# ** Warning: PCIe_top/../PCIe_environment/PCIe_scoreboard.sv(259): (vopt-2250) Function "compare_rc_ep_dl" has no return value assignment.
+# ** Note: (vsim-12126) Error and warning message counts have been restored: Errors=0, Warnings=11.
