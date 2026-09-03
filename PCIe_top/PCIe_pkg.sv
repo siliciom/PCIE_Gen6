@@ -16,20 +16,20 @@
 `timescale 1ns/1ps
 
 package PCIe_pkg;
+
     `include "uvm_macros.svh"
      import uvm_pkg::*;
        
 	`include "../PCIe_config/PCIe_defines.sv"
 	`include "../PCIe_agents/PCIe_sequence_item.sv"
 	`include "../PCIe_config/PCIe_env_config.sv"
-	`include "../PCIe_config/PCIe_defines.sv"
 	//`include "../PCIe_config/enum_defs.sv"
-         `include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_TL_model.sv"
+`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_TL_model.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_PL_model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_TL_model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_DL_model.sv"
-        `include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_PL_model.sv"
+`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_PL_model.sv"
         
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_controller_sequencer.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_controller_sequencer.sv"

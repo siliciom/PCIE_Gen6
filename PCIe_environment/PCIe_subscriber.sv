@@ -15,14 +15,14 @@
 ***********************************************************************************************************************/
 
 class PCIe_subscriber extends uvm_subscriber#(PCIe_sequence_item);
-  `uvm_component_utils(PCIe_subscriber)
+ 
+ `uvm_component_utils(PCIe_subscriber)
 
-     PCIe_sequence_item     pcie_seq_item;
+  PCIe_sequence_item     pcie_seq_item;
 
   function new(string name="PCIe_subscriber",uvm_component parent);
     super.new(name,parent); 
   endfunction
-
 
   function void build_phase(uvm_phase phase);
    `uvm_info("PCIe_SUBSCRIBER","ENTERED_INTO_SUB_BUILD_PHASE",UVM_LOW)
@@ -32,8 +32,8 @@ class PCIe_subscriber extends uvm_subscriber#(PCIe_sequence_item);
  
  
   virtual function void write(PCIe_sequence_item t);
-      pcie_seq_item = t;
- endfunction
+     pcie_seq_item = t;
+  endfunction
    
 endclass
 

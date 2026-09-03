@@ -318,6 +318,7 @@
 // Monitor interface fields
 //------------------------------------------------------------------------------
 `define PCIe_MON_DATA_W              32
+`define PCIe_SB_DATA_W               32
 
 `define PCIe_TX_VALID_W               1
 `define PCIe_TX_ELEC_IDLE_W           1
@@ -338,7 +339,88 @@
 `define PCIe_PL_SYMBOL_W             2
 `define PCIe_PL_SCRAMBLER_LFSR_W     23
 
-`define PCIe_PL_SCRAMBLER_POLYNOMIAL 23'b101000010000000100100101
+`define PCIe_PL_SCRAMBLER_POLYNOMIAL 23'b01000010000000100100101
 `define PCIe_PL_SCRAMBLER_SEED       23'h7FFFFF
+
+//==============================================================================
+// Initial values for state machines and sequence numbers
+//==============================================================================
+`define PCIe_INIT_PREVIOUS_SYMBOL    2'b11
+`define PCIe_INIT_TX_ACKNAK_SEQ_NUM  10'h3FF
+`define PCIe_INIT_NEXT_TX_FLIT_SEQ_NUM  10'h001
+`define PCIe_INIT_NEXT_EXPECTED_RX_FLIT_SEQ_NUM  10'h001
+`define PCIe_INIT_IMPLICIT_RX_FLIT_SEQ_NUM  10'h000
+`define PCIe_INIT_ACKD_FLIT_SEQ_NUM  10'h3FF
+`define PCIe_INIT_FLIT_REPLAY_NUM    3'b000
+`define PCIe_INIT_TX_REPLAY_FLIT_SEQ_NUM  10'h000
+`define PCIe_INIT_NAK_IGNORE_FLIT_SEQ_NUM  10'h000
+`define PCIe_INIT_RX_RETRY_BUFFER_LAST_FLIT_SEQ_NUM  10'h000
+`define PCIe_INIT_NEXT_RX_FLIT_SEQ_NUM_TO_STORE  10'h001
+
+//==============================================================================
+// TS Ordered Set configuration
+//==============================================================================
+`define PCIe_TS_OS_SIZE              16
+`define PCIe_TS1_TX_COUNT            10
+`define PCIe_TS1_RX_COUNT            8
+`define PCIe_TS2_TX_COUNT            16
+`define PCIe_TS2_RX_COUNT            8
+`define PCIe_OS_BYPASS_IDX_0         0
+`define PCIe_OS_BYPASS_IDX_1         8
+`define PCIe_OS_BYPASS_IDX_2         15
+
+//==============================================================================
+// TS K-symbol encodings (first symbol of ordered set)
+//==============================================================================
+`define PCIe_TS_K_SYMBOL_TS1         2'b11  // COM (K-symbol for TS1)
+`define PCIe_TS_K_SYMBOL_TS2         2'b10  // COM (K-symbol for TS2)
+`define PCIe_TS_K_SYMBOL_IDLE        2'b00  // IDLE (K-symbol for IDLE)
+
+//==============================================================================
+// FLIT mode configuration
+//==============================================================================
+`define PCIe_FLIT_DWORDS             61
+
+//==============================================================================
+// Sequence Number Constants
+//==============================================================================
+`define PCIe_SEQ_NUM_ZERO            10'h000
+`define PCIe_SEQ_NUM_MAX             10'h3FF  // 1023
+
+`define PCIe_FLIT_REPLAY_NUM         3'h0  // 1023
+
+//==============================================================================
+// PHY timing (for monitors only - PHY driver keeps hardcoded values per requirement)
+//==============================================================================
+`define PCIe_PHY_MON_RX_SAMPLE_DELAY 15.625ps
+`define PCIe_PHY_TX_BIT_DELAY        31.25ps
+
+//==============================================================================
+// DLLP/FLIT field bit positions
+//==============================================================================
+`define PCIe_DLP0_FLIT_USAGE_HI      7
+`define PCIe_DLP0_FLIT_USAGE_LO      6
+`define PCIe_DLP0_LAST_FLIT_PAYLOAD  5
+`define PCIe_DLP0_DLLP_TYPE          4
+`define PCIe_DLP0_REPLAY_CMD_HI      3
+`define PCIe_DLP0_REPLAY_CMD_LO      2
+`define PCIe_DLP0_SEQ_NUM_HI_HI      1
+`define PCIe_DLP0_SEQ_NUM_HI_LO      0
+
+`define PCIe_DLP1_SEQ_NUM_LO_HI      7
+`define PCIe_DLP1_SEQ_NUM_LO_LO      0
+
+`define PCIe_FLIT_USAGE_PAYLOAD      2'b01
+`define PCIe_FLIT_USAGE_NOP          2'b00
+`define PCIe_FLIT_USAGE_IDLE         2'b00
+
+`define PCIe_REPLAY_CMD_EXPLICIT     2'b00
+`define PCIe_REPLAY_CMD_ACK          2'b01
+`define PCIe_REPLAY_CMD_NAK_STD      2'b10
+`define PCIe_REPLAY_CMD_NAK_SEL      2'b11
+
+`define PCIe_DLLP_TYPE_REGULAR       1'b0
+`define PCIe_DLLP_TYPE_OPTIMIZED     1'b1
+
 `endif 
 // PCIe_DEFINES_SVH

@@ -23,10 +23,10 @@
 `uvm_analysis_imp_decl(_rc_controller_rx)
 `uvm_analysis_imp_decl(_ep_controller_tx)
 
-`uvm_analysis_imp_decl(_rc_controller_dl)
-`uvm_analysis_imp_decl(_ep_controller_dl)
-
-
+`uvm_analysis_imp_decl(_rc_controller_dl_RC_EP)
+`uvm_analysis_imp_decl(_ep_controller_dl_RC_EP)
+`uvm_analysis_imp_decl(_rc_controller_dl_EP_RC)
+`uvm_analysis_imp_decl(_ep_controller_dl_EP_RC)
 
 class PCIe_scoreboard extends uvm_scoreboard;
 
@@ -40,9 +40,11 @@ class PCIe_scoreboard extends uvm_scoreboard;
   uvm_analysis_imp_ep_controller_rx #(PCIe_sequence_item,PCIe_scoreboard) ep_con_rx_imp;
   uvm_analysis_imp_rc_controller_rx #(PCIe_sequence_item,PCIe_scoreboard) rc_con_rx_imp;
   uvm_analysis_imp_ep_controller_tx #(PCIe_sequence_item,PCIe_scoreboard) ep_con_tx_imp;
-
-  uvm_analysis_imp_rc_controller_dl #(PCIe_sequence_item,PCIe_scoreboard) rc_con_dl_imp;
-  uvm_analysis_imp_ep_controller_dl #(PCIe_sequence_item,PCIe_scoreboard) ep_con_dl_imp;
+  
+  uvm_analysis_imp_rc_controller_dl_RC_EP #(PCIe_sequence_item,PCIe_scoreboard) rc_con_dl_rcep_imp;
+  uvm_analysis_imp_ep_controller_dl_RC_EP #(PCIe_sequence_item,PCIe_scoreboard) ep_con_dl_rcep_imp;
+  uvm_analysis_imp_rc_controller_dl_EP_RC #(PCIe_sequence_item,PCIe_scoreboard) rc_con_dl_eprc_imp;
+  uvm_analysis_imp_ep_controller_dl_EP_RC#(PCIe_sequence_item,PCIe_scoreboard) ep_con_dl_eprc_imp;
 
   bit [31:0] rc_phy_tx_q[$];
   bit [31:0] ep_phy_rx_q[$];
@@ -54,9 +56,10 @@ class PCIe_scoreboard extends uvm_scoreboard;
   bit [31:0] rc_controller_rx_q[$];
   bit [31:0] ep_controller_tx_q[$];
 
-
   bit[0:5][7:0]dlp_ep_q[$]; // RC-->EP
   bit[0:5][7:0]dlp_rc_q[$]; // RC-->EP
+  bit[0:5][7:0]dlp_ep_qu[$]; // EP-->RC
+  bit[0:5][7:0]dlp_rc_qu[$]; // EP-->RC
   
 
   function new(string name="PCIe_scoreboard",uvm_component parent);
@@ -76,8 +79,10 @@ class PCIe_scoreboard extends uvm_scoreboard;
        rc_con_rx_imp = new("rc_con_rx_imp",this);
        ep_con_tx_imp = new("ep_con_tx_imp",this);
 
-       rc_con_dl_imp = new("rc_con_dl_imp",this);
-       ep_con_dl_imp = new("ep_con_dl_imp",this);
+       rc_con_dl_rcep_imp = new("rc_con_dl_rcep_imp",this);
+       ep_con_dl_rcep_imp = new("ep_con_dl_rcep_imp",this);
+       rc_con_dl_eprc_imp = new("rc_con_dl_eprc_imp",this);
+       ep_con_dl_eprc_imp = new("ep_con_dl_eprc_imp",this);
     
    `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_BUILD_PHASE",UVM_LOW)
   endfunction
@@ -239,30 +244,97 @@ class PCIe_scoreboard extends uvm_scoreboard;
         `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_LOW)
   endfunction
 
+  // RC to EP
+
   // Packet going from the RC Controller to Scoreboard
-  function void write_rc_controller_dl(PCIe_sequence_item pkt);
-    `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_RC_CONTROLLER_DL_PACKET",UVM_LOW)
+  function void write_rc_controller_dl_RC_EP(PCIe_sequence_item pkt);
+    `uvm_info("PCIe_SCOREBOARD","ACTUAL_PACKET_RC_TO_EP_DLP",UVM_LOW)
+    `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p", pkt.dlp), UVM_LOW)
     dlp_rc_q.push_back(pkt.dlp);
-    `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p",pkt.dlp),UVM_LOW)
-    compare_rc_ep_dl();
+    compare_rc_ep_dl(pkt);
+  endfunction
+
+  // Packet going from the EP Controller to Scoreboard
+  function void write_ep_controller_dl_RC_EP(PCIe_sequence_item pkt);
+    `uvm_info("PCIe_SCOREBOARD","EXPECTED_PACKET_RC_TO_EP_DLP",UVM_LOW)
+    `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p", pkt.dlp), UVM_LOW)
+    dlp_ep_q.push_back(pkt.dlp);
+    compare_rc_ep_dl(pkt);
+  endfunction
+
+  // EP TO RC
+ 
+  // Packet going from the RC Controller to Scoreboard
+  function void write_rc_controller_dl_EP_RC(PCIe_sequence_item pkt);
+    `uvm_info("PCIe_SCOREBOARD","EXPECTED_PACKET_EP_TO_RC",UVM_LOW)
+    `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p", pkt.dlp), UVM_LOW)
+    dlp_rc_qu.push_back(pkt.dlp);
+    compare_ep_rc_dl(pkt);
      
   endfunction
 
   // Packet going from the EP Controller to Scoreboard
-  function void write_ep_controller_dl(PCIe_sequence_item pkt);
-    `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_EP_CONTROLLER_DL_PACKET",UVM_LOW)
-    dlp_ep_q.push_back(pkt.dlp);
-    `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p",pkt.dlp),UVM_LOW)
-    compare_rc_ep_dl();
+  function void write_ep_controller_dl_EP_RC(PCIe_sequence_item pkt);
+    `uvm_info("PCIe_SCOREBOARD","ACTUAL_PACKET_EP_TO_RC",UVM_LOW)
+    `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p", pkt.dlp), UVM_LOW)
+    dlp_ep_qu.push_back(pkt.dlp);
+    compare_ep_rc_dl(pkt);
   endfunction
+  
 
-  function compare_rc_ep_dl();
+  function compare_rc_ep_dl(PCIe_sequence_item item);
+
+	  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] expected_dlp_rc_ep;
+          bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] actual_dlp_rc_ep;
+
+	  `uvm_info("PCIe_SCOREBOARD",$sformatf("Queues: Expected=%0d, Actual=%0d", dlp_ep_q.size(), dlp_rc_q.size()), UVM_LOW)
+
 	  while((dlp_ep_q.size() > 0) && (dlp_rc_q.size() >0))
           begin
-	  if(dlp_ep_q.pop_front() == dlp_rc_q.pop_front())
-		  `uvm_info("PCIE_SCOREBOARD","PASS_DLP_PACKETS_MATCHED",UVM_LOW)
+		  expected_dlp_rc_ep = dlp_ep_q.pop_front();
+                  actual_dlp_rc_ep   = dlp_rc_q.pop_front();
+          
+	  if(expected_dlp_rc_ep == actual_dlp_rc_ep)
+	  begin
+		  `uvm_info("PCIE_SCOREBOARD","PASS_DLP_PACKETS_MATCHED_RC_TO_EP",UVM_LOW)
+		  `uvm_info("PCIE_SCOREBOARD",$sformatf("PASS_RC_EP :: expected=%p :: actual=%p",expected_dlp_rc_ep,actual_dlp_rc_ep),UVM_LOW)
+	           item.print_dlp_details("MATCHED_PACKET", actual_dlp_rc_ep);
+	   end
 	  else
-		  `uvm_info("PCIE_SCOREBOARD","FAIL_DLP_PACKETS_MATCHED",UVM_LOW)
+	  begin
+		  `uvm_info("PCIE_SCOREBOARD","FAIL_DLP_PACKETS_MATCHED_RC_TO_EP",UVM_LOW)
+		  `uvm_info("PCIE_SCOREBOARD",$sformatf("FAIL_RC_EP :: expected=%p :: actual=%p",expected_dlp_rc_ep,actual_dlp_rc_ep),UVM_LOW)
+		  item.print_dlp_details("EXPECTED_DLP", expected_dlp_rc_ep);
+		  item.print_dlp_details("ACTUAL_DLP", actual_dlp_rc_ep);
+	  end
+          end
+  endfunction
+
+  function compare_ep_rc_dl(PCIe_sequence_item item);
+
+	  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] expected_dlp_ep_rc;
+          bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] actual_dlp_ep_rc;
+
+	  `uvm_info("PCIe_SCOREBOARD",$sformatf("Queues: Expected=%0d, Actual=%0d", dlp_ep_qu.size(), dlp_rc_qu.size()), UVM_LOW)
+
+	  while((dlp_ep_qu.size() > 0) && (dlp_rc_qu.size() >0))
+          begin
+		  expected_dlp_ep_rc = dlp_ep_qu.pop_front();
+                  actual_dlp_ep_rc   = dlp_rc_qu.pop_front();
+
+	  if(expected_dlp_ep_rc == actual_dlp_ep_rc)
+	  begin
+		  `uvm_info("PCIE_SCOREBOARD","PASS_DLP_PACKETS_MATCHED_EP_TO_RC",UVM_LOW)
+		  `uvm_info("PCIE_SCOREBOARD",$sformatf("PASS_EP_RC :: expected=%p :: actual=%p",expected_dlp_ep_rc,actual_dlp_ep_rc),UVM_LOW)
+	           item.print_dlp_details("MATCHED_PACKET", actual_dlp_ep_rc);
+	   end
+	  else 
+	  begin
+		  `uvm_info("PCIE_SCOREBOARD","FAIL_DLP_PACKETS_MATCHED_EP_TO_RC",UVM_LOW)
+		  `uvm_info("PCIE_SCOREBOARD",$sformatf("FAIL_EP_RC :: expected=%p :: actual=%p",expected_dlp_ep_rc,actual_dlp_ep_rc),UVM_LOW)
+		  item.print_dlp_details("EXPECTED_DLP", expected_dlp_ep_rc);
+		  item.print_dlp_details("ACTUAL_DLP", actual_dlp_ep_rc);
+	  end
           end
   endfunction
   

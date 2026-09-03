@@ -31,7 +31,6 @@ class PCIe_EP_DL_model extends uvm_component;
   bit received_explicit_seq;
   bit [`PCIe_REPLAY_CMD_W-1:0] replay_cmd;
   bit [`PCIe_SEQ_NUM_W-1:0] last_sent;
-  bit IS_PAYLOAD;
 
   typedef struct {
     bit [`PCIe_TLP_DATA_BYTE_W-1:0][`PCIe_BYTE_W-1:0] tlp_data;
@@ -64,6 +63,7 @@ class PCIe_EP_DL_model extends uvm_component;
   bit received_explicit_seq_0;
 
   bit NAK_SCHEDULED;
+  bit ACK_SCHEDULED;
   bit NAK_SCHEDULED_TYPE;
   bit STANDARD_NAK;
   bit NAK_WITHDRAWAL_ALLOWED;
@@ -73,6 +73,19 @@ class PCIe_EP_DL_model extends uvm_component;
   bit credit;
   bit form_dlp_flit;
 
+   // Simplified DLLP content encodings for DLCMSM simulation
+    localparam bit [31:0] FEATURE_DLLP = 32'h0100_0000;
+    localparam bit [31:0] INITFC1_DLLP = 32'h0200_0000;
+    localparam bit [31:0] INITFC2_DLLP = 32'h0300_0000;
+        // ---- DLCMSM additions ----
+    dl_state_e          DL_STATE = DL_INACTIVE;
+    dl_init_substate_e  dl_init_substate;
+    event               ep_l0_to_dl_event;   // fired by PL model when LTSSM reaches L0
+    int                 fc1_sent_count, fc1_rcvd_count;
+    int                 fc2_sent_count, fc2_rcvd_count;
+    bit                 phy_linkup;      
+    bit                 link_enabled = 1'b1;
+
   function new(string name = "PCIe_RC_DL_model", uvm_component parent);
     super.new(name, parent);
   endfunction
@@ -81,15 +94,18 @@ class PCIe_EP_DL_model extends uvm_component;
     super.build_phase(phase);
     dl_imp = new("dl_imp", this);
     dl_ap = new("dl_ap", this);
+     if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event", ep_l0_to_dl_event))
+      `uvm_fatal("EVENT","ep_l0_to_dl_event not found") 
+
   endfunction
 
   // Modulo 1023 helper for sequence number increments (1 to 1023)
-  function bit [`PCIe_SEQ_NUM_W-1:0] mod1023_add(bit [`PCIe_SEQ_NUM_W-1:0] a, bit [`PCIe_SEQ_NUM_W-1:0] b_inc);
+  function bit [`PCIe_SEQ_NUM_W-1:0] mod1023_add(bit [`PCIe_SEQ_NUM_W-1:0] a,bit [`PCIe_SEQ_NUM_W-1:0] b_inc);
     int sum = int'(a) + int'(b_inc);
-    while (sum > 1023) sum -= 1023;
+    while(sum > (`PCIe_MAX_UNACK_FLITS + 512)) sum -= (`PCIe_MAX_UNACK_FLITS + 512);
     return sum;
   endfunction
-
+  
   // Modulo 1023 helper for sequence number subtraction (1 to 1023)
   function automatic bit [`PCIe_SEQ_NUM_W-1:0] mod1023_sub(bit [`PCIe_SEQ_NUM_W-1:0] a, bit [`PCIe_SEQ_NUM_W-1:0] b);
     int diff;
@@ -99,6 +115,63 @@ class PCIe_EP_DL_model extends uvm_component;
     if (diff < 0) diff += 1023;
     return diff;
   endfunction
+
+   task run_phase(uvm_phase phase);
+       `uvm_info("EP_DL_MODEL","WAITING_FOR_LTSSM_L0",UVM_LOW)
+       forever begin
+          @(ep_l0_to_dl_event);
+          `uvm_info("EP_DL_MODEL","LTSSM_REACHED_L0_STARTING_DLCMSM",UVM_LOW)
+	  phy_linkup = 1'b1; 
+          run_dlcmsm();
+       end
+    endtask
+    task run_dlcmsm();
+
+   DL_STATE = DL_INACTIVE;
+   `uvm_info("EP_DLCMSM","STATE=DL_INACTIVE",UVM_LOW)
+
+   wait (phy_linkup && link_enabled);
+
+   DL_STATE = DL_FEATURE;
+   `uvm_info("EP_DLCMSM","TRANSITION_DL_INACTIVE_TO_DL_FEATURE",UVM_LOW)
+   send_dllp_flit(FEATURE_DLLP);
+
+   DL_STATE = DL_INIT;
+   dl_init_substate = INIT_FC1;
+   `uvm_info("EP_DLCMSM","TRANSITION_DL_FEATURE_TO_DL_INIT_FC1",UVM_LOW)
+
+   fc1_sent_count = 0;
+   while (fc1_sent_count < 4) begin
+      send_dllp_flit(INITFC1_DLLP);
+      fc1_sent_count++;
+   end
+
+   dl_init_substate = INIT_FC2;
+   `uvm_info("EP_DLCMSM","TRANSITION_INIT_FC1_TO_INIT_FC2",UVM_LOW)
+
+   fc2_sent_count = 0;
+   while (fc2_sent_count < 4) begin
+      send_dllp_flit(INITFC2_DLLP);
+      fc2_sent_count++;
+   end
+
+   DL_STATE = DL_ACTIVE;
+   `uvm_info("EP_DLCMSM","TRANSITION_DL_INIT_TO_DL_ACTIVE_LINK_READY_FOR_TLPS",UVM_LOW)
+
+   wait (!phy_linkup);
+   DL_STATE = DL_INACTIVE;
+   `uvm_info("EP_DLCMSM","PHY_LINKUP=0_BACK_TO_DL_INACTIVE",UVM_LOW)
+endtask
+    // Builds a NOP/DLLP-only flit (is_payload=0) with given dllp_content and
+    // pushes it through the SAME path normal flits use (dl_ap -> PL model)
+    task send_dllp_flit(bit [31:0] content);
+       PCIe_sequence_item dcm_item;
+       dcm_item = PCIe_sequence_item::type_id::create("dcm_item");
+       dllp_content = content;
+       form_dl_packet(dcm_item.tlp_data, 1'b0, dcm_item.dlp_flit_out); // is_payload=0
+       dl_ap.write(dcm_item);
+       `uvm_info("EP_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h",content),UVM_LOW)
+    endtask
 
   // Standard NAK implementation
   task standard_nak_procedure();
@@ -170,15 +243,13 @@ class PCIe_EP_DL_model extends uvm_component;
 
   // FLIT MODE PACKET CREATION DLP
   task form_dl_packet(
-    input bit [`PCIe_TLP_DATA_BYTE_W-1:0][`PCIe_BYTE_W-1:0] tlp_data,
+    input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,
     input bit is_payload,
-    output bit [`PCIe_DLP_FLIT_BYTE_W-1:0][`PCIe_BYTE_W-1:0] dl_flit_out
+    output bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out
   );
     bit [`PCIe_SEQ_NUM_W-1:0] seq_num_to_send;
     bit [`PCIe_REPLAY_CMD_W-1:0] replay_command;
     bit [`PCIe_DLP_BYTE_W-1:0][`PCIe_BYTE_W-1:0] dlp;
-
-    IS_PAYLOAD = is_payload;
 
     // 1. Determine Replay Command and Sequence Number
     if (NAK_SCHEDULED) begin
@@ -223,6 +294,11 @@ class PCIe_EP_DL_model extends uvm_component;
       NEXT_TX_FLIT_SEQ_NUM = mod1023_add(NEXT_TX_FLIT_SEQ_NUM, 10'h1);
       `uvm_info("EP_DL_MODEL",$sformatf("NEXT_TX_FLIT_SEQ_NUM INSIDE THE DL INTERNAL STATE IS %d",NEXT_TX_FLIT_SEQ_NUM),UVM_LOW);
     end
+
+   // clear ACK flag here
+   if(replay_command == 2'b01) begin
+	   ACK_SCHEDULED=1'b0;
+   end
 
     last_flit_was_payload = is_payload;
 
@@ -372,7 +448,7 @@ class PCIe_EP_DL_model extends uvm_component;
 
   // RX_EP
   // Handling the incoming flit and passing info to EP
-  task handle_incoming_flit(bit [`PCIe_DLP_BYTE_W-1:0][`PCIe_BYTE_W-1:0] dlp, bit is_valid);
+  task handle_incoming_flit(bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp, bit is_valid);
     bit [`PCIe_FLIT_USAGE_W-1:0] is_nop;
     bit prior_was_payload;
     bit [`PCIe_SEQ_NUM_W-1:0] sequence_number;
@@ -381,9 +457,11 @@ class PCIe_EP_DL_model extends uvm_component;
     bit is_explicit;
     bit [`PCIe_FLIT_USAGE_W-1:0] flit_usage;
 
+    `uvm_info("EP_CON_MONITOR",$sformatf("DEBUG_HANDLE_INCOMING_FLIT_collected dlp_ep from ep monitor is dlp=%p",dlp),UVM_LOW)
+    sequence_number = {dlp[0][1:0],dlp[1]};
     is_nop = (!(sequence_number == 10'h0) && dlp[0][7:6] == 2'b00);
     prior_was_payload = dlp[0][5];
-    sequence_number = {dlp[0][1:0],dlp[1]};
+    `uvm_info("SEQ_DEBUG",$sformatf("dlp=%p :: %b :: %b",dlp,dlp[0][1:0],dlp[1]),UVM_LOW)
     replay_cmd = dlp[4][3:2];
     flit_usage = dlp[0][7:6];
     is_payload = (flit_usage == 2'b01);
@@ -445,7 +523,6 @@ class PCIe_EP_DL_model extends uvm_component;
       end
       else begin
         `uvm_info("EP_DL_MODEL","ENTERED_NORMAL_DL_TASK",UVM_LOW);
-
         if (duplicate_sequence_number()) discard_flit(0);
         else if (bad_sequence_number()) begin
           `uvm_info("EP_DL_MODEL","ENTERED_NAK_SCHEDULE_TASK",UVM_LOW);
@@ -454,6 +531,7 @@ class PCIe_EP_DL_model extends uvm_component;
         else begin
           `uvm_info("EP_DL_MODEL","ENTERED_ACK_SCHEDULE_TASK",UVM_LOW);
           execute_ack_schedule(0);
+	  ACK_SCHEDULED=1;
           success = 1;
         end
       end
@@ -616,6 +694,7 @@ class PCIe_EP_DL_model extends uvm_component;
     dl_ap.write(item);
   endfunction
 
+
   // =========================================================================
   // PCIe 6.0 Flow Control DLLP Payload Generator
   // Returns a 32-bit vector ready to map to DLP2 (MSB) through DLP5 (LSB)
@@ -762,5 +841,233 @@ class PCIe_EP_DL_model extends uvm_component;
       .is_infinite_data(is_inf_data)
     );
   endtask
+
+  // Task to drive the 6 initialization DLLPs during FC_INIT1 or FC_INIT2
+task dlcssm_initialization_sequence(
+    input bit [1:0] fc_phase, // 2'b01 = InitFC1, 2'b10 = InitFC2
+    input bit [2:0] vc_id     // 3'b000 for VC0
+);
+    bit [31:0] init_dllp;
+
+    `uvm_info("DL_CSSM", $sformatf("Transmitting Phase %0d Flow Control DLLPs", fc_phase), UVM_LOW)
+
+    // =========================================================================
+    // PART 1: TRANSMIT 3 DEDICATED PACKETS (Zero Credits for Single VC)
+    // =========================================================================
+    
+    // 1. Dedicated Posted (P)
+    init_dllp = create_fc_dllp(
+        .fc_phase(fc_phase), .fc_class(2'b00), .shared_fc(1'b0), .vc(vc_id),
+        .hdr_scale(2'b01), .data_scale(2'b01), .hdr_fc(12'd0), .data_fc(16'd0),
+        .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+    );
+
+    // 2. Dedicated Non-Posted (NP)
+    init_dllp = create_fc_dllp(
+        .fc_phase(fc_phase), .fc_class(2'b01), .shared_fc(1'b0), .vc(vc_id),
+        .hdr_scale(2'b01), .data_scale(2'b01), .hdr_fc(12'd0), .data_fc(16'd0),
+        .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+    );
+
+    // 3. Dedicated Completions (Cpl)
+    init_dllp = create_fc_dllp(
+        .fc_phase(fc_phase), .fc_class(2'b10), .shared_fc(1'b0), .vc(vc_id),
+        .hdr_scale(2'b01), .data_scale(2'b01), .hdr_fc(12'd0), .data_fc(16'd0),
+        .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+    );
+
+    // =========================================================================
+    // PART 2: TRANSMIT 3 SHARED PACKETS (Actual credits & Infinite Completions) [16]
+    // =========================================================================
+
+    // 4. Shared Posted (P) - Standard Posted values (Scale Factor 1)
+    init_dllp = create_fc_dllp(
+        .fc_phase(fc_phase), .fc_class(2'b00), .shared_fc(1'b1), .vc(vc_id),
+        .hdr_scale(2'b01), .data_scale(2'b01), .hdr_fc(12'd8), .data_fc(16'd64), // Assuming 1024B MPS
+        .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+    );
+
+    // 5. Shared Non-Posted (NP) - Standard NP values
+    init_dllp = create_fc_dllp(
+        .fc_phase(fc_phase), .fc_class(2'b01), .shared_fc(1'b1), .vc(vc_id),
+        .hdr_scale(2'b01), .data_scale(2'b01), .hdr_fc(12'd8), .data_fc(16'd4),  // NP Data = 4 (64B payload)
+        .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+    );
+
+    // 6. Shared Completions (Cpl) - Infinite for EP / standard RC
+    init_dllp = create_fc_dllp(
+        .fc_phase(fc_phase), .fc_class(2'b10), .shared_fc(1'b1), .vc(vc_id),
+        .hdr_scale(2'b00), .data_scale(2'b00), .hdr_fc(12'd0), .data_fc(16'd0),  // Scale/credits are ignored
+        .is_infinite_hdr(1'b1), .is_infinite_data(1'b1)                          // Triggers Infinite Advertisement
+    );
+
+endtask
+
+    /*// =========================================================================
+    // PCIe 6.0 Dynamic Flow Control Initialization Sequence
+    // Grounded in Section 3.4 & Section 2.6.1.2 of the Base Spec
+    // =========================================================================
+    
+    // Define your physical maximum queue configurations (matches actual FIFO sizes)
+    const int MAX_TX_RETRY_DEPTH = 512; 
+    const int MAX_RX_RETRY_DEPTH = 512;
+
+    task automatic drive_initialization_sequence(
+        input bit [1:0] fc_phase, // 2'b01 = InitFC1, 2'b10 = InitFC2
+        input bit [2:0] vc_id     // 3'b000 for VC0
+    );
+        bit [31:0] init_dllp;
+        
+        // Calculated variables
+        int rx_free_slots;
+        int tx_free_slots;
+        
+        bit [11:0] calc_rx_hdr_fc;
+        bit [15:0] calc_rx_data_fc;
+        bit [1:0]  calc_rx_hdr_scale;
+        bit [1:0]  calc_rx_data_scale;
+        
+        // 1. Calculate remaining slots in your EP Rx Retry Buffer
+        rx_free_slots = MAX_RX_RETRY_DEPTH - rx_retry_buffer.size();
+        if (rx_free_slots < 0) rx_free_slots = 0;
+        
+        // 2. Calculate remaining slots in your RC Tx Retry Buffer (useful for sanity logs)
+        tx_free_slots = MAX_TX_RETRY_DEPTH - tx_retry_buffer.size();
+        if (tx_free_slots < 0) tx_free_slots = 0;
+
+        // 3. Map free RX slots to unscaled Credits (Hdr = 1 unit, Data = 16 Bytes)
+        calc_rx_hdr_fc  = rx_free_slots;              // 1 Header Credit per free slot
+        calc_rx_data_fc = (rx_free_slots * 236) / 16; // ~14 Data Credits per free slot
+
+        // 4. Calculate Scale Factors on the fly (Table 2-46 / 2-47)
+        // Header Scale
+        if (calc_rx_hdr_fc <= 127) begin
+            calc_rx_hdr_scale = 2'b01; // SF = 1
+        end else if (calc_rx_hdr_fc <= 508) begin
+            calc_rx_hdr_scale = 2'b10; // SF = 4 (Shifted right by 2 before DLLP packing)
+        end else begin
+            calc_rx_hdr_scale = 2'b11; // SF = 16 (Shifted right by 4 before DLLP packing)
+        end
+
+        // Data Scale
+        if (calc_rx_data_fc <= 2047) begin
+            calc_rx_data_scale = 2'b01; // SF = 1
+        end else if (calc_rx_data_fc <= 8188) begin
+            calc_rx_data_scale = 2'b10; // SF = 4
+        end else begin
+            calc_rx_data_scale = 2'b11; // SF = 16
+        end
+
+        `uvm_info("DL_INIT", $sformatf("Driving Init Sequence Phase %0d. RX Queue Space: %0d/%0d. Calculated Shared HdrFC: %0d, DataFC: %0d", 
+                  fc_phase, rx_free_slots, MAX_RX_RETRY_DEPTH, calc_rx_hdr_fc, calc_rx_data_fc), UVM_LOW)
+
+        // =========================================================================
+        // PART 1: TRANSMIT 3 DEDICATED PACKETS (Zero Credits for Single VC0 Mode)
+        // =========================================================================
+        
+        // 1. Dedicated Posted (P)
+        init_dllp = create_fc_dllp(
+            .fc_phase(fc_phase), .fc_class(2'b00), .shared_fc(1'b0), .vc(vc_id),
+            .hdr_scale(2'b01), .data_scale(2'b01), .hdr_fc(12'd0), .data_fc(16'd0),
+            .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+        );
+
+        // 2. Dedicated Non-Posted (NP)
+        init_dllp = create_fc_dllp(
+            .fc_phase(fc_phase), .fc_class(2'b01), .shared_fc(1'b0), .vc(vc_id),
+            .hdr_scale(2'b01), .data_scale(2'b01), .hdr_fc(12'd0), .data_fc(16'd0),
+            .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+        );
+
+        // 3. Dedicated Completions (Cpl)
+        init_dllp = create_fc_dllp(
+            .fc_phase(fc_phase), .fc_class(2'b10), .shared_fc(1'b0), .vc(vc_id),
+            .hdr_scale(2'b01), .data_scale(2'b01), .hdr_fc(12'd0), .data_fc(16'd0),
+            .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+        );
+
+        // =========================================================================
+        // PART 2: TRANSMIT 3 SHARED PACKETS (Dynamically Calculated)
+        // =========================================================================
+
+        // 4. Shared Posted (P) - Dynamic Shared Credits based on buffer space
+        init_dllp = create_fc_dllp(
+            .fc_phase(fc_phase), .fc_class(2'b00), .shared_fc(1'b1), .vc(vc_id),
+            .hdr_scale(calc_rx_hdr_scale), .data_scale(calc_rx_data_scale), 
+            .hdr_fc(calc_rx_hdr_fc), .data_fc(calc_rx_data_fc),
+            .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+        );
+
+        // 5. Shared Non-Posted (NP) - Allocate 25% of the calculated total queue pool
+        init_dllp = create_fc_dllp(
+            .fc_phase(fc_phase), .fc_class(2'b01), .shared_fc(1'b1), .vc(vc_id),
+            .hdr_scale(calc_rx_hdr_scale), .data_scale(calc_rx_data_scale), 
+            .hdr_fc(calc_rx_hdr_fc / 4), .data_fc(calc_rx_data_fc / 4),
+            .is_infinite_hdr(1'b0), .is_infinite_data(1'b0)
+        );
+
+        // 6. Shared Completions (Cpl) - Endpoints must always advertise Infinite Cpl
+        init_dllp = create_fc_dllp(
+            .fc_phase(fc_phase), .fc_class(2'b10), .shared_fc(1'b1), .vc(vc_id),
+            .hdr_scale(2'b00), .data_scale(2'b00), .hdr_fc(12'd0), .data_fc(16'd0),
+            .is_infinite_hdr(1'b1), .is_infinite_data(1'b1)
+        );
+
+    endtask*/
+   // =========================================================================
+    // TASK 1: Calculates credits based on free queue slots and builds the 32-bit payload
+    // =========================================================================
+    /*task automatic calculate_and_build_updatefc(
+        output bit [31:0] dllp_out,
+        output bit        is_optimized
+    );
+        int max_slots = 512; // Maximum physical capacity of your rx_retry_buffer
+        int free_slots = max_slots - rx_retry_buffer.size();
+        bit [7:0]  calc_hdr;
+        bit [11:0] calc_data;
+
+        if (free_slots < 0) free_slots = 0;
+
+        // 1. Calculate unscaled credits (1 header credit per slot, ~14 data credits per slot)
+        calc_hdr  = free_slots[7:0];
+        calc_data = ((free_slots * 236) / 16) & 12'hFFF;
+
+        // 2. Assemble 32-bit Optimized Update FC DLLP (Layout from Fig 4-31)
+        dllp_out[3]    = 1'b0;      // Indicator bit for Optimized Update FC (Must be 0)
+        dllp_out[30:28] = 3'b000;    // Virtual Channel ID (VC0)
+        dllp_out[27:20] = calc_hdr;  // Shared NP Header credits (NPRH) [1]
+        dllp_out[19:12] = calc_hdr;  // Shared Posted Header credits (PRH) [1]
+        dllp_out[11:0]  = calc_data; // Shared Posted Data credits (PRD) [1]
+
+        is_optimized = 1'b1;         // Set DLP0 Bit 4 to 1'b1 (Optimized format indicator) [2]
+    endtask
+
+    // =========================================================================
+    // TASK 2: Background keep-alive loop that automatically runs during DL_Active
+    // =========================================================================
+    task automatic run_updatefc_loop();
+        bit [31:0] tx_payload;
+        bit        opt_flag;
+
+        `uvm_info("DL_FC", "Periodic UpdateFC loop started successfully!", UVM_LOW)
+
+        forever begin
+            #30us; // Strict spec keep-alive timing rule to prevent link timeouts [4]
+            
+            if (!EP_REPLAY_IN_PROGRESS) begin
+                // Recalculate remaining buffer space and get updated payload
+                calculate_and_build_updatefc(tx_payload, opt_flag);
+
+                // Load directly into your DL model transmit registers
+                dllp_content        = tx_payload; // Assign 32-bit payload (DLP2..5)
+                credit              = 1'b1;       // Set flag to tell TX driver to inject DLLP
+                credit_is_optimized = opt_flag;   // Selects Optimized format type
+                
+                `uvm_info("DL_FC", $sformatf("Transmitted UpdateFC: %h (Buffer Slots Occupied: %0d)", 
+                          tx_payload, rx_retry_buffer.size()), UVM_MEDIUM)
+            end
+        end
+    endtask*/ 
+
 
 endclass
