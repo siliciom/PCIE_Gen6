@@ -59,7 +59,11 @@ class PCIe_RC_PL_model extends uvm_component;
    localparam bit [7:0] RC_SELECTED_LINK_NUM = 8'h00;
    localparam bit [7:0] RC_ASSIGNED_LANE_NUM = 8'h00;
    localparam bit [7:0] PAD_BYTE             = 8'hFF;
-
+      
+bit [`PCIe_BYTE_W-1:0] flit_crc_body[$];
+   bit [63:0]             flit_crc;
+   event                  rc_flit_ready;
+   bit                    rc_flit_ready_flag = 1'b0;
   // Input from RC DL model.
    uvm_analysis_imp #(PCIe_sequence_item, PCIe_RC_PL_model) pl_imp;
 
@@ -611,7 +615,67 @@ task rc_state_config_complete();
               `uvm_info("RC_LTSSM","L0_MODE=FLIT_MODE",UVM_LOW)
                //rc_l0_flit_mode();
 	     wait(pl_sent);
-                `uvm_info("RC_CONTROLLER",$sformatf("dl_flit_out is %p",dl_flit_out),UVM_LOW)
+                `uvm_info("RC_CONTROLLER",$sformatf("dl_flit_out is %p",dl_flit_out),UVM_LOW) 
+        
+              // ===== ADDED: Gen6 Flit-Mode CRC/FEC computation (log-only, does not alter transmit loop) =====
+              // This block computes CRC and FEC for the 242-byte Flit and logs the results.
+              // It does NOT change what gets sent on rc_pipe_intf_tx.tx_data below -- the
+              // original 242-byte transmit loop is left completely untouched, per team request.
+              begin
+                 bit [`PCIe_BYTE_W-1:0] dl_bytes_q [$];   // holds the 242B payload as a byte queue
+                 bit [`PCIe_BYTE_W-1:0] crc_bytes  [0:7]; // 8 CRC bytes (Gen6 Flit CRC)
+                 bit [`PCIe_BYTE_W-1:0] fec_bytes  [0:5]; // 6 FEC/ECC bytes (Gen6 Flit FEC)
+
+                 // STEP 1: Copy the 242-byte DL/PL payload (dl_flit_out) into a byte queue,
+                 // Byte0 first -- this is the input the CRC function expects.
+                 dl_bytes_q.delete();
+                 for(int ci = 0; ci < `PCIe_DLP_FLIT_BYTE_W; ci++)
+                    dl_bytes_q.push_back(dl_flit_out[ci]);
+
+                 // STEP 2: Compute the 64-bit (8-byte) CRC over the 242-byte payload.
+                 flit_crc  = calculate_flit_crc(dl_bytes_q);
+                 `uvm_info("RC_LTSSM",$sformatf("FLIT_CRC64 = 0x%016h",flit_crc),UVM_LOW)
+
+                 // Split the 64-bit CRC result into 8 individual bytes, MSB first --
+                 // this is the byte order the Flit format appends them in.
+                 crc_bytes = '{flit_crc[63:56], flit_crc[55:48], flit_crc[47:40], flit_crc[39:32],
+                               flit_crc[31:24], flit_crc[23:16], flit_crc[15:8],  flit_crc[7:0]};
+                 // MONITOR : print the 8 CRC bytes exactly as they would be appended to the Flit
+                 `uvm_info("RC_PL_MONITOR",
+                           $sformatf("RC_TX_CRC_8_BYTES = %p (CRC64 = 0x%016h)",crc_bytes,flit_crc),
+                           UVM_LOW)
+
+                 // STEP 3: Concatenate 242B payload + 8B CRC -> 250B body (for FEC input).
+                 flit_crc_body = {dl_bytes_q, crc_bytes};
+
+                 // STEP 4: Compute the 6-byte FEC/ECC over the 250B (payload+CRC) body.
+                 calculate_flit_fec(flit_crc_body, fec_bytes);
+                 // MONITOR : print the 6 FEC bytes exactly as they would be appended to the Flit
+                 `uvm_info("RC_PL_MONITOR",
+                           $sformatf("RC_TX_FEC_6_BYTES = %p",fec_bytes),
+                           UVM_LOW)
+
+                 // STEP 5: Concatenate 250B (payload+CRC) + 6B FEC -> 256B final Flit.
+                 flit_crc_body = {flit_crc_body, fec_bytes};
+
+                 // Log the final assembled 256-byte Flit (242 payload + 8 CRC + 6 FEC).
+                 `uvm_info("RC_LTSSM",
+                           $sformatf("FINAL_FLIT_DATA = %0d Bytes (242 DL + 8 CRC + 6 FEC) = %p",
+                                     flit_crc_body.size(), flit_crc_body),
+                           UVM_LOW)
+                 // MONITOR : print the complete 256-byte Flit for coverage/checking
+                 `uvm_info("RC_PL_MONITOR",
+                           $sformatf("RC_TX_256_BYTE_FLIT = %p",flit_crc_body),
+                           UVM_LOW)
+
+                 // STEP 6: Signal that the CRC/FEC-protected Flit is ready, so any
+                 // listener (e.g. EP_PL_model or a monitor) can pick up flit_crc_body
+                 // and check these exact CRC/FEC values.
+                 rc_flit_ready_flag = 1'b1;
+                 -> rc_flit_ready;
+              end
+              // ===== END ADDED BLOCK =====
+
               // FLIT is 242 bytes = 60.5 dwords, send 61 dwords (last dword partial)
               for(int i=0 ; i<`PCIe_FLIT_DWORDS; i++) begin
                  bit [`PCIe_MON_DATA_W-1:0] flit_dword;
@@ -970,7 +1034,314 @@ task rc_state_config_complete();
        pl_sent=1;
      endfunction
 
+  //----------------------------------------------------------------------------
+   // Gen6 Flit-Mode CRC/FEC : declarations, tables, and functions
+   // (computed on the assembled 242B Flit body, before scrambling.
+   // Grows 242B -> 250B (+CRC) -> 256B (+FEC). Mirrored identical logic
+   // on the EP_PL_model RX side)
+   //----------------------------------------------------------------------------
+ 
+   // GF(2^8) antilog table: fec_exp_table[i] = alpha^i, alpha the root
+   // of x^8+x^4+x^3+x^2+1 (PCIe Base Spec 6.2 Fig 4-36, "i to alpha^i")
+   static const bit [`PCIe_BYTE_W-1:0] fec_exp_table [0:255] = '{
+     8'h01, 8'h02, 8'h04, 8'h08, 8'h10, 8'h20, 8'h40, 8'h80,
+     8'h1d, 8'h3a, 8'h74, 8'he8, 8'hcd, 8'h87, 8'h13, 8'h26,
+     8'h4c, 8'h98, 8'h2d, 8'h5a, 8'hb4, 8'h75, 8'hea, 8'hc9,
+     8'h8f, 8'h03, 8'h06, 8'h0c, 8'h18, 8'h30, 8'h60, 8'hc0,
+     8'h9d, 8'h27, 8'h4e, 8'h9c, 8'h25, 8'h4a, 8'h94, 8'h35,
+     8'h6a, 8'hd4, 8'hb5, 8'h77, 8'hee, 8'hc1, 8'h9f, 8'h23,
+     8'h46, 8'h8c, 8'h05, 8'h0a, 8'h14, 8'h28, 8'h50, 8'ha0,
+     8'h5d, 8'hba, 8'h69, 8'hd2, 8'hb9, 8'h6f, 8'hde, 8'ha1,
+     8'h5f, 8'hbe, 8'h61, 8'hc2, 8'h99, 8'h2f, 8'h5e, 8'hbc,
+     8'h65, 8'hca, 8'h89, 8'h0f, 8'h1e, 8'h3c, 8'h78, 8'hf0,
+     8'hfd, 8'he7, 8'hd3, 8'hbb, 8'h6b, 8'hd6, 8'hb1, 8'h7f,
+     8'hfe, 8'he1, 8'hdf, 8'ha3, 8'h5b, 8'hb6, 8'h71, 8'he2,
+     8'hd9, 8'haf, 8'h43, 8'h86, 8'h11, 8'h22, 8'h44, 8'h88,
+     8'h0d, 8'h1a, 8'h34, 8'h68, 8'hd0, 8'hbd, 8'h67, 8'hce,
+     8'h81, 8'h1f, 8'h3e, 8'h7c, 8'hf8, 8'hed, 8'hc7, 8'h93,
+     8'h3b, 8'h76, 8'hec, 8'hc5, 8'h97, 8'h33, 8'h66, 8'hcc,
+     8'h85, 8'h17, 8'h2e, 8'h5c, 8'hb8, 8'h6d, 8'hda, 8'ha9,
+     8'h4f, 8'h9e, 8'h21, 8'h42, 8'h84, 8'h15, 8'h2a, 8'h54,
+     8'ha8, 8'h4d, 8'h9a, 8'h29, 8'h52, 8'ha4, 8'h55, 8'haa,
+     8'h49, 8'h92, 8'h39, 8'h72, 8'he4, 8'hd5, 8'hb7, 8'h73,
+     8'he6, 8'hd1, 8'hbf, 8'h63, 8'hc6, 8'h91, 8'h3f, 8'h7e,
+     8'hfc, 8'he5, 8'hd7, 8'hb3, 8'h7b, 8'hf6, 8'hf1, 8'hff,
+     8'he3, 8'hdb, 8'hab, 8'h4b, 8'h96, 8'h31, 8'h62, 8'hc4,
+     8'h95, 8'h37, 8'h6e, 8'hdc, 8'ha5, 8'h57, 8'hae, 8'h41,
+     8'h82, 8'h19, 8'h32, 8'h64, 8'hc8, 8'h8d, 8'h07, 8'h0e,
+     8'h1c, 8'h38, 8'h70, 8'he0, 8'hdd, 8'ha7, 8'h53, 8'ha6,
+     8'h51, 8'ha2, 8'h59, 8'hb2, 8'h79, 8'hf2, 8'hf9, 8'hef,
+     8'hc3, 8'h9b, 8'h2b, 8'h56, 8'hac, 8'h45, 8'h8a, 8'h09,
+     8'h12, 8'h24, 8'h48, 8'h90, 8'h3d, 8'h7a, 8'hf4, 8'hf5,
+     8'hf7, 8'hf3, 8'hfb, 8'heb, 8'hcb, 8'h8b, 8'h0b, 8'h16,
+     8'h2c, 8'h58, 8'hb0, 8'h7d, 8'hfa, 8'he9, 8'hcf, 8'h83,
+     8'h1b, 8'h36, 8'h6c, 8'hd8, 8'had, 8'h47, 8'h8e, 8'h01
+   };
+
+   // GF(2^8) discrete log table: fec_log_table[v] = i such that
+   // alpha^i = v. fec_log_table[0] is undefined (never indexed with 0
+   // by this algorithm) and stored as 8'hff as a sentinel.
+   // (PCIe Base Spec 6.2 Fig 4-37, "alpha^i to i")
+   static const bit [`PCIe_BYTE_W-1:0] fec_log_table [0:255] = '{
+     8'hff, 8'h00, 8'h01, 8'h19, 8'h02, 8'h32, 8'h1a, 8'hc6,
+     8'h03, 8'hdf, 8'h33, 8'hee, 8'h1b, 8'h68, 8'hc7, 8'h4b,
+     8'h04, 8'h64, 8'he0, 8'h0e, 8'h34, 8'h8d, 8'hef, 8'h81,
+     8'h1c, 8'hc1, 8'h69, 8'hf8, 8'hc8, 8'h08, 8'h4c, 8'h71,
+     8'h05, 8'h8a, 8'h65, 8'h2f, 8'he1, 8'h24, 8'h0f, 8'h21,
+     8'h35, 8'h93, 8'h8e, 8'hda, 8'hf0, 8'h12, 8'h82, 8'h45,
+     8'h1d, 8'hb5, 8'hc2, 8'h7d, 8'h6a, 8'h27, 8'hf9, 8'hb9,
+     8'hc9, 8'h9a, 8'h09, 8'h78, 8'h4d, 8'he4, 8'h72, 8'ha6,
+     8'h06, 8'hbf, 8'h8b, 8'h62, 8'h66, 8'hdd, 8'h30, 8'hfd,
+     8'he2, 8'h98, 8'h25, 8'hb3, 8'h10, 8'h91, 8'h22, 8'h88,
+     8'h36, 8'hd0, 8'h94, 8'hce, 8'h8f, 8'h96, 8'hdb, 8'hbd,
+     8'hf1, 8'hd2, 8'h13, 8'h5c, 8'h83, 8'h38, 8'h46, 8'h40,
+     8'h1e, 8'h42, 8'hb6, 8'ha3, 8'hc3, 8'h48, 8'h7e, 8'h6e,
+     8'h6b, 8'h3a, 8'h28, 8'h54, 8'hfa, 8'h85, 8'hba, 8'h3d,
+     8'hca, 8'h5e, 8'h9b, 8'h9f, 8'h0a, 8'h15, 8'h79, 8'h2b,
+     8'h4e, 8'hd4, 8'he5, 8'hac, 8'h73, 8'hf3, 8'ha7, 8'h57,
+     8'h07, 8'h70, 8'hc0, 8'hf7, 8'h8c, 8'h80, 8'h63, 8'h0d,
+     8'h67, 8'h4a, 8'hde, 8'hed, 8'h31, 8'hc5, 8'hfe, 8'h18,
+     8'he3, 8'ha5, 8'h99, 8'h77, 8'h26, 8'hb8, 8'hb4, 8'h7c,
+     8'h11, 8'h44, 8'h92, 8'hd9, 8'h23, 8'h20, 8'h89, 8'h2e,
+     8'h37, 8'h3f, 8'hd1, 8'h5b, 8'h95, 8'hbc, 8'hcf, 8'hcd,
+     8'h90, 8'h87, 8'h97, 8'hb2, 8'hdc, 8'hfc, 8'hbe, 8'h61,
+     8'hf2, 8'h56, 8'hd3, 8'hab, 8'h14, 8'h2a, 8'h5d, 8'h9e,
+     8'h84, 8'h3c, 8'h39, 8'h53, 8'h47, 8'h6d, 8'h41, 8'ha2,
+     8'h1f, 8'h2d, 8'h43, 8'hd8, 8'hb7, 8'h7b, 8'ha4, 8'h76,
+     8'hc4, 8'h17, 8'h49, 8'hec, 8'h7f, 8'h0c, 8'h6f, 8'hf6,
+     8'h6c, 8'ha1, 8'h3b, 8'h52, 8'h29, 8'h9d, 8'h55, 8'haa,
+     8'hfb, 8'h60, 8'h86, 8'hb1, 8'hbb, 8'hcc, 8'h3e, 8'h5a,
+     8'hcb, 8'h59, 8'h5f, 8'hb0, 8'h9c, 8'ha9, 8'ha0, 8'h51,
+     8'h0b, 8'hf5, 8'h16, 8'heb, 8'h7a, 8'h75, 8'h2c, 8'hd7,
+     8'h4f, 8'hae, 8'hd5, 8'he9, 8'he6, 8'he7, 8'had, 8'he8,
+     8'h74, 8'hd6, 8'hf4, 8'hea, 8'ha8, 8'h50, 8'h58, 8'haf
+   };
+
+   //----------------------------------------------------------------------------
+   // Gen6 Flit-Mode CRC
+   //----------------------------------------------------------------------------
+   // GF(2^8) multiply for the Flit CRC's field: x^8+x^5+x^3+x+1 -> reduction
+   // byte 8'h2B. Per PCIe Base Spec 6.2 Section 4.2.3.4.3 "CRC Bytes in
+   // Flit". NOTE: this is a DIFFERENT GF(256) field than any FEC/ECC tables
+   // (Appendix J's alpha uses reduction byte 8'h1D) -- do not mix the two.
+   //----------------------------------------------------------------------------
+   function automatic bit [`PCIe_BYTE_W-1:0] gf_mul_crc_field(
+     input bit [`PCIe_BYTE_W-1:0] a,
+     input bit [`PCIe_BYTE_W-1:0] b
+   );
+     bit [`PCIe_BYTE_W-1:0] p, aa, bb;
+     p  = 8'h00;
+     aa = a;
+     bb = b;
+     for(int i = 0; i < `PCIe_BYTE_W; i++)
+     begin
+       if(bb[0])
+         p = p ^ aa;
+       if(aa[7])
+         aa = (aa << 1) ^ 8'h2B;
+       else
+         aa = (aa << 1);
+       bb = bb >> 1;
+     end
+     return p;
+   endfunction : gf_mul_crc_field
+
+   //----------------------------------------------------------------------------
+   // flit_crc_body must hold `PCIe_DLP_FLIT_BYTE_W Bytes (Byte0 first).
+   // Returns {CRC0..CRC7}, to be appended right after the Flit body and
+   // BEFORE scrambling. CRC = a(x) mod g(x) over GF(2^8),
+   // g(x) = (x+alpha)(x+alpha^2)...(x+alpha^8), alpha root of
+   // x^8+x^5+x^3+x+1 -- a Reed-Solomon-style symbol-serial polynomial
+   // code, not a binary LFSR CRC -- see Section 4.2.3.4.3.
+   //----------------------------------------------------------------------------
+   function bit [63:0] calculate_flit_crc(input bit [`PCIe_BYTE_W-1:0] flit_bytes[$]);
+     bit [`PCIe_BYTE_W-1:0] g[8];
+     bit [`PCIe_BYTE_W-1:0] rem[8];
+     bit [`PCIe_BYTE_W-1:0] fb;
+     bit [63:0]             crc_result;
+
+     g[0] = 8'hD5; // x^7 : alpha^172
+     g[1] = 8'h68; // x^6 : alpha^116
+     g[2] = 8'hFE; // x^5 : alpha^186
+     g[3] = 8'hD5; // x^4 : alpha^172
+     g[4] = 8'h33; // x^3 : alpha^195
+     g[5] = 8'h41; // x^2 : alpha^134
+     g[6] = 8'h4D; // x^1 : alpha^199
+     g[7] = 8'h69; // x^0 : alpha^36
+
+     if(flit_bytes.size() < `PCIe_DLP_FLIT_BYTE_W)
+     begin
+       `uvm_error("PCIe_PL_MODEL",
+                  $sformatf("calculate_flit_crc: need >= %0d Bytes, got %0d",
+                            `PCIe_DLP_FLIT_BYTE_W,
+                            flit_bytes.size()))
+       `uvm_info("RC_PL_MODEL","CRC error is there",UVM_LOW)
+       return '0;
+     end
+     `uvm_info("RC_PL_MODEL","CRC error is not there",UVM_LOW)
+
+     foreach(rem[i]) rem[i] = 8'h00;
+
+     for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
+     begin
+       fb = rem[0] ^ flit_bytes[i];
+       for(int k = 0; k < 7; k++)
+         rem[k] = rem[k+1];
+       rem[7] = 8'h00;
+       if(fb != 8'h00)
+       begin
+         for(int k = 0; k < 8; k++)
+           rem[k] = rem[k] ^ gf_mul_crc_field(fb, g[k]);
+       end
+     end
+
+     crc_result = {rem[0], rem[1], rem[2], rem[3], rem[4], rem[5], rem[6], rem[7]};
+     `uvm_info("RC_PL_MODEL",
+               $sformatf("CRC is calculated = 0x%016h",crc_result),
+               UVM_LOW)
+     `uvm_info("RC_PL_MONITOR",
+               $sformatf("RC_TX_CRC_BYTES = {%02h %02h %02h %02h %02h %02h %02h %02h}",
+                         rem[0],rem[1],rem[2],rem[3],rem[4],rem[5],rem[6],rem[7]),
+               UVM_LOW)
+     return crc_result;
+   endfunction : calculate_flit_crc
+
+   //----------------------------------------------------------------------------
+   // Convenience: append the 8B CRC (MSB-byte first) onto an assembled
+   // Flit body queue, BEFORE that queue is handed to the scrambler.
+   //----------------------------------------------------------------------------
+   function void append_flit_crc(ref bit [`PCIe_BYTE_W-1:0] flit_bytes[$]);
+     bit [63:0] crc = calculate_flit_crc(flit_bytes);
+     for(int c = 7; c >= 0; c--)
+       flit_bytes.push_back(crc[8*c +: 8]);
+     `uvm_info("RC_PL_MODEL",
+               $sformatf("CRC is appended to the 242 Bytes data coming from DL and PL, Flit body size = %0d Bytes",
+                         flit_bytes.size()),
+               UVM_LOW)
+   endfunction : append_flit_crc
+
+   //----------------------------------------------------------------------------
+   // GF(2^8) multiply via log/antilog tables (Gen6 Flit FEC field,
+   // x^8+x^4+x^3+x^2+1). This is a DIFFERENT GF(256) field than the CRC's
+   // (reduction byte 8'h2B) -- do not mix the two.
+   //----------------------------------------------------------------------------
+   function automatic bit [`PCIe_BYTE_W-1:0] fec_gf_mul(
+     input bit [`PCIe_BYTE_W-1:0] a,
+     input bit [`PCIe_BYTE_W-1:0] b
+   );
+     int unsigned s;
+     if(a == 8'h00 || b == 8'h00)
+       return 8'h00;
+     s = (int'(fec_log_table[a]) + int'(fec_log_table[b])) % 255;
+     return fec_exp_table[s];
+   endfunction : fec_gf_mul
+
+   //----------------------------------------------------------------------------
+   // Encode one 84-Byte ECC group -> Check Byte (B84), Parity Byte (B85)
+   // C = XOR_{k=0}^{83} info[k] * alpha^(84-k) (Spec Equation 4-2)
+   // P = XOR_{k=0}^{83} info[k]               (Spec Equation 4-1)
+   //----------------------------------------------------------------------------
+   function automatic void fec_encode_group(
+     input  bit [`PCIe_BYTE_W-1:0] info [0:83],
+     output bit [`PCIe_BYTE_W-1:0] check,
+     output bit [`PCIe_BYTE_W-1:0] parity
+   );
+     bit [`PCIe_BYTE_W-1:0] c, p;
+     c = 8'h00;
+     p = 8'h00;
+     for(int k = 0; k < 84; k++)
+     begin
+       c ^= fec_gf_mul(info[k], fec_exp_table[(84 - k) % 255]);
+       p ^= info[k];
+     end
+     check  = c;
+     parity = p;
+   endfunction : fec_encode_group
+
+   //----------------------------------------------------------------------------
+   // calculate_flit_fec: computes the 6 ECC Bytes for a 250B
+   // (242B payload + 8B CRC) Flit body without modifying it.
+   // Byte-to-group mapping (0 <= i <= 249): Group = i%3, Offset = i/3.
+   // Group1 offset 83 and Group2 offset 83 are forced padding (0), since
+   // those two groups only carry 83 real info Bytes versus Group0's 84.
+   // ecc_out layout: [0]=G1 Check(B84) [1]=G2 Check(B84) [2]=G0 Check(B84)
+   //                 [3]=G1 Parity(B85)[4]=G2 Parity(B85)[5]=G0 Parity(B85)
+   //----------------------------------------------------------------------------
+   function void calculate_flit_fec(
+     input  bit [`PCIe_BYTE_W-1:0] flit_in [$],
+     output bit [`PCIe_BYTE_W-1:0] ecc_out [6]
+   );
+     bit [`PCIe_BYTE_W-1:0] grp0 [0:83], grp1 [0:83], grp2 [0:83];
+     bit [`PCIe_BYTE_W-1:0] c0, p0, c1, p1, c2, p2;
+
+     if(flit_in.size() < (`PCIe_DLP_FLIT_BYTE_W + 8))
+     begin
+       `uvm_error("PCIe_PL_MODEL",
+                  $sformatf("calculate_flit_fec: need >= %0d Bytes (payload+CRC), got %0d",
+                            `PCIe_DLP_FLIT_BYTE_W + 8,
+                            flit_in.size()))
+       `uvm_info("RC_PL_MODEL","FEC error is there",UVM_LOW)
+       foreach(ecc_out[i]) ecc_out[i] = '0;
+       return;
+     end
+     `uvm_info("RC_PL_MODEL","FEC error is not there",UVM_LOW)
+
+     grp1[83] = 8'h00; // forced padding, spec 4.2.3.4.4
+     grp2[83] = 8'h00; // forced padding, spec 4.2.3.4.4
+
+     for(int i = 0; i <= 249; i++)
+     begin
+       int grp = i % 3;
+       int off = i / 3;
+       case(grp)
+         0: grp0[off] = flit_in[i];
+         1: grp1[off] = flit_in[i];
+         2: grp2[off] = flit_in[i];
+       endcase
+     end
+
+     fec_encode_group(grp0, c0, p0);
+     fec_encode_group(grp1, c1, p1);
+     fec_encode_group(grp2, c2, p2);
+
+     // Byte250=G1 Check, 251=G2 Check, 252=G0 Check,
+     // Byte253=G1 Parity,254=G2 Parity,255=G0 Parity
+     ecc_out[0] = c1; ecc_out[1] = c2; ecc_out[2] = c0;
+     ecc_out[3] = p1; ecc_out[4] = p2; ecc_out[5] = p0;
+
+     `uvm_info("RC_PL_MODEL",
+               $sformatf("FEC ECC computed: G0(C=0x%02h,P=0x%02h) G1(C=0x%02h,P=0x%02h) G2(C=0x%02h,P=0x%02h)",
+                         c0, p0, c1, p1, c2, p2),
+               UVM_LOW)
+     `uvm_info("RC_PL_MODEL","FEC is calculated",UVM_LOW)
+     `uvm_info("RC_PL_MONITOR",
+               $sformatf("RC_TX_FEC_BYTES = %p",ecc_out),
+               UVM_LOW)
+   endfunction : calculate_flit_fec
+
+   //----------------------------------------------------------------------------
+   // Convenience: append the 6B ECC onto an assembled 250B (payload+CRC)
+   // Flit body queue, producing the 256B Flit ready for scrambling.
+   //----------------------------------------------------------------------------
+   function void append_flit_fec(ref bit [`PCIe_BYTE_W-1:0] flit_bytes[$]);
+     bit [`PCIe_BYTE_W-1:0] ecc [6];
+     calculate_flit_fec(flit_bytes, ecc);
+     for(int e = 0; e < 6; e++)
+       flit_bytes.push_back(ecc[e]);
+     `uvm_info("RC_PL_MODEL",
+               $sformatf("FEC is appended to the Flit (payload+CRC), Flit size = %0d Bytes",
+                         flit_bytes.size()),
+               UVM_LOW)
+   endfunction : append_flit_fec
+
 endclass
+
+
+
+
+
+
+ 
 
 
 
