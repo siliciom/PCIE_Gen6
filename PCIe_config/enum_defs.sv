@@ -224,7 +224,10 @@ typedef enum
      {
        INIT_FC1, INIT_FC2
      } dl_init_substate_e;
-
+typedef struct {
+    bit [`PCIe_TLP_DATA_BYTE_W-1:0][`PCIe_BYTE_W-1:0] tlp_data;
+    bit [`PCIe_SEQ_NUM_W-1:0] seq_num;
+  } tx_buffer_t;
      
 
 endpackage

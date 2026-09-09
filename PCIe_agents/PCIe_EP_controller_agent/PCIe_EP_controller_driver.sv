@@ -65,6 +65,16 @@ task run_phase(uvm_phase phase);
      ep_pl_model.ep_ltssm();
      end
      wait(ep_pl_model.link_up==1)
+
+     // ---- DLCMSM addition: NEVER hardcode phy_linkup inside the DL model.
+     // Mirror it live, every pass, straight from the real LTSSM link_up bit
+     // that ep_state_l0() sets. This is the single source of truth DLCMSM
+     // waits on in dlcmsm_state_dl_inactive().
+     ep_dl_model.phy_linkup = ep_pl_model.link_up;
+     `uvm_info("EP_CONTROLLER",$sformatf(
+        "[DLCMSM_GATE] MIRRORED :: ep_pl_model.link_up=%0b -> ep_dl_model.phy_linkup=%0b :: current_DL_STATE=%s",
+        ep_pl_model.link_up, ep_dl_model.phy_linkup, ep_dl_model.DL_STATE.name()),UVM_LOW)
+
      if (ep_dl_model.EP_REPLAY_IN_PROGRESS) begin
         phase.raise_objection(this, "REPLAY");
       `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_REPLAY_SECTION",UVM_LOW)
@@ -86,17 +96,29 @@ task run_phase(uvm_phase phase);
        phase.drop_objection(this, "ACK");
     end
     else begin
-      seq_item_port.try_next_item(pcie_seq_item);
-      if (pcie_seq_item != null) begin
-        `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-        tx_ap.write(pcie_seq_item);
-        drive_flit();
-        seq_item_port.item_done();
+      // ---- DLCMSM addition: TL traffic only after DL_ACTIVE is reached.
+      // finish_item() in the sequence will simply block (try_next_item
+      // keeps returning null) until DLCMSM's FC_INIT1/FC_INIT2 counters
+      // both hit their targets and DL_STATE flips to DL_ACTIVE.
+      if (ep_dl_model.DL_STATE == DL_ACTIVE) begin
+         seq_item_port.try_next_item(pcie_seq_item);
+         if (pcie_seq_item != null) begin
+           `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+           tx_ap.write(pcie_seq_item);
+           drive_flit();
+           seq_item_port.item_done();
+         end
+         else begin
+           // No sequence item currently available.
+           // Give DL model a chance to schedule ACK/NAK/REPLAY.
+           #1ns;
+         end
       end
       else begin
-        // No sequence item currently available.
-        // Give DL model a chance to schedule ACK/NAK/REPLAY.
-        #1ns;
+         `uvm_info("EP_CONTROLLER",$sformatf(
+            "[DLCMSM_GATE] TL_HELD :: current_DL_STATE=%s :: waiting_for_DL_ACTIVE_before_pulling_TL_items",
+            ep_dl_model.DL_STATE.name()),UVM_LOW)
+         #1ns;
       end
     end
   end
@@ -145,7 +167,3 @@ task run_phase(uvm_phase phase);
 
 
 endclass
-
-
-
-

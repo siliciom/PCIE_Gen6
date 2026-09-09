@@ -21,7 +21,7 @@ class PCIe_EP_DL_model extends uvm_component;
   `uvm_component_utils(PCIe_EP_DL_model)
 
   // TL -> DL and DL -> PL TLM connections.
-  uvm_analysis_imp #(PCIe_sequence_item, PCIe_EP_DL_model) dl_imp;
+  uvm_analysis_imp #(PCIe_sequence_item,PCIe_EP_DL_model) dl_imp;
   uvm_analysis_port #(PCIe_sequence_item) dl_ap;
 
   bit [31:0] dllp_content;
@@ -32,10 +32,6 @@ class PCIe_EP_DL_model extends uvm_component;
   bit [`PCIe_REPLAY_CMD_W-1:0] replay_cmd;
   bit [`PCIe_SEQ_NUM_W-1:0] last_sent;
 
-  typedef struct {
-    bit [`PCIe_TLP_DATA_BYTE_W-1:0][`PCIe_BYTE_W-1:0] tlp_data;
-    bit [`PCIe_SEQ_NUM_W-1:0] seq_num;
-  } tx_buffer_t;
 
   bit [`PCIe_DLP_FLIT_BYTE_W-1:0][`PCIe_BYTE_W-1:0] rx_retry_buffer[$];
   tx_buffer_t tx_retry_buffer[$];
@@ -90,6 +86,15 @@ class PCIe_EP_DL_model extends uvm_component;
     int                 fc2_sent_count, fc2_rcvd_count;
     bit                 phy_linkup;      
     bit                 link_enabled = 1'b1;
+
+    // ---- DLCMSM FSM additions (dependency-driven, mirrors LTSSM style) ----
+    // Named, single-source-of-truth completion targets — no magic numbers
+    // scattered in a bare while() loop, referenced by every debug print below.
+    localparam int NUM_INITFC1_DLLP = 4;   // FC_INIT1 is "done" once this many INITFC1 DLLPs sent
+    localparam int NUM_INITFC2_DLLP = 4;   // FC_INIT2 is "done" once this many INITFC2 DLLPs sent
+    event dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
+    bit   dl_link_active;                   // stays 1 while in DL_ACTIVE - TL/driver can gate on this
+    // --------------------------------------------------------------------
 
   function new(string name = "PCIe_RC_DL_model", uvm_component parent);
     super.new(name, parent);
@@ -219,52 +224,148 @@ class PCIe_EP_DL_model extends uvm_component;
   // END LCRC LOGIC BLOCK
   // =========================================================================
 
-   /*task run_phase(uvm_phase phase);
-       `uvm_info("EP_DL_MODEL","WAITING_FOR_LTSSM_L0",UVM_LOW)
-       forever begin
-          @(ep_l0_to_dl_event);
-          `uvm_info("EP_DL_MODEL","LTSSM_REACHED_L0_STARTING_DLCMSM",UVM_LOW)
-	  phy_linkup = 1'b1; 
-          run_dlcmsm();
-       end
-    endtask*/
+  // =========================================================================
+  // DLCMSM FSM — ADDED / ACTIVATED BLOCK
+  // Mirrors PCIe_RC_DL_model's DLCMSM implementation exactly (EP side).
+  // Dependency chain enforced:
+  //   DL_INACTIVE  --(phy_linkup && link_enabled)-->  DL_FEATURE
+  //   DL_FEATURE   --(FEATURE_DLLP sent)-->            DL_INIT.FC_INIT1
+  //   FC_INIT1     --(fc1_sent_count >= NUM_INITFC1_DLLP)--> FC_INIT2
+  //   FC_INIT2     --(fc2_sent_count >= NUM_INITFC2_DLLP)--> DL_ACTIVE
+  //   DL_ACTIVE    --> dl_link_active=1, dl_active_event fires -> TL may send TLPs
+  // =========================================================================
+
+  task run_phase(uvm_phase phase);
+     `uvm_info("EP_DLCMSM","[DLCMSM_TRACE] WAITING_FOR_ep_l0_to_dl_event (fired by PL model on LTSSM L0 entry)",UVM_LOW)
+     forever begin
+        @(ep_l0_to_dl_event);
+        `uvm_info("EP_DLCMSM","[DLCMSM_TRACE] ep_l0_to_dl_event_FIRED :: LTSSM_REACHED_L0 :: STARTING_DLCMSM_FSM",UVM_LOW)
+        DL_STATE       = DL_INACTIVE;
+        dl_link_active = 1'b0;
+        fc1_sent_count = 0;
+        fc2_sent_count = 0;
+        run_dlcmsm();
+     end
+  endtask
+
     task run_dlcmsm();
+       forever begin
+          case (DL_STATE)
 
-   DL_STATE = DL_INACTIVE;
-   `uvm_info("EP_DLCMSM","STATE=DL_INACTIVE",UVM_LOW)
+             DL_INACTIVE: begin
+                `uvm_info("EP_DLCMSM","==========================================",UVM_LOW)
+                `uvm_info("EP_DLCMSM","DLCMSM_STATE = DL_INACTIVE",UVM_LOW)
+                `uvm_info("EP_DLCMSM","==========================================",UVM_LOW)
+                dlcmsm_state_dl_inactive();
+             end
 
-   wait (phy_linkup && link_enabled);
+             DL_FEATURE: begin
+                `uvm_info("EP_DLCMSM","==========================================",UVM_LOW)
+                `uvm_info("EP_DLCMSM","DLCMSM_STATE = DL_FEATURE",UVM_LOW)
+                `uvm_info("EP_DLCMSM","==========================================",UVM_LOW)
+                dlcmsm_state_dl_feature();
+             end
 
-   DL_STATE = DL_FEATURE;
-   `uvm_info("EP_DLCMSM","TRANSITION_DL_INACTIVE_TO_DL_FEATURE",UVM_LOW)
-   send_dllp_flit(FEATURE_DLLP);
+             DL_INIT: begin
+                case (dl_init_substate)
+                   INIT_FC1: begin
+                      `uvm_info("EP_DLCMSM","SUB_STATE = DL_INIT.FC_INIT1",UVM_LOW)
+                      dlcmsm_state_init_fc1();
+                   end
+                   INIT_FC2: begin
+                      `uvm_info("EP_DLCMSM","SUB_STATE = DL_INIT.FC_INIT2",UVM_LOW)
+                      dlcmsm_state_init_fc2();
+                   end
+                   default: `uvm_error("EP_DLCMSM","INVALID_DL_INIT_SUBSTATE")
+                endcase
+             end
 
-   DL_STATE = DL_INIT;
-   dl_init_substate = INIT_FC1;
-   `uvm_info("EP_DLCMSM","TRANSITION_DL_FEATURE_TO_DL_INIT_FC1",UVM_LOW)
+             DL_ACTIVE: begin
+                `uvm_info("EP_DLCMSM","==========================================",UVM_LOW)
+                `uvm_info("EP_DLCMSM","DLCMSM_STATE = DL_ACTIVE :: LINK_READY_FOR_TLP_TRAFFIC",UVM_LOW)
+                `uvm_info("EP_DLCMSM","==========================================",UVM_LOW)
+                dlcmsm_state_dl_active();
+                wait (!phy_linkup);
+                DL_STATE       = DL_INACTIVE;
+                dl_link_active = 1'b0;
+                `uvm_info("EP_DLCMSM","[DL_ACTIVE] phy_linkup=0 :: BACK_TO_DL_INACTIVE",UVM_LOW)
+                return;
+             end
 
-   fc1_sent_count = 0;
-   while (fc1_sent_count < 4) begin
-      send_dllp_flit(INITFC1_DLLP);
-      fc1_sent_count++;
-   end
+             default: `uvm_error("EP_DLCMSM","INVALID_DLCMSM_STATE")
+          endcase
+       end
+    endtask
 
-   dl_init_substate = INIT_FC2;
-   `uvm_info("EP_DLCMSM","TRANSITION_INIT_FC1_TO_INIT_FC2",UVM_LOW)
+    // ---------------- DL_INACTIVE ----------------
+    task dlcmsm_state_dl_inactive();
+       `uvm_info("EP_DLCMSM",$sformatf(
+          "[DL_INACTIVE] CHECKING_DEPENDENCY :: phy_linkup=%0b (mirrored live from LTSSM link_up by the driver) :: link_enabled=%0b",
+          phy_linkup, link_enabled),UVM_LOW)
+       wait (phy_linkup && link_enabled);
+       `uvm_info("EP_DLCMSM",$sformatf(
+          "[DL_INACTIVE] DEPENDENCY_SATISFIED :: phy_linkup=%0b link_enabled=%0b :: TRANSITION -> DL_FEATURE",
+          phy_linkup, link_enabled),UVM_LOW)
+       DL_STATE = DL_FEATURE;
+    endtask
 
-   fc2_sent_count = 0;
-   while (fc2_sent_count < 4) begin
-      send_dllp_flit(INITFC2_DLLP);
-      fc2_sent_count++;
-   end
+    // ---------------- DL_FEATURE ----------------
+    task dlcmsm_state_dl_feature();
+       send_dllp_flit(FEATURE_DLLP);
+       `uvm_info("EP_DLCMSM",$sformatf(
+          "[DL_FEATURE] FEATURE_DLLP_SENT=%08h :: TRANSITION -> DL_INIT.FC_INIT1",FEATURE_DLLP),UVM_LOW)
+       DL_STATE         = DL_INIT;
+       dl_init_substate = INIT_FC1;
+       fc1_sent_count    = 0;
+       fc2_sent_count    = 0;
+    endtask
 
-   DL_STATE = DL_ACTIVE;
-   `uvm_info("EP_DLCMSM","TRANSITION_DL_INIT_TO_DL_ACTIVE_LINK_READY_FOR_TLPS",UVM_LOW)
+    // ---------------- DL_INIT : FC_INIT1 ----------------
+    task dlcmsm_state_init_fc1();
+       send_dllp_flit(INITFC1_DLLP);
+       fc1_sent_count++;
+       `uvm_info("EP_DLCMSM",$sformatf(
+          "[DL_INIT.FC_INIT1] INITFC1_DLLP_SENT :: fc1_sent_count=%0d / target=%0d",
+          fc1_sent_count, NUM_INITFC1_DLLP),UVM_LOW)
 
-   wait (!phy_linkup);
-   DL_STATE = DL_INACTIVE;
-   `uvm_info("EP_DLCMSM","PHY_LINKUP=0_BACK_TO_DL_INACTIVE",UVM_LOW)
-endtask
+       if (fc1_sent_count >= NUM_INITFC1_DLLP) begin
+          `uvm_info("EP_DLCMSM",$sformatf(
+             "[DL_INIT.FC_INIT1] TARGET_REACHED(%0d/%0d) :: TRANSITION -> DL_INIT.FC_INIT2",
+             fc1_sent_count, NUM_INITFC1_DLLP),UVM_LOW)
+          dl_init_substate = INIT_FC2;
+       end
+       else begin
+          `uvm_info("EP_DLCMSM","[DL_INIT.FC_INIT1] TARGET_NOT_REACHED :: STAYING_IN_FC_INIT1",UVM_LOW)
+       end
+    endtask
+
+    // ---------------- DL_INIT : FC_INIT2 ----------------
+    task dlcmsm_state_init_fc2();
+       send_dllp_flit(INITFC2_DLLP);
+       fc2_sent_count++;
+       `uvm_info("EP_DLCMSM",$sformatf(
+          "[DL_INIT.FC_INIT2] INITFC2_DLLP_SENT :: fc2_sent_count=%0d / target=%0d",
+          fc2_sent_count, NUM_INITFC2_DLLP),UVM_LOW)
+
+       if (fc2_sent_count >= NUM_INITFC2_DLLP) begin
+          `uvm_info("EP_DLCMSM",$sformatf(
+             "[DL_INIT.FC_INIT2] TARGET_REACHED(%0d/%0d) :: TRANSITION -> DL_ACTIVE",
+             fc2_sent_count, NUM_INITFC2_DLLP),UVM_LOW)
+          DL_STATE = DL_ACTIVE;
+       end
+       else begin
+          `uvm_info("EP_DLCMSM","[DL_INIT.FC_INIT2] TARGET_NOT_REACHED :: STAYING_IN_FC_INIT2",UVM_LOW)
+       end
+    endtask
+
+    // ---------------- DL_ACTIVE ----------------
+    task dlcmsm_state_dl_active();
+       dl_link_active = 1'b1;
+       -> dl_active_event;
+       `uvm_info("EP_DLCMSM",
+          "[DL_ACTIVE] dl_link_active=1 :: dl_active_event_TRIGGERED :: TL_MAY_NOW_SEND_TLPs",UVM_LOW)
+    endtask
+
     // Builds a NOP/DLLP-only flit (is_payload=0) with given dllp_content and
     // pushes it through the SAME path normal flits use (dl_ap -> PL model)
     task send_dllp_flit(bit [31:0] content);
@@ -279,6 +380,9 @@ endtask
        dl_ap.write(dcm_item);
        `uvm_info("EP_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h",content),UVM_LOW)
     endtask
+  // =========================================================================
+  // END DLCMSM FSM BLOCK
+  // =========================================================================
 
   // Standard NAK implementation
   task standard_nak_procedure();
@@ -1220,4 +1324,3 @@ endtask
 
 
 endclass
-
