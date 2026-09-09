@@ -1,5 +1,6 @@
 #set testname "PCIe_base_test"
-set testname "PCIe_3DW_flit_test"
+#set testname "PCIe_3DW_flit_test"
+set testname "PCIe_IO_3DW_FLIT_test"
 
 vlib work
 vmap work work

@@ -59,6 +59,7 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_phy_base_sequence.sv"
 	`include "../PCIe_sequences/PCIe_EP_phy_base_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_flit_sequence.sv"
+	`include "../PCIe_sequences/PCIe_IO_3DW_FLIT_sequence.sv"
 
      `include "../PCIe_environment/PCIe_scoreboard.sv"
      `include "../PCIe_environment/PCIe_subscriber.sv"
@@ -66,6 +67,7 @@ package PCIe_pkg;
 
      `include "../PCIe_tests/PCIe_base_test.sv"
      `include "../PCIe_tests/PCIe_3DW_flit_test.sv"
+     `include "../PCIe_tests/PCIe_IO_3DW_FLIT_test.sv"
 
 
 endpackage
