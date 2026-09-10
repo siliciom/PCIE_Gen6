@@ -1,9 +1,9 @@
 //=========================================================================================
 // File         : PCIe_EP_controller_driver.sv
-// Project      : PCIe_Gen6
+// Project      : PCIE_Gen6
 // Description  : PCIe_agents\PCIe_EP_controller_agent\PCIe_EP_controller_driver.sv
 // Author       : 
-// Date         : 2026-08-14
+// Date         : 2026-09-09
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -31,7 +31,7 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
    bit[`PCIe_PL_PIPE_WORD_W-1:0] scr_data;
    bit[0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data;
    bit[0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
-
+   bit ep_tlp_active;
    
    virtual PCIe_EP_interface     ep_pipe_intf_tx, ep_pipe_intf_rx;	
     
@@ -71,9 +71,7 @@ task run_phase(uvm_phase phase);
      // that ep_state_l0() sets. This is the single source of truth DLCMSM
      // waits on in dlcmsm_state_dl_inactive().
      ep_dl_model.phy_linkup = ep_pl_model.link_up;
-     `uvm_info("EP_CONTROLLER",$sformatf(
-        "[DLCMSM_GATE] MIRRORED :: ep_pl_model.link_up=%0b -> ep_dl_model.phy_linkup=%0b :: current_DL_STATE=%s",
-        ep_pl_model.link_up, ep_dl_model.phy_linkup, ep_dl_model.DL_STATE.name()),UVM_LOW)
+     ep_tlp_active = ep_dl_model.dl_link_active;
 
      if (ep_dl_model.EP_REPLAY_IN_PROGRESS) begin
         phase.raise_objection(this, "REPLAY");
@@ -104,6 +102,7 @@ task run_phase(uvm_phase phase);
          seq_item_port.try_next_item(pcie_seq_item);
          if (pcie_seq_item != null) begin
            `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+           wait(ep_tlp_active);
            tx_ap.write(pcie_seq_item);
            drive_flit();
            seq_item_port.item_done();
