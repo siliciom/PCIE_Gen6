@@ -1,9 +1,9 @@
 //=========================================================================================
 // File         : PCIe_EP_PL_model.sv
-// Project      : PCIe_Gen6
-// Description  : PCIe_environment\PCIe_EP_PL_model.sv
+// Project      : PCIE_Gen6
+// Description  : PCIe_agents\PCIe_EP_controller_agent\PCIe_EP_PL_model.sv
 // Author       : 
-// Date         : 2026-08-14
+// Date         : 2026-09-09
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -21,7 +21,7 @@ class PCIe_EP_PL_model extends uvm_component;
    // Input from RC DL model.
    uvm_analysis_imp #(PCIe_sequence_item, PCIe_EP_PL_model) pl_imp;
    
-   pcie_mode_e mode;
+   //pkt_mode_e current_pkt_mode;
    PCIe_env_config   pcie_ecfg;
    virtual PCIe_EP_interface     ep_pipe_intf_tx,ep_pipe_intf_rx;
 
@@ -69,13 +69,9 @@ class PCIe_EP_PL_model extends uvm_component;
             `uvm_fatal("NO_VIF", "EC_PIPE_INTERFACE_not_found")
       if (!uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf_rx))
             `uvm_fatal("NO_VIF", "EC_PIPE_INTERFACE_not_found")
-      if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event",ep_l0_to_dl_event))
-             `uvm_fatal("EVENT", "event not found")
-       mode = pcie_ecfg.mode;
-       if(mode == FLIT_MODE)
-       `uvm_info("RC_PL_MODEL","Configured_in_FLIT_MODE",UVM_LOW)
-       else
-       `uvm_info("RC_PL_MODEL","Configured_in_NON_FLIT_MODE", UVM_LOW)
+if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event",ep_l0_to_dl_event))
+              `uvm_fatal("EVENT", "event not found")
+        `uvm_info("EP_PL_MODEL","Per-transaction pkt_mode from item.pkt_mode",UVM_LOW)
         polynomial = `PCIe_PL_SCRAMBLER_POLYNOMIAL;
        // polynomial = 23'b01000010000000100100101;
         reset_scrambler();
@@ -522,15 +518,15 @@ task ep_state_config_complete();
         link_up = 1'b1;
         `uvm_info("EP_LTSSM","LINK_UP=1",UVM_LOW)
         // INFORM DL THAT LINK IS UP
-        -> ep_l0_to_dl_event;
+        //-> ep_l0_to_dl_event;
         `uvm_info("EP_LTSSM","EP_L0_TO_DL_EVENT_TRIGGERED",UVM_LOW)
-        // SELECT FLIT / NON-FLIT MODE
-        case (mode)
-           NON_FLIT_MODE: begin
+        // SELECT FLIT / NON-FLIT MODE (link-wide from global config)
+        case (pcie_ecfg.mode)
+           NON_FLIT: begin
               `uvm_info("EP_LTSSM","L0_MODE=NON_FLIT_MODE",UVM_LOW)
                //ep_l0_non_flit_mode();
            end
-           FLIT_MODE: begin
+           FLIT: begin
               `uvm_info("EP_LTSSM","L0_MODE=FLIT_MODE",UVM_LOW)
            end
            default: begin
@@ -816,17 +812,43 @@ task ep_state_config_complete();
       `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_PRE_ENCODE_TASK"),UVM_LOW)
     endtask
 
-    task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out);
+/*task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out);
       bit [31:0] scramble_data;
       bit [31:0] gray_data;
       bit [31:0] pre_data;
       bit        parity;
       `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_TX_PROCESS_TASK", UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("The data_in_from PL inside tx_prpcess is %d mode=%s",data_in, current_pkt_mode.name()), UVM_LOW)
+       tx_process_executed = 1'b1;
+
+      // Both FLIT and NON-FLIT use identical TX processing (scramble, gray, parity, precode)
+      // Per-transaction mode stored from item.pkt_mode in write()
+      `uvm_info("PCIe_PL_MODEL",$sformatf("TX_PROCESS:mode=%s", current_pkt_mode.name()), UVM_LOW)
+      scramble_32(data_in, scramble_data);
+      tx_gray_encode(scramble_data,gray_data);
+      tx_parity_generate(gray_data,parity);
+      tx_parity_q.push_back(parity);
+      `uvm_info("PCIe_PL_MODEL",$sformatf("TX_PARITY = %0b  PARITY_QUEUE_SIZE = %0d",parity,tx_parity_q.size()),UVM_LOW);
+      tx_precoder(gray_data,pre_data);
+      data_out = pre_data;
+
+      `uvm_info("PCIe_PL_MODEL", $sformatf("TX_PROCESS_INPUT=%08h OUTPUT=%08h", data_in, data_out),UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_TX_PROCESS_TASK",  UVM_LOW)
+    endtask*/
+
+    
+    task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out);
+      bit [31:0] scramble_data;
+      bit [31:0] gray_data;
+      bit [31:0] pre_data;
+      bit        parity;
+      
+      `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_TX_PROCESS_TASK", UVM_LOW)
       `uvm_info("PCIe_PL_MODEL",$sformatf("The data_in_from PL inside tx_prpcess is %d",data_in), UVM_LOW)
        tx_process_executed = 1'b1;
-      case(mode)
+      case(pcie_ecfg.mode)
          // NON-FLIT MODE
-         NON_FLIT_MODE:
+         NON_FLIT:
          begin
             `uvm_info("PCIe_PL_MODEL","TX_PROCESS:NON_FLIT_MODE", UVM_LOW)
             scramble_32(data_in, scramble_data);
@@ -838,7 +860,7 @@ task ep_state_config_complete();
             data_out = pre_data;
          end
          // FLIT MODE
-         FLIT_MODE:
+         FLIT:
          begin
             `uvm_info("PCIe_PL_MODEL","TX_PROCESS:FLIT_MODE", UVM_LOW)
             scramble_32(data_in,scramble_data);
@@ -859,11 +881,14 @@ task ep_state_config_complete();
       `uvm_info("PCIe_PL_MODEL","EXIT_FROM_TX_PROCESS_TASK",  UVM_LOW)
     endtask
 
+
+
    // PL model receives the 242-byte DL result.
     function void write(PCIe_sequence_item item);
      bit [31:0] temp;
-     `uvm_info("EP_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",item.dlp_flit_out),UVM_MEDIUM)
+     `uvm_info("EP_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p mode=%s",item.dlp_flit_out, item.pkt_mode.name()),UVM_MEDIUM)
       dl_flit_out=item.dlp_flit_out;
+      //current_pkt_mode = item.pkt_mode;
       pl_qu.delete();
       for (int i = 0; i < 242; i += 4) begin
         temp = '0;

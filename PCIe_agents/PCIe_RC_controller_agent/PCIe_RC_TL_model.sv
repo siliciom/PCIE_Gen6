@@ -1,25 +1,9 @@
 //=========================================================================================
 // File         : PCIe_RC_TL_model.sv
-// Project      : PCIe_Gen6
+// Project      : PCIE_Gen6
 // Description  : PCIe_agents\PCIe_RC_controller_agent\PCIe_RC_TL_model.sv
-//
-//                Root-Complex Transaction Layer model.
-//
-//                FLOW (unchanged from the integration environment) :
-//                  RC_driver.tx_ap --> tl_imp (this) --> tl_ap --> RC_DL.dl_imp
-//
-//                The driver still publishes the sequence item on its analysis
-//                port; write() is the entry point. This model then
-//                  1. serializes the TLP header (FLIT or NON-FLIT format)
-//                  2. appends OHC and payload  -> serialized_tlp[]
-//                  3. in FLIT mode packs it into the 236 B TLP region and pads
-//                     the remainder with NOP TLPs -> flit_tlp_region[]
-//                  4. flattens that into item.tlp_data (236 bytes) which is the
-//                     field the DL model consumes in form_dl_packet()
-//                  5. publishes the item on tl_ap toward the DL model
-//
 // Author       : 
-// Date         : 2026-08-14
+// Date         : 2026-09-09
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -74,9 +58,7 @@ class PCIe_RC_TL_model extends uvm_component;
   // FUNCTION: write (tl_imp) - entry point from the RC controller driver.
   //--------------------------------------------------------------------------
   virtual function void write(PCIe_sequence_item tr);
-    `uvm_info("RC_TL_MODEL",
-       $sformatf("RECEIVED_TL_PAYLOAD_FROM_RC_CONTROLLER_DRIVER %s", tr.pkt_mode.name()),
-       UVM_LOW)
+    `uvm_info("RC_TL_MODEL", $sformatf("RECEIVED_TL_PAYLOAD_FROM_RC_CONTROLLER_DRIVER %s", tr.pkt_mode.name()), UVM_LOW)
      send_tlp(tr);
   endfunction
 

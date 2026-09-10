@@ -3,7 +3,7 @@
 // Project      : PCIE_Gen6
 // Description  : PCIe_environment\PCIe_subscriber.sv
 // Author       : 
-// Date         : 2026-08-14
+// Date         : 2026-09-09
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -28,8 +28,8 @@ class PCIe_subscriber extends uvm_subscriber#(PCIe_sequence_item);
    virtual PCIe_RC_interface rc_pipe_intf;
    virtual PCIe_EP_interface ep_pipe_intf;
 
-   PCIe_env_config   pcie_ecfg;
-   pcie_mode_e       mode;
+PCIe_env_config   pcie_ecfg;
+    // Per-transaction mode coverage from pcie_seq_item.pkt_mode in write()
 
    int rc_l0_flit_dword_count;
    int ep_l0_flit_dword_count;
@@ -160,10 +160,10 @@ class PCIe_subscriber extends uvm_subscriber#(PCIe_sequence_item);
                                                               bins b_normal          = { 8'h00 };  // Training.Control = 0
                                                              }
 
-      cp_rc_mode : coverpoint rc_pl.mode {
-                                          ignore_bins b_non_flit = { NON_FLIT_MODE };
-                                          bins b_flit     = { FLIT_MODE     };
-                                         }
+cp_rc_mode : coverpoint pcie_seq_item.pkt_mode {
+                                           ignore_bins b_non_flit = { NON_FLIT };
+                                           bins b_flit     = { FLIT     };
+                                          }
 
    endgroup : rc_pl_cg
 
@@ -276,10 +276,10 @@ class PCIe_subscriber extends uvm_subscriber#(PCIe_sequence_item);
 	                                                        bins b_normal = {8'h00};
       }
 
-      cp_ep_mode : coverpoint ep_pl.mode {
-                                          ignore_bins b_non_flit = { NON_FLIT_MODE };
-                                          bins b_flit     = { FLIT_MODE     };
-                                         }
+cp_ep_mode : coverpoint pcie_seq_item.pkt_mode {
+                                           ignore_bins b_non_flit = { NON_FLIT };
+                                           bins b_flit     = { FLIT     };
+                                          }
 
 
       cp_ep_pl_sent : coverpoint ep_pl.pl_sent {
@@ -297,17 +297,16 @@ class PCIe_subscriber extends uvm_subscriber#(PCIe_sequence_item);
       //ep_pl_cross_cg = new();
    endfunction
 
-   function void build_phase(uvm_phase phase);
-    `uvm_info("PCIe_SUBSCRIBER","ENTERED_INTO_SUB_BUILD_PHASE",UVM_LOW)
-     super.build_phase(phase);
-        pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item") ;
-     if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
-        `uvm_fatal("PCIe_SUBSCRIBER","Cannot_get_PCIe_env_config")
-     mode = pcie_ecfg.mode;
-     uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf);
-     uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf);
-    `uvm_info("PCIe_SUBSCRIBER","EXIT_FROM_SUB_BUILD_PHASE",UVM_LOW)
-   endfunction
+function void build_phase(uvm_phase phase);
+     `uvm_info("PCIe_SUBSCRIBER","ENTERED_INTO_SUB_BUILD_PHASE",UVM_LOW)
+      super.build_phase(phase);
+         pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item") ;
+      if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
+         `uvm_fatal("PCIe_SUBSCRIBER","Cannot_get_PCIe_env_config")
+      uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf);
+      uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf);
+     `uvm_info("PCIe_SUBSCRIBER","EXIT_FROM_SUB_BUILD_PHASE",UVM_LOW)
+    endfunction
 
    function void start_of_simulation_phase(uvm_phase phase);
      super.start_of_simulation_phase(phase);

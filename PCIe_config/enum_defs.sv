@@ -3,7 +3,7 @@
 // Project      : PCIE_Gen6
 // Description  : PCIe_config\enum_defs.sv
 // Author       : 
-// Date         : 2026-08-14
+// Date         : 2026-09-09
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -13,6 +13,7 @@
 * you agree to be and are bound to the terms of the SILICIOM TECHNOLOGIES PVT LTD license agreement.
 * All other rights reserved.
 ***********************************************************************************************************************/
+
 package typedef_enums;
 
   // TL enum encodings below come from the `define macros, so the macro file
@@ -179,10 +180,6 @@ package typedef_enums;
                    } replay_scheduled_type_e;
 
 
-  typedef enum bit {
-                    NON_FLIT_MODE,
-                    FLIT_MODE
-                   } pcie_mode_e;
   typedef enum
      {
         DETECT,

@@ -1,9 +1,9 @@
 //=========================================================================================
 // File         : PCIe_RC_DL_model.sv
-// Project      : PCIe_Gen6
-// Description  : PCIe_environment\PCIe_RC_DL_model.sv
+// Project      : PCIE_Gen6
+// Description  : PCIe_agents\PCIe_RC_controller_agent\PCIe_RC_DL_model.sv
 // Author       : 
-// Date         : 2026-08-14
+// Date         : 2026-09-09
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -13,7 +13,6 @@
 * you agree to be and are bound to the terms of the SILICIOM TECHNOLOGIES PVT LTD license agreement.
 * All other rights reserved.
 ***********************************************************************************************************************/
-
 
 import typedef_enums :: *;
 class PCIe_RC_DL_model extends uvm_component;
@@ -32,7 +31,6 @@ class PCIe_RC_DL_model extends uvm_component;
   bit [`PCIe_REPLAY_CMD_W-1:0] replay_cmd;
   bit [`PCIe_SEQ_NUM_W-1:0] last_sent;
 
-
   tx_buffer_t tx_retry_buffer[$];
 
   // Retry buffers for retry logic at TX and RX side
@@ -42,7 +40,9 @@ class PCIe_RC_DL_model extends uvm_component;
   replay_scheduled_type_e REPLAY_SCHEDULED_TYPE;
 
   // ---- LCRC additions: mode awareness (mirrors EP DL model / PL model pattern) ----
-  pcie_mode_e       mode;
+  // Per-transaction mode comes from item.pkt_mode in write()
+  // Link-wide mode for DLCMSM flits comes from config
+  pkt_mode_e       link_mode;
   PCIe_env_config   pcie_ecfg;
   // ---------------------------------------------------------------------------
 
@@ -112,24 +112,43 @@ class PCIe_RC_DL_model extends uvm_component;
   endfunction
 
 
-  function void build_phase(uvm_phase phase);
+function void build_phase(uvm_phase phase);
     super.build_phase(phase);
     dl_imp = new("dl_imp",this);
     dl_ap = new("dl_ap",this);
      if (!uvm_config_db#(event)::get(this, "", "PCIE_rc_l0_to_dl_event", rc_l0_to_dl_event))
-      `uvm_fatal("EVENT","rc_l0_to_dl_event not found") 
+       `uvm_fatal("EVENT","rc_l0_to_dl_event not found") 
 
-    // ---- LCRC addition: fetch mode so we know which LCRC path to run ----
+    // ---- LCRC addition: fetch link-wide mode for DLCMSM flits; per-transaction mode from item.pkt_mode ----
     if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
       `uvm_fatal("RC_DL_MODEL","Cannot_get_PCIe_env_config");
-    mode = pcie_ecfg.mode;
-    if (mode == FLIT_MODE)
-      `uvm_info("RC_DL_MODEL","LCRC_CONFIGURED_IN_FLIT_MODE",UVM_LOW)
-    else
-      `uvm_info("RC_DL_MODEL","LCRC_CONFIGURED_IN_NON_FLIT_MODE",UVM_LOW)
+    link_mode = pcie_ecfg.mode;
+    `uvm_info("RC_DL_MODEL",$sformatf("LINK_MODE_FOR_DLCMSM=%s",link_mode.name()),UVM_LOW)
     // ------------------------------------------------------------------
 
   endfunction
+
+// DL model consumes TL output, creates the DLP, then publishes to PL.
+function void write(PCIe_sequence_item item);
+  `uvm_info("RC_DL_MODEL","TL -> DL",UVM_LOW);
+   item.print();
+  form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
+
+  // ---- LCRC addition: stamp LCRC based on configured mode ----
+  if (item.pkt_mode == FLIT) begin
+    item.dl_lcrc = generate_lcrc_flit(item.dlp_flit_out);
+    `uvm_info("LCRC_FLIT_MODE",$sformatf("STAMPED_ON_ITEM :: dl_lcrc=%08h",item.dl_lcrc),UVM_LOW)
+  end
+  else begin
+    int unsigned byte_len;
+    byte_len = (item.tlp_total_dw_count > 0) ? (item.tlp_total_dw_count * 4) : `PCIe_TLP_DATA_BYTE_W;
+    item.dl_lcrc = generate_lcrc_non_flit(item.tlp_data, byte_len);
+    `uvm_info("LCRC_NONFLIT_MODE",$sformatf("STAMPED_ON_ITEM :: bytes_covered=%0d :: dl_lcrc=%08h",byte_len,item.dl_lcrc),UVM_LOW)
+  end
+  // -------------------------------------------------------------
+
+  dl_ap.write(item);
+endfunction
 
 
   // Modulo 1023 helper for sequence number increments (1 to 1023)
@@ -257,7 +276,8 @@ class PCIe_RC_DL_model extends uvm_component;
   task run_phase(uvm_phase phase);
      `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] WAITING_FOR_rc_l0_to_dl_event (fired by PL model on LTSSM L0 entry)",UVM_LOW)
      forever begin
-        @(rc_l0_to_dl_event);
+       // @(rc_l0_to_dl_event);
+        wait(phy_linkup == 1);
         `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] rc_l0_to_dl_event_FIRED :: LTSSM_REACHED_L0 :: STARTING_DLCMSM_FSM",UVM_LOW)
         // Reset FSM state on every (re)start so a re-training link re-runs FC-Init cleanly.
         DL_STATE       = DL_INACTIVE;
@@ -333,8 +353,7 @@ class PCIe_RC_DL_model extends uvm_component;
    // ---------------- DL_FEATURE ----------------
    task dlcmsm_state_dl_feature();
       send_dllp_flit(FEATURE_DLLP);
-      `uvm_info("RC_DLCMSM",$sformatf(
-         "[DL_FEATURE] FEATURE_DLLP_SENT=%08h :: TRANSITION -> DL_INIT.FC_INIT1",FEATURE_DLLP),UVM_LOW)
+      `uvm_info("RC_DLCMSM",$sformatf("[DL_FEATURE] FEATURE_DLLP_SENT=%08h :: TRANSITION -> DL_INIT.FC_INIT1",FEATURE_DLLP),UVM_LOW)
       DL_STATE         = DL_INIT;
       dl_init_substate = INIT_FC1;
       fc1_sent_count    = 0;
@@ -382,7 +401,7 @@ class PCIe_RC_DL_model extends uvm_component;
    // ---------------- DL_ACTIVE ----------------
    task dlcmsm_state_dl_active();
       dl_link_active = 1'b1;
-      -> dl_active_event;
+     // -> dl_active_event;
       `uvm_info("RC_DLCMSM",
          "[DL_ACTIVE] dl_link_active=1 :: dl_active_event_TRIGGERED :: TL_MAY_NOW_SEND_TLPs",UVM_LOW)
    endtask
@@ -395,13 +414,13 @@ class PCIe_RC_DL_model extends uvm_component;
        dllp_content = content;
        form_dl_packet(dcm_item.tlp_data, 1'b0, dcm_item.dlp_flit_out); // is_payload=0
 
-       // ---- LCRC addition: stamp LCRC on this DLCMSM flit before sending, same as any other flit ----
-       if (mode == FLIT_MODE)
-          dcm_item.dl_lcrc = generate_lcrc_flit(dcm_item.dlp_flit_out);
-       else
-          dcm_item.dl_lcrc = generate_lcrc_non_flit(dcm_item.tlp_data, `PCIe_TLP_DATA_BYTE_W);
-       `uvm_info("RC_DLCMSM",$sformatf("DLCMSM_FLIT_LCRC_STAMPED :: dl_lcrc=%08h",dcm_item.dl_lcrc),UVM_LOW)
-       // ---------------------------------------------------------------------------------------------
+// ---- LCRC addition: stamp LCRC on this DLCMSM flit before sending, same as any other flit ----
+        if (dcm_item.pkt_mode == FLIT)
+           dcm_item.dl_lcrc = generate_lcrc_flit(dcm_item.dlp_flit_out);
+        else
+           dcm_item.dl_lcrc = generate_lcrc_non_flit(dcm_item.tlp_data, `PCIe_TLP_DATA_BYTE_W);
+        `uvm_info("RC_DLCMSM",$sformatf("DLCMSM_FLIT_LCRC_STAMPED :: dl_lcrc=%08h",dcm_item.dl_lcrc),UVM_LOW)
+        // ---------------------------------------------------------------------------------------------
 
        dl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
        `uvm_info("RC_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h",content),UVM_LOW)
@@ -948,28 +967,6 @@ class PCIe_RC_DL_model extends uvm_component;
 
   endtask
 
-
-  // DL model consumes TL output, creates the DLP, then publishes to PL.
-  function void write(PCIe_sequence_item item);
-    `uvm_info("RC_DL_MODEL",$sformatf("DL -> PL: item from driver=%p",item.tlp_data),UVM_LOW);
-
-    form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
-
-    // ---- LCRC addition: stamp LCRC based on configured mode ----
-    if (mode == FLIT_MODE) begin
-      item.dl_lcrc = generate_lcrc_flit(item.dlp_flit_out);
-      `uvm_info("LCRC_FLIT_MODE",$sformatf("STAMPED_ON_ITEM :: dl_lcrc=%08h",item.dl_lcrc),UVM_LOW)
-    end
-    else begin
-      int unsigned byte_len;
-      byte_len = (item.tlp_total_dw_count > 0) ? (item.tlp_total_dw_count * 4) : `PCIe_TLP_DATA_BYTE_W;
-      item.dl_lcrc = generate_lcrc_non_flit(item.tlp_data, byte_len);
-      `uvm_info("LCRC_NONFLIT_MODE",$sformatf("STAMPED_ON_ITEM :: bytes_covered=%0d :: dl_lcrc=%08h",byte_len,item.dl_lcrc),UVM_LOW)
-    end
-    // -------------------------------------------------------------
-
-    dl_ap.write(item);
-  endfunction
 
   // =========================================================================
   // PCIe 6.0 Flow Control DLLP Payload Generator

@@ -1,15 +1,15 @@
 //=========================================================================================
 // File         : PCIe_EP_DL_model.sv
-// Project      : PCIe_Gen6
-// Description  : PCIe_environment\PCIe_EP_DL_model.sv
+// Project      : PCIE_Gen6
+// Description  : PCIe_agents\PCIe_EP_controller_agent\PCIe_EP_DL_model.sv
 // Author       : 
-// Date         : 2026-08-14
+// Date         : 2026-09-09
 //=========================================================================================
 
 /**********************************************************************************************************************
 * Copyright by the SILICIOM TECHNOLOGIES PVT LTD,
 * By using, accessing or downloading any part of this file/document,  including by copying, saving,
-* iistributing, displaying or preparing derivatives of,
+* distributing, displaying or preparing derivatives of,
 * you agree to be and are bound to the terms of the SILICIOM TECHNOLOGIES PVT LTD license agreement.
 * All other rights reserved.
 ***********************************************************************************************************************/
@@ -37,7 +37,7 @@ class PCIe_EP_DL_model extends uvm_component;
   tx_buffer_t tx_retry_buffer[$];
 
   // ---- LCRC additions: mode awareness (mirrors PL model pattern) ----
-  pcie_mode_e       mode;
+  // Per-transaction mode comes from item.pkt_mode in write() and check_lcrc_on_rx()
   PCIe_env_config   pcie_ecfg;
   // ---------------------------------------------------------------
 
@@ -81,7 +81,7 @@ class PCIe_EP_DL_model extends uvm_component;
         // ---- DLCMSM additions ----
     dl_state_e          DL_STATE = DL_INACTIVE;
     dl_init_substate_e  dl_init_substate;
-    event               ep_l0_to_dl_event;   // fired by PL model when LTSSM reaches L0
+    //event               ep_l0_to_dl_event;   // fired by PL model when LTSSM reaches L0
     int                 fc1_sent_count, fc1_rcvd_count;
     int                 fc2_sent_count, fc2_rcvd_count;
     bit                 phy_linkup;      
@@ -92,7 +92,7 @@ class PCIe_EP_DL_model extends uvm_component;
     // scattered in a bare while() loop, referenced by every debug print below.
     localparam int NUM_INITFC1_DLLP = 4;   // FC_INIT1 is "done" once this many INITFC1 DLLPs sent
     localparam int NUM_INITFC2_DLLP = 4;   // FC_INIT2 is "done" once this many INITFC2 DLLPs sent
-    event dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
+   // event dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
     bit   dl_link_active;                   // stays 1 while in DL_ACTIVE - TL/driver can gate on this
     // --------------------------------------------------------------------
 
@@ -104,17 +104,13 @@ class PCIe_EP_DL_model extends uvm_component;
     super.build_phase(phase);
     dl_imp = new("dl_imp", this);
     dl_ap = new("dl_ap", this);
-     if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event", ep_l0_to_dl_event))
-      `uvm_fatal("EVENT","ep_l0_to_dl_event not found") 
+  //   if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event", ep_l0_to_dl_event))
+   //   `uvm_fatal("EVENT","ep_l0_to_dl_event not found") 
 
-    // ---- LCRC additions: fetch mode so we know which LCRC path to run ----
+    // ---- LCRC additions: mode comes from transaction (item.pkt_mode) in write() and check_lcrc_on_rx() ----
     if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
       `uvm_fatal("EP_DL_MODEL","Cannot_get_PCIe_env_config");
-    mode = pcie_ecfg.mode;
-    if (mode == FLIT_MODE)
-      `uvm_info("EP_DL_MODEL","LCRC_CONFIGURED_IN_FLIT_MODE",UVM_LOW)
-    else
-      `uvm_info("EP_DL_MODEL","LCRC_CONFIGURED_IN_NON_FLIT_MODE",UVM_LOW)
+    `uvm_info("EP_DL_MODEL","LCRC_MODE_PER_TRANSACTION_FROM_ITEM_PKT_MODE",UVM_LOW)
     // ------------------------------------------------------------------
 
   endfunction
@@ -238,7 +234,8 @@ class PCIe_EP_DL_model extends uvm_component;
   task run_phase(uvm_phase phase);
      `uvm_info("EP_DLCMSM","[DLCMSM_TRACE] WAITING_FOR_ep_l0_to_dl_event (fired by PL model on LTSSM L0 entry)",UVM_LOW)
      forever begin
-        @(ep_l0_to_dl_event);
+        //@(ep_l0_to_dl_event);
+         wait(phy_linkup == 1);
         `uvm_info("EP_DLCMSM","[DLCMSM_TRACE] ep_l0_to_dl_event_FIRED :: LTSSM_REACHED_L0 :: STARTING_DLCMSM_FSM",UVM_LOW)
         DL_STATE       = DL_INACTIVE;
         dl_link_active = 1'b0;
@@ -361,7 +358,7 @@ class PCIe_EP_DL_model extends uvm_component;
     // ---------------- DL_ACTIVE ----------------
     task dlcmsm_state_dl_active();
        dl_link_active = 1'b1;
-       -> dl_active_event;
+       //-> dl_active_event;
        `uvm_info("EP_DLCMSM",
           "[DL_ACTIVE] dl_link_active=1 :: dl_active_event_TRIGGERED :: TL_MAY_NOW_SEND_TLPs",UVM_LOW)
     endtask
@@ -756,7 +753,7 @@ class PCIe_EP_DL_model extends uvm_component;
     bit [`PCIe_DL_LCRC_W-1:0] computed;
     bit pass;
 
-    if (mode == FLIT_MODE) begin
+    if (item.pkt_mode == FLIT) begin
       computed = generate_lcrc_flit(item.dlp_flit_out);
       pass = lcrc_check(computed, item.dl_lcrc, "FLIT");
     end
@@ -932,7 +929,7 @@ class PCIe_EP_DL_model extends uvm_component;
     form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
 
     // ---- LCRC addition: stamp LCRC based on configured mode ----
-    if (mode == FLIT_MODE) begin
+    if (item.pkt_mode == FLIT) begin
       item.dl_lcrc = generate_lcrc_flit(item.dlp_flit_out);
       `uvm_info("LCRC_FLIT_MODE",$sformatf("STAMPED_ON_ITEM :: dl_lcrc=%08h",item.dl_lcrc),UVM_LOW)
     end
