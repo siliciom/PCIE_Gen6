@@ -3,7 +3,7 @@
 // Project      : PCIE_Gen6
 // Description  : PCIe_config\PCIe_env_config.sv
 // Author       : 
-// Date         : 2026-08-14
+// Date         : 2026-09-09
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -13,6 +13,7 @@
 * you agree to be and are bound to the terms of the SILICIOM TECHNOLOGIES PVT LTD license agreement.
 * All other rights reserved.
 ***********************************************************************************************************************/
+
 import typedef_enums :: *;
 class PCIe_env_config extends uvm_object;
 
@@ -45,11 +46,11 @@ class PCIe_env_config extends uvm_object;
    //----------------------------------------
    bit has_subscriber             = 1;
 
-   pcie_mode_e mode;
+   pkt_mode_e mode;
 
    function new(string name="PCIe_env_config");
      super.new(name);
-     mode = FLIT_MODE; //by_default_nothing_is_config
+     mode = FLIT; //by_default_nothing_is_config
    endfunction
    
 endclass
