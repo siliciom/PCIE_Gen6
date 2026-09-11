@@ -54,7 +54,9 @@ package PCIe_pkg;
 	`include "../PCIe_agents/PCIe_EP_top_agent.sv"
 	`include "../PCIe_agents/PCIe_RC_top_agent.sv"
 
+        `include "../PCIe_sequences/PCIe_RC_controller_base_sequence.sv"
 	`include "../PCIe_sequences/PCIe_EP_controller_base_sequence.sv"
+        `include "../PCIe_sequences/PCIe_RC_phy_base_sequence.sv"
 	`include "../PCIe_sequences/PCIe_EP_phy_base_sequence.sv"
 
         `include "../PCIe_sequences/PCIe_RC_3DW_flit_sequence.sv"
@@ -169,8 +171,7 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MemWr_followed_MemRd_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MsgWr_withdata_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MsgWr_withoutdata_sequence.sv"
-	`include "../PCIe_sequences/PCIe_RC_controller_base_sequence.sv"
-	`include "../PCIe_sequences/PCIe_RC_phy_base_sequence.sv"
+	
 
         `include "../PCIe_environment/PCIe_scoreboard.sv"
         `include "../PCIe_environment/PCIe_subscriber.sv"
@@ -178,7 +179,6 @@ package PCIe_pkg;
 
 	`include "../PCIe_tests/PCIe_base_test.sv"
 
-        `include "../PCIe_tests/PCIe_base_test.sv"
         `include "../PCIe_tests/PCIe_3DW_flit_test.sv"
         `include "../PCIe_tests/PCIe_IO_3DW_FLIT_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_electrical_idle_during_training_test.sv"
