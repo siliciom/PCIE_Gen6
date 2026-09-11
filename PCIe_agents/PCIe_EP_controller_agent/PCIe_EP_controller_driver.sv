@@ -115,7 +115,7 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
             bit [`PCIe_MON_DATA_W-1:0] flit_dword;
             flit_dword = {ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+3], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+2], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+1], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+0]};
  	    ep_pl_model.tx_process_executed = 1'b0;
- 	    ep_pl_model.tx_process(flit_dword, scr_data);
+ 	    ep_pl_model.tx_process(flit_dword, scr_data,pcie_seq_item);
                   if (ep_pl_model.tx_process_executed) begin
                      @(posedge ep_pipe_intf_tx.pclk);
                      ep_pipe_intf_tx.tx_data <= scr_data;

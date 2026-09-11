@@ -121,7 +121,7 @@ task run_phase(uvm_phase phase);
             flit_dword = {rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+3], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+2], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+1], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+0]};
   `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_LOW)
  	    rc_pl_model.tx_process_executed = 1'b0;
- 	    rc_pl_model.tx_process(flit_dword, scr_data);
+ 	    rc_pl_model.tx_process(flit_dword, scr_data,pcie_seq_item);
   `uvm_info("SCR_DATA",$sformatf("scr_data is %h :: %d",scr_data,scr_data),UVM_LOW)
                   if (rc_pl_model.tx_process_executed) begin
                      @(posedge rc_pipe_intf_tx.pclk);
