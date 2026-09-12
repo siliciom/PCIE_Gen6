@@ -33,9 +33,10 @@ class PCIe_EP_basic_linkup_L0_sequence extends PCIe_EP_controller_base_sequence;
     if (!pcie_seq_item.randomize() with {
       electrical_idle_test == 1'b0;
       no_receiver_test     == 1'b0;
-      tx_elec_idle == 1'b1;
-      tx_valid     == 1'b0;
-      rate         == 2'b00;
+      tx_elec_idle         == 1'b1;
+      tx_valid             == 1'b0;
+      rate                 == 2'b00;
+      pkt_mode             == FLIT;
     }) begin
       `uvm_error("EP_BASIC_LINKUP_L0_SEQ","EP_basic_linkup_L0_sequence_randomization_failed")
     end

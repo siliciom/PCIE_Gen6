@@ -76,10 +76,14 @@ bit            tx_process_executed;
       if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event",ep_l0_to_dl_event))
              `uvm_fatal("EVENT", "event not found")
        //if(pcie_ecfg.mode == FLIT)
-       if(pcie_seq_item.pkt_mode == FLIT)
-       `uvm_info("RC_PL_MODEL","Configured_in_FLIT_MODE",UVM_LOW)
-       else
-       `uvm_info("RC_PL_MODEL","Configured_in_NON_FLIT_MODE", UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
+    endfunction
+   
+   task reset_phase(uvm_phase phase);
+     phase.raise_objection(this);
+   
+     `uvm_info("PCIE_EP_PL_MODEL",
+               "Entering RESET phase", UVM_LOW)
         polynomial = `PCIe_PL_SCRAMBLER_POLYNOMIAL;
        // polynomial = 23'b01000010000000100100101;
         reset_scrambler();
@@ -87,10 +91,16 @@ bit            tx_process_executed;
         no_receiver_test   = 1'b0;
         detect_fail_count  = 0;
         previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
-      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
-    endfunction
+
+        `uvm_info("PCIE_EP_PL_MODEL","Reset deasserted", UVM_LOW)
+        phase.drop_objection(this);
    
+   endtask
 task ep_ltssm( PCIe_sequence_item pcie_seq_item);
+       if(pcie_seq_item.pkt_mode == FLIT)
+       `uvm_info("RC_PL_MODEL","Configured_in_FLIT_MODE",UVM_LOW)
+       else
+       `uvm_info("RC_PL_MODEL","Configured_in_NON_FLIT_MODE", UVM_LOW)
         no_receiver_test = pcie_seq_item.no_receiver_test;
         forever begin
            case (ep_main_state)

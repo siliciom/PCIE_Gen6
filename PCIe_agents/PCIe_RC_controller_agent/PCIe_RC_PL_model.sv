@@ -85,25 +85,52 @@ class PCIe_RC_PL_model extends uvm_component;
        if (!uvm_config_db#(event)::get(this, "", "PCIE_rc_l0_to_dl_event",rc_l0_to_dl_event))
               `uvm_fatal("EVENT", "event not found")
         //if(pcie_ecfg.mode == FLIT)
+        // LTSSM Initial State
+       // rc_main_state   = DETECT;
+       // rc_detect_state = DETECT_QUIET;
+       // electrical_idle_test_done = 1'b0;
+       // no_receiver_test   = 1'b0;
+       // detect_fail_count  = 0;
+       //`uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
+       // polynomial = `PCIe_PL_SCRAMBLER_POLYNOMIAL;
+       // //polynomial = 23'b01000010000000100100101;
+       // reset_scrambler();
+       // previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
+        `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
+   endfunction
+
+   task reset_phase(uvm_phase phase);
+   
+     phase.raise_objection(this);
+   
+     `uvm_info("PCIE_RC_PL_MODEL",
+               "Entering RESET phase", UVM_LOW)
+   
+     // Initialize model state
+     rc_main_state             = DETECT;
+     rc_detect_state           = DETECT_QUIET;
+     electrical_idle_test_done = 1'b0;
+     no_receiver_test           = 1'b0;
+     detect_fail_count         = 0;
+   
+     polynomial     = `PCIe_PL_SCRAMBLER_POLYNOMIAL;
+     reset_scrambler();
+     previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
+   
+     // Hold model in reset
+    // wait (rc_pipe_intf_rx.rst_n == 1'b1);
+   
+     `uvm_info("PCIE_RC_PL_MODEL","Reset deasserted", UVM_LOW)
+   
+     phase.drop_objection(this);
+   
+   endtask
+
+   task rc_ltssm(PCIe_sequence_item  pcie_seq_item);
         if(pcie_seq_item.pkt_mode == FLIT)
          `uvm_info("RC_PL_MODEL","Configured_in_FLIT_MODE",UVM_LOW)
         else
          `uvm_info("RC_PL_MODEL","Configured_in_NON_FLIT_MODE", UVM_LOW)
-        // LTSSM Initial State
-        rc_main_state   = DETECT;
-        rc_detect_state = DETECT_QUIET;
-        electrical_idle_test_done = 1'b0;
-        no_receiver_test   = 1'b0;
-        detect_fail_count  = 0;
-       `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
-        polynomial = `PCIe_PL_SCRAMBLER_POLYNOMIAL;
-        //polynomial = 23'b01000010000000100100101;
-        reset_scrambler();
-        previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
-        `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
-   endfunction
-
-   task rc_ltssm(PCIe_sequence_item  pcie_seq_item);
         no_receiver_test = pcie_seq_item.no_receiver_test;
         forever begin
            case (rc_main_state)

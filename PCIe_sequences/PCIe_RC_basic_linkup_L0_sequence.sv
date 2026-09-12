@@ -33,9 +33,10 @@ class PCIe_RC_basic_linkup_L0_sequence extends PCIe_RC_controller_base_sequence;
     if (!pcie_seq_item.randomize() with {
       electrical_idle_test == 1'b0;
       no_receiver_test     == 1'b0;
-      tx_elec_idle == 1'b1;
-      tx_valid     == 1'b0;
-      rate         == 3'b000;
+      tx_elec_idle         == 1'b1;
+      tx_valid             == 1'b0;
+      rate                 == 3'b000;
+      pkt_mode             == FLIT;
     }) begin
       `uvm_error("RC_BASIC_LINKUP_L0_SEQ","RC_basic_linkup_L0_sequence_randomization_failed")
     end
