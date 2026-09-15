@@ -62,31 +62,6 @@ task run_phase(uvm_phase phase);
   `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
       `uvm_info("RC_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",rc_dl_model.DL_STATE.name()),UVM_LOW)
   forever begin
-	 // if(!rc_pl_model.link_up) begin
-         //    rc_pl_model.rc_ltssm();
-         // end
-    // wait(rc_pl_model.link_up==1)
-    // if (rc_dl_model.RC_REPLAY_IN_PROGRESS) begin
-    //    phase.raise_objection(this, "REPLAY");
-    //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_REPLAY_SECTION",UVM_LOW)
-    //  handle_replay_request(rc_dl_model.TX_REPLAY_FLIT_SEQ_NUM);
-    //    phase.drop_objection(this, "REPLAY");
-    //end
-    //else if (rc_dl_model.NAK_SCHEDULED) begin
-    //    phase.raise_objection(this, "NACK");
-    //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NACK_SECTION",UVM_LOW)
-    //    phase.drop_objection(this, "NACK");
-    //end
-    //else if (rc_dl_model.ACK_SCHEDULED) begin
-    //    phase.raise_objection(this, "ACK");
-    //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_ACK_SECTION",UVM_LOW)
-    //  rc_dl_model.form_dl_packet(tlp_data,0,dl_flit_out);
-    //  ack_item.dlp_flit_out = dl_flit_out;
-    //  rc_dl_model.dl_ap.write(ack_item);
-    //  drive_flit();
-    //   phase.drop_objection(this, "ACK");
-    //end
-    ////else
     begin
       seq_item_port.try_next_item(pcie_seq_item);
       if (pcie_seq_item != null) begin
@@ -94,6 +69,28 @@ task run_phase(uvm_phase phase);
 	//pcie_seq_item.print();
         rc_pl_model.rc_ltssm(pcie_seq_item);
         `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+         // wait(rc_pl_model.link_up==1)
+         // if (rc_dl_model.RC_REPLAY_IN_PROGRESS) begin
+         //    phase.raise_objection(this, "REPLAY");
+         //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_REPLAY_SECTION",UVM_LOW)
+         //  handle_replay_request(rc_dl_model.TX_REPLAY_FLIT_SEQ_NUM);
+         //    phase.drop_objection(this, "REPLAY");
+         //end
+         //else if (rc_dl_model.NAK_SCHEDULED) begin
+         //    phase.raise_objection(this, "NACK");
+         //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NACK_SECTION",UVM_LOW)
+         //    phase.drop_objection(this, "NACK");
+         //end
+         //else if (rc_dl_model.ACK_SCHEDULED) begin
+         //    phase.raise_objection(this, "ACK");
+         //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_ACK_SECTION",UVM_LOW)
+         //  rc_dl_model.form_dl_packet(tlp_data,0,dl_flit_out);
+         //  ack_item.dlp_flit_out = dl_flit_out;
+         //  rc_dl_model.dl_ap.write(ack_item);
+         //  drive_flit();
+         //   phase.drop_objection(this, "ACK");
+         //end
+         ////else
         //tx_ap.write(pcie_seq_item);
        // if (!pcie_seq_item.electrical_idle_test) begin
          // drive_flit();

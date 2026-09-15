@@ -144,7 +144,7 @@ task ep_ltssm( PCIe_sequence_item pcie_seq_item);
                    end
                 endcase
              end
-CONFIGURATION: begin
+            CONFIGURATION: begin
                  `uvm_info("EP_LTSSM","EP_LTSSM_STATE_CONFIGURATION",UVM_LOW)
                  case (ep_cfg_state)
                     LINKWIDTH_START: begin
@@ -175,9 +175,10 @@ CONFIGURATION: begin
               end
              L0: begin
                 `uvm_info("EP_LTSSM","EP_LTSSM_STATE_L0",UVM_LOW)
+		         
 		         ep_state_l0(pcie_seq_item);
 		         break;
-             end
+                  end
              default: begin
                 `uvm_error("EP_LTSSM","INVALID_EP_LTSSM_STATE")
              end
@@ -550,6 +551,7 @@ task ep_state_config_complete();
     task ep_state_l0(PCIe_sequence_item item);
 
         `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+	  item.print();
         `uvm_info("EP_LTSSM","LTSSM_STATE=L0",UVM_LOW)
         `uvm_info("EP_LTSSM","ENTERING_L0_STATE",UVM_LOW)
         `uvm_info("EP_LTSSM","==========================================",UVM_LOW)

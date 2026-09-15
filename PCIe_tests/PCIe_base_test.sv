@@ -70,7 +70,7 @@ class PCIe_base_test extends uvm_test;
     svr = uvm_report_server::get_server();
     if(svr.get_severity_count(UVM_FATAL) + svr.get_severity_count(UVM_ERROR) > 0) begin
      `uvm_info(get_type_name(), "----------------------------------------------------------------------------------- ", UVM_NONE)    
-     `uvm_info(get_type_name(), "  ######## ########  ######  ########    ########    ###    #### ##       ", UVM_NONE) 
+     `uvm_info(get_type_name(), "       ######## ########  ######  ########    ########    ###    #### ##       ", UVM_NONE) 
      `uvm_info(get_type_name(), "	   ##    ##       ##    ##    ##       ##         ## ##    ##  ##       ", UVM_NONE)
      `uvm_info(get_type_name(), "	   ##    ##       ##          ##       ##        ##   ##   ##  ##       ", UVM_NONE)
      `uvm_info(get_type_name(), "	   ##    ######    ######     ##       ######   ##     ##  ##  ##       ", UVM_NONE)
