@@ -147,6 +147,7 @@ function void write(PCIe_sequence_item item);
   end
   // -------------------------------------------------------------
 
+  `uvm_info("RC_DL_MODEL","SENT_DLP_TO_PL_236B", UVM_LOW)
   dlp_pl_ap.write(item);
 endfunction
 
@@ -661,6 +662,7 @@ endfunction
 
     last_flit_was_payload = is_payload;
 
+    print_dlp(dlp);
     // Assemble Output
     for(int i=0;i<`PCIe_TLP_DATA_BYTE_W;i++)
       dl_flit_out[i] = tlp_data[i];
@@ -673,6 +675,66 @@ endfunction
     store_tx_retry_buffer(tlp_data,seq_num_to_send);
   endtask
 
+
+  //--------------------------------------------------------------------------
+  // ADDITIONAL DEBUG ONLY: Print complete DLP and individual DLP fields.
+  // Existing model code is intentionally unchanged.
+  //--------------------------------------------------------------------------
+  function void print_dlp(bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp);
+
+    string dump;
+
+    dump = $sformatf({"\n",
+      "         ============================================================\n",
+      "                           DLP PACKET FORMAT \n",
+      "         ============================================================\n",
+      "         DLP SIZE : %0d bytes\n",
+      "         ------------------------------------------------------------\n",
+      "         COMPLETE DLP BYTES:\n",
+      "         ------------------------------------------------------------\n",
+      "           DLP[0] = %02h\n",
+      "           DLP[1] = %02h\n",
+      "           DLP[2] = %02h\n",
+      "           DLP[3] = %02h\n",
+      "           DLP[4] = %02h\n",
+      "           DLP[5] = %02h\n",
+      "         ------------------------------------------------------------\n",
+      "         DLP0 FIELDS:\n",
+      "         ------------------------------------------------------------\n",
+      "           FLIT_USAGE        [%0d:%0d] = %02h\n",
+      "           LAST_FLIT_PAYLOAD [%0d]    = %0b\n",
+      "           DLLP_TYPE         [%0d]    = %0b\n",
+      "           REPLAY_CMD        [%0d:%0d] = %02h\n",
+      "           SEQ_NUM[%0d:%0d]  [%0d:%0d] = %02h\n",
+      "         ------------------------------------------------------------\n",
+      "         DLP1 FIELDS:\n",
+      "         ------------------------------------------------------------\n",
+      "           SEQ_NUM[%0d:%0d]  [%0d:%0d] = %02h\n",
+      "         ------------------------------------------------------------\n",
+      "         DLP2-DLP5 DLLP CONTENT:\n",
+      "         ------------------------------------------------------------\n",
+      "           DLLP_CONTENT[31:24] = %02h\n",
+      "           DLLP_CONTENT[23:16] = %02h\n",
+      "           DLLP_CONTENT[15:8]  = %02h\n",
+      "           DLLP_CONTENT[7:0]   = %02h\n",
+      "           DLLP_CONTENT        = %08h\n",
+      "         ============================================================\n"},
+      `PCIe_DLP_BYTE_W,
+      dlp[0], dlp[1], dlp[2], dlp[3], dlp[4], dlp[5],
+
+      `PCIe_DLP0_FLIT_USAGE_HI, `PCIe_DLP0_FLIT_USAGE_LO, dlp[0][7:6],
+      `PCIe_DLP0_LAST_FLIT_PAYLOAD, dlp[0][5],
+      `PCIe_DLP0_DLLP_TYPE, dlp[0][4],
+      `PCIe_DLP0_REPLAY_CMD_HI, `PCIe_DLP0_REPLAY_CMD_LO, dlp[0][3:2],
+      `PCIe_SEQ_NUM_W-1, `PCIe_SEQ_NUM_W-2, 1, 0, {dlp[0][1:0]},
+      `PCIe_SEQ_NUM_W-3, 0, 7, 0, dlp[1],
+
+      dlp[2], dlp[3], dlp[4], dlp[5],
+      {dlp[2], dlp[3], dlp[4], dlp[5]});
+
+    `uvm_info("RC_DL_DLP_DUMP", dump, UVM_LOW)
+
+  endfunction
 
   // Create NOP2 DLLP
   task create_no2_dllp(output bit [`PCIe_DLLP_CONTENT_W-1:0] dllp_content);

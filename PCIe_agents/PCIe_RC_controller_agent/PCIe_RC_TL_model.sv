@@ -140,6 +140,7 @@ class PCIe_RC_TL_model extends uvm_component;
                  tr.pkt_mode.name(), src.size(), nbytes), UVM_LOW)
 
     print_tlp_data(tr);
+    print_full_packet(tr);
 
   endfunction
 
@@ -168,6 +169,110 @@ class PCIe_RC_TL_model extends uvm_component;
     end
 
     `uvm_info("TL_TO_DL_236B", dump, UVM_LOW)
+
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // Dump full packet fields separately.
+  // Existing 236-byte tlp_data dump is retained.
+  //
+  // NON-FLIT : Header + Payload + LCRC
+  // FLIT     : Header + Payload; LCRC is part of the FLIT CRC mechanism and
+  //            is not part of the 236-byte TLP region.
+  //--------------------------------------------------------------------------
+  virtual function void print_full_packet(PCIe_sequence_item tr);
+
+    string line;
+    string dump;
+    int    b;
+
+    dump = $sformatf({"\n",
+      "         ************************************************************\n",
+      "                          TLP FULL PACKET\n",
+      "         ************************************************************\n",
+      "         Packet Mode     : %s\n",
+      "         Header          : %0d DW / %0d bytes\n",
+      "         Payload         : %0d DW / %0d bytes\n"},
+      (tr.pkt_mode == FLIT) ? "FLIT" : "NON-FLIT",
+      tr.tlp_header_dw_count,
+      tr.tlp_header_dw_count * `PCIe_TL_DW_BYTES,
+      tr.tlp_payload_dw_count,
+      tr.tlp_payload_dw_count * `PCIe_TL_DW_BYTES);
+
+    // HEADER BYTES
+    dump = {dump,
+      "         ------------------------------------------------------------\n",
+      "         HEADER BYTES\n",
+      "         ------------------------------------------------------------\n"};
+    line = "";
+
+    for (b = 0;
+         b < (tr.tlp_header_dw_count * `PCIe_TL_DW_BYTES);
+         b++) begin
+
+      if ((b % `PCIe_FLIT_DUMP_BPL) == 0)
+        line = $sformatf("           [%3d] :", b);
+
+      line = {line, $sformatf(" %02h", tr.tlp_data[b])};
+
+      if (((b % `PCIe_FLIT_DUMP_BPL) == `PCIe_FLIT_DUMP_BPL-1) ||
+          (b == (tr.tlp_header_dw_count * `PCIe_TL_DW_BYTES)-1))
+        dump = {dump, line, "\n"};
+    end
+
+    // PAYLOAD BYTES
+    dump = {dump,
+      "         ------------------------------------------------------------\n",
+      "         PAYLOAD BYTES\n",
+      "         ------------------------------------------------------------\n"};
+
+    if (tr.tlp_payload_dw_count == 0) begin
+      dump = {dump, "           <none>\n"};
+    end
+    else begin
+      line = "";
+
+      for (b = (tr.tlp_header_dw_count * `PCIe_TL_DW_BYTES);
+           b < ((tr.tlp_header_dw_count + tr.tlp_payload_dw_count) *
+                `PCIe_TL_DW_BYTES);
+           b++) begin
+
+        if ((b % `PCIe_FLIT_DUMP_BPL) == 0)
+          line = $sformatf("           [%3d] :", b);
+
+        line = {line, $sformatf(" %02h", tr.tlp_data[b])};
+
+        if (((b % `PCIe_FLIT_DUMP_BPL) == `PCIe_FLIT_DUMP_BPL-1) ||
+            (b == ((tr.tlp_header_dw_count + tr.tlp_payload_dw_count) *
+                   `PCIe_TL_DW_BYTES)-1))
+          dump = {dump, line, "\n"};
+      end
+    end
+
+    // LCRC BYTES
+    dump = {dump,
+      "         ------------------------------------------------------------\n",
+      "         LCRC BYTES\n",
+      "         ------------------------------------------------------------\n"};
+
+    if (tr.pkt_mode == FLIT) begin
+      dump = {dump,
+        "           < LCRC not valid for FLIT mode >\n"};
+    end
+    else begin
+      dump = {dump,
+        $sformatf(
+          "           Byte range : [%0d:%0d] = %0d bytes\n",
+          (tr.tlp_header_dw_count + tr.tlp_payload_dw_count) *
+            `PCIe_TL_DW_BYTES,
+          ((tr.tlp_header_dw_count + tr.tlp_payload_dw_count) *
+            `PCIe_TL_DW_BYTES) +
+            (`PCIe_DL_LCRC_W / `PCIe_BYTE_W) - 1,
+          `PCIe_DL_LCRC_W / `PCIe_BYTE_W),
+        "           Value      : <LCRC_generation_not_present_in_RC_TL_model>\n"};
+    end
+
+    `uvm_info("FULL_PACKET", dump, UVM_LOW)
 
   endfunction
 
