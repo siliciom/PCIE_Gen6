@@ -496,6 +496,31 @@ class PCIe_sequence_item extends uvm_sequence_item;
     if (mem_deferrable) dir == PCIe_TL_WRITE;
   }
 
+  constraint c_cfg_fields {
+    if (txn_type != PCIe_TL_CFG) {
+      cfg_reg_num     == '0;
+      cfg_ext_reg_num == '0;
+      cfg_bus_num     == '0;
+      cfg_dev_num     == '0;
+      cfg_fn_num      == '0;
+      cfg_type1       == 1'b0;
+    }
+  }
+  
+  constraint c_io_fields {
+    if (txn_type != PCIe_TL_IO) {
+      io_data == '0;
+    }
+  }
+  
+  constraint c_msg_fields {
+    if (txn_type != PCIe_TL_MSG) {
+      msg_code      == '0;
+      msg_route     == PCIe_MSG_ROUTE_TO_RC;
+      msg_has_data  == 1'b0;
+    }
+  }
+
   function new(string name="PCIE_sequence_item");
     super.new(name);
   endfunction

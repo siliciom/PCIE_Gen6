@@ -20,8 +20,8 @@ class PCIe_RC_DL_model extends uvm_component;
   `uvm_component_utils(PCIe_RC_DL_model)
 
   // TL -> DL and DL -> PL TLM connections.
-  uvm_analysis_imp #(PCIe_sequence_item,PCIe_RC_DL_model) dl_imp;
-  uvm_analysis_port #(PCIe_sequence_item) dl_ap;
+  uvm_analysis_imp #(PCIe_sequence_item,PCIe_RC_DL_model) tlp_dl_imp;
+  uvm_analysis_port #(PCIe_sequence_item) dlp_pl_ap;
 
   bit [`PCIe_DLLP_CONTENT_W-1:0] dllp_content;
   bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
@@ -114,8 +114,8 @@ class PCIe_RC_DL_model extends uvm_component;
 
 function void build_phase(uvm_phase phase);
     super.build_phase(phase);
-    dl_imp = new("dl_imp",this);
-    dl_ap = new("dl_ap",this);
+    tlp_dl_imp = new("tlp_dl_imp",this);
+    dlp_pl_ap = new("dlp_pl_ap",this);
      if (!uvm_config_db#(event)::get(this, "", "PCIE_rc_l0_to_dl_event", rc_l0_to_dl_event))
        `uvm_fatal("EVENT","rc_l0_to_dl_event not found") 
 
@@ -147,7 +147,7 @@ function void write(PCIe_sequence_item item);
   end
   // -------------------------------------------------------------
 
-  dl_ap.write(item);
+  dlp_pl_ap.write(item);
 endfunction
 
 
@@ -339,7 +339,7 @@ endfunction
      ctl_item.pkt_mode = link_mode;
      form_dl_packet(ctl_item.tlp_data, 1'b0, ctl_item.dlp_flit_out);
      stamp_dl_lcrc(ctl_item);
-     dl_ap.write(ctl_item);
+     dlp_pl_ap.write(ctl_item);
   endtask
 
   // Re-sends flits from the TX retry buffer that the peer has NAKed.
@@ -369,7 +369,7 @@ endfunction
      r_item.pkt_mode = link_mode;
      form_dl_packet(r_item.tlp_data, 1'b1, r_item.dlp_flit_out);
      stamp_dl_lcrc(r_item);
-     dl_ap.write(r_item);
+     dlp_pl_ap.write(r_item);
   endtask
 
   // Stamps LCRC on an outgoing item exactly like write()/send_dllp_flit().
@@ -505,7 +505,7 @@ endfunction
    endtask
 
     // Builds a NOP/DLLP-only flit (is_payload=0) with given dllp_content and
-    // pushes it through the SAME path normal flits use (dl_ap -> PL model)
+    // pushes it through the SAME path normal flits use (dlp_pl_ap -> PL model)
     task send_dllp_flit(bit [31:0] content);
        PCIe_sequence_item dcm_item;
        dcm_item = PCIe_sequence_item::type_id::create("dcm_item");
@@ -520,7 +520,7 @@ endfunction
         `uvm_info("RC_DLCMSM",$sformatf("DLCMSM_FLIT_LCRC_STAMPED :: dl_lcrc=%08h",dcm_item.dl_lcrc),UVM_LOW)
         // ---------------------------------------------------------------------------------------------
 
-       dl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
+       dlp_pl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
        `uvm_info("RC_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h",content),UVM_LOW)
     endtask
   // =========================================================================

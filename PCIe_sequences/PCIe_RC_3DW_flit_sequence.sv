@@ -37,11 +37,14 @@ class PCIe_RC_3DW_flit_sequence extends PCIe_RC_controller_base_sequence;
     pcie_seq_item = PCIe_sequence_item::type_id::create("mwr_3dw");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
+
+         // LTSSM information
          electrical_idle_test == 1'b0;
          no_receiver_test     == 1'b0;
          tx_elec_idle         == 1'b1;
          pkt_mode             == FLIT;
 
+         // Memory transaction information
          txn_type == PCIe_TL_MEM;
          dir      == PCIe_TL_WRITE;
 
@@ -56,23 +59,33 @@ class PCIe_RC_3DW_flit_sequence extends PCIe_RC_controller_base_sequence;
          //   12 + 224 = 236 bytes
          //length == 10'd5;
          length == 10'd02;
-
-                 // OHC-A1 is NOT emitted (see flit_ohc_c / determine_ohc_a).
+         // OHC-A1 is NOT emitted (see flit_ohc_c / determine_ohc_a).
          first_dw_be == 4'b1110;
          last_dw_be  == 4'hF;
-
          // Not a poisoned TLP - ep is rand and unconstrained in the item,
          // so without this it randomizes to 1 about half the time.
          ep == 1'b0;
-
          tag          == 14'h0010;
          requester_id == 16'h0100;
-
          tc   == 3'h0;
          ts   == 3'b000;
          attr == 3'b000;
-
-         at == 2'b00;   
+         at == 2'b00;  
+         // Configuration fields MUST be zero for MEM transaction
+         cfg_reg_num          == '0;
+         cfg_ext_reg_num      == '0;
+         cfg_bus_num          == '0;
+         cfg_dev_num          == '0;
+         cfg_fn_num           == '0;
+         cfg_type1            == 1'b0;
+   
+         // IO fields MUST be zero for MEM transaction
+         io_data              == '0;
+   
+         // Message fields MUST be zero/default for MEM transaction
+         msg_code             == '0;
+         msg_route            == PCIe_MSG_ROUTE_TO_RC;
+         msg_has_data         == 1'b0; 
        })
       `uvm_error("RC_3DW","randomize failed for 3DW MWr")
 

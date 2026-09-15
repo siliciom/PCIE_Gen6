@@ -47,9 +47,9 @@ class PCIe_RC_controller_agent extends uvm_agent;
           super.connect_phase(phase);
           rc_controller_driver.seq_item_port.connect(rc_controller_sequencer.seq_item_export);
 	  // RC_DRIVER -> TL -> DL -> PL Connection
-	 rc_controller_driver.tx_ap.connect(rc_tl_model.tl_imp);
-         rc_tl_model.tl_ap.connect(rc_dl_model.dl_imp);
-         rc_dl_model.dl_ap.connect(rc_pl_model.pl_imp);
+	 rc_controller_driver.tx_tl_ap.connect(rc_tl_model.tx_tl_imp);
+         rc_tl_model.tlp_dl_ap.connect(rc_dl_model.tlp_dl_imp);
+         rc_dl_model.dlp_pl_ap.connect(rc_pl_model.dlp_pl_imp);
         `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
       endfunction
   

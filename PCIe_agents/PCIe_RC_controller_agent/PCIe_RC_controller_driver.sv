@@ -17,7 +17,7 @@
 class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
   
   `uvm_component_utils(PCIe_RC_controller_driver)
-   uvm_analysis_port #(PCIe_sequence_item) tx_ap;
+   uvm_analysis_port #(PCIe_sequence_item) tx_tl_ap;
    uvm_analysis_port #(PCIe_sequence_item) ltssm_ap;
   
    PCIe_sequence_item            pcie_seq_item;
@@ -33,13 +33,11 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
   bit[0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
   bit[0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data;
 
-
-
    virtual PCIe_RC_interface     rc_pipe_intf_tx, rc_pipe_intf_rx;	
 	
    function new(string name="PCIe_RC_controller_driver", uvm_component parent);
      super.new(name,parent);
-     tx_ap=new("tx_ap",this);
+     tx_tl_ap=new("tx_tl_ap",this);
    endfunction
 
    function void build_phase(uvm_phase phase);
@@ -71,7 +69,7 @@ task run_phase(uvm_phase phase);
           rc_dl_model.phy_linkup = rc_pl_model.link_up;
           drive_flit(pcie_seq_item);
           `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-          tx_ap.write(pcie_seq_item);
+          tx_tl_ap.write(pcie_seq_item);
         end
         seq_item_port.item_done();
      end
@@ -81,33 +79,7 @@ task run_phase(uvm_phase phase);
           #1ns;
         end
      end
-     /*else begin
-        // Link is up: route normal TLPs through TL -> DL -> PL and push the
-        // resulting flit onto the PIPE interface.
-        rc_dl_model.phy_linkup = rc_pl_model.link_up;
-        seq_item_port.try_next_item(pcie_seq_item);
-        if (pcie_seq_item != null) begin
-          if (rc_pl_model.pl_sent && !pcie_seq_item.electrical_idle_test) begin
-             `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-            drive_flit(pcie_seq_item);
-            `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-            tx_ap.write(pcie_seq_item);
-          end
-          seq_item_port.item_done();
-        end
-        else begin
-          if (rc_pl_model.pl_sent) begin
-            drive_flit(pcie_seq_item);
-          end
-          else begin
-            #1ns;
-          end
-        end*/
-    // end
-  //end
   endtask
-
-  
 
   // Drive the flit task
   task drive_flit(PCIe_sequence_item pcie_seq_item);
@@ -147,12 +119,12 @@ rc_pl_model.tx_process_executed = 1'b0;
       // Handle Replay Types
       if(rc_dl_model.REPLAY_SCHEDULED_TYPE==STANDARD_REPLAY) begin
         if(replayed_item.seq_num>=N) begin
-          tx_ap.write(replayed_item);
+          tx_tl_ap.write(replayed_item);
           `uvm_info("RC_CONTROLLER","writing on the port now....",UVM_LOW)
         end
       end
       else if(rc_dl_model.REPLAY_SCHEDULED_TYPE==SELECTIVE_REPLAY) begin
-        tx_ap.write(replayed_item);
+        tx_tl_ap.write(replayed_item);
         break;
       end
     end

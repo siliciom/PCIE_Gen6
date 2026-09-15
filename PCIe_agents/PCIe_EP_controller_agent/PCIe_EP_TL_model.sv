@@ -118,7 +118,10 @@ class PCIe_EP_TL_model extends uvm_component;
     if (uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
       tl_pkt_mode = pcie_ecfg.mode;
     void'(uvm_config_db#(pkt_mode_e)::get(this, "", "EP_TL_PKT_MODE", tl_pkt_mode));
+  endfunction
 
+   task reset_phase(uvm_phase phase);
+     phase.raise_objection(this);
     clear_all_memories();
 
     `uvm_info("EP_TL_MODEL",
@@ -136,8 +139,9 @@ class PCIe_EP_TL_model extends uvm_component;
         `PCIe_TL_MEM4DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_MEM4DW_DEPTH*4,
         `PCIe_TL_IO3DW_DEPTH,  `PCIe_TL_MEM_DATA_W, `PCIe_TL_IO3DW_DEPTH*4), UVM_LOW)
 
-    `uvm_info("EP_TL_MODEL","EXIT_FROM_EP_TL_MODEL_BUILD_PHASE",UVM_LOW)
-  endfunction
+    `uvm_info("EP_TL_MODEL","EXIT_FROM_EP_TL_MODEL_RESET_PHASE",UVM_LOW)
+     phase.drop_objection(this);
+   endtask
 
   function void clear_all_memories();
     for (int i = 0; i < `PCIe_TL_MEM3DW_DEPTH; i++) mem3dw[i] = `PCIe_TL_MEM_INIT_VALUE;

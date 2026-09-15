@@ -24,9 +24,9 @@ class PCIe_RC_TL_model extends uvm_component;
   // TLM ports  (names kept identical to the integration environment)
   //--------------------------------------------------------------------------
   // Input from RC controller driver.
-  uvm_analysis_imp #(PCIe_sequence_item, PCIe_RC_TL_model) tl_imp;
+  uvm_analysis_imp #(PCIe_sequence_item, PCIe_RC_TL_model) tx_tl_imp;
   // Output toward RC DL model.
-  uvm_analysis_port #(PCIe_sequence_item) tl_ap;
+  uvm_analysis_port #(PCIe_sequence_item) tlp_dl_ap;
 
   PCIe_sequence_item item;
 
@@ -49,13 +49,13 @@ class PCIe_RC_TL_model extends uvm_component;
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
     `uvm_info("RC_TL_MODEL","ENTERED_INTO_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
-     tl_imp = new("tl_imp", this);
-     tl_ap  = new("tl_ap",  this);
+     tx_tl_imp = new("tx_tl_imp", this);
+     tlp_dl_ap  = new("tlp_dl_ap",  this);
     `uvm_info("RC_TL_MODEL","EXIT_FROM_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
   endfunction
 
   //--------------------------------------------------------------------------
-  // FUNCTION: write (tl_imp) - entry point from the RC controller driver.
+  // FUNCTION: write (tx_tl_imp) - entry point from the RC controller driver.
   //--------------------------------------------------------------------------
   virtual function void write(PCIe_sequence_item tr);
     `uvm_info("RC_TL_MODEL", $sformatf("RECEIVED_TL_PAYLOAD_FROM_RC_CONTROLLER_DRIVER %s", tr.pkt_mode.name()), UVM_LOW)
@@ -97,7 +97,7 @@ class PCIe_RC_TL_model extends uvm_component;
     pack_to_tlp_data(tr);
 
     `uvm_info(get_type_name(), "[TL->DL] TLP_SENT_TO_DL", UVM_MEDIUM);
-     tl_ap.write(tr);
+     tlp_dl_ap.write(tr);
 
   endfunction
 

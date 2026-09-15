@@ -35,6 +35,8 @@ class PCIe_EP_3DW_flit_sequence extends PCIe_EP_controller_base_sequence;
 
     // 3DW Memory Write (MWr_32)
     pcie_seq_item = PCIe_sequence_item::type_id::create("mwr_3dw");
+    pcie_seq_item.txn_type.rand_mode(0);
+    pcie_seq_item.dir.rand_mode(0);
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          electrical_idle_test == 1'b0;
@@ -43,38 +45,6 @@ class PCIe_EP_3DW_flit_sequence extends PCIe_EP_controller_base_sequence;
          tx_valid             == 1'b0;
          rate                 == 3'b000;
          pkt_mode             == FLIT;
-
-         //txn_type == PCIe_TL_MEM;
-         //dir      == PCIe_TL_WRITE;
-
-         //mem_locked     == 1'b0;
-         //mem_deferrable == 1'b0;
-
-         //// 32-bit address
-         //address == {32'h0, mem_addr_32};
-
-         //// Payload sized to fill the 236 byte FLIT TLP region.
-         ////   Header Base 3 DW (12 B) + no OHC-A1  ->  payload = 224 B = 56 DW
-         ////   12 + 224 = 236 bytes
-         ////length == 10'd5;
-         //length == 10'd56;
-
-         //        // OHC-A1 is NOT emitted (see flit_ohc_c / determine_ohc_a).
-         //first_dw_be == 4'b1110;
-         //last_dw_be  == 4'hF;
-
-         //// Not a poisoned TLP - ep is rand and unconstrained in the item,
-         //// so without this it randomizes to 1 about half the time.
-         //ep == 1'b0;
-
-         //tag          == 14'h0010;
-         //requester_id == 16'h0100;
-
-         //tc   == 3'h0;
-         //ts   == 3'b000;
-         //attr == 3'b000;
-
-         //at == 2'b00;   
        })
       `uvm_error("EP_3DW","randomize failed for 3DW MWr")
 

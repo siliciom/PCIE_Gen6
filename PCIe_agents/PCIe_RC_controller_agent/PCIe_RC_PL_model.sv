@@ -64,12 +64,12 @@ class PCIe_RC_PL_model extends uvm_component;
    localparam bit [7:0] PAD_BYTE             = 8'hFF;
 
   // Input from RC DL model.
-   uvm_analysis_imp #(PCIe_sequence_item, PCIe_RC_PL_model) pl_imp;
+   uvm_analysis_imp #(PCIe_sequence_item, PCIe_RC_PL_model) dlp_pl_imp;
    uvm_analysis_imp #(PCIe_sequence_item, PCIe_RC_PL_model) ltssm_imp;
 
    function new(string name="PCIe_RC_PL_model",uvm_component parent);
       super.new(name,parent);
-      pl_imp=new("pl_imp",this);
+      dlp_pl_imp=new("dlp_pl_imp",this);
    endfunction
 
    function void build_phase(uvm_phase phase);
@@ -102,8 +102,7 @@ class PCIe_RC_PL_model extends uvm_component;
    
      phase.raise_objection(this);
    
-     `uvm_info("PCIE_RC_PL_MODEL",
-               "Entering RESET phase", UVM_LOW)
+     `uvm_info("PCIE_RC_PL_MODEL","Entering RESET phase", UVM_LOW)
    
      // Initialize model state
      rc_main_state             = DETECT;
