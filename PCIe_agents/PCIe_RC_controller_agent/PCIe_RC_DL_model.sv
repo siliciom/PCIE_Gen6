@@ -370,6 +370,7 @@ endfunction
      r_item.pkt_mode = link_mode;
      form_dl_packet(r_item.tlp_data, 1'b1, r_item.dlp_flit_out);
      stamp_dl_lcrc(r_item);
+     `uvm_info("RC_DL_MODEL",$sformatf("SENDING_DLP_TO_PL_MODEL"),UVM_LOW)
      dlp_pl_ap.write(r_item);
   endtask
 
@@ -663,7 +664,8 @@ endfunction
     last_flit_was_payload = is_payload;
 
     print_dlp(dlp);
-    // Assemble Output
+    print_dlp_tlp_seq_ecrc(tlp_data,dlp,'0);
+  // Assemble Output
     for(int i=0;i<`PCIe_TLP_DATA_BYTE_W;i++)
       dl_flit_out[i] = tlp_data[i];
 
@@ -674,6 +676,50 @@ endfunction
 
     store_tx_retry_buffer(tlp_data,seq_num_to_send);
   endtask
+
+  
+  //--------------------------------------------------------------------------
+  // ADDITIONAL DEBUG ONLY: TLP + Sequence Number + ECRC style dump.
+  // Existing model code is intentionally unchanged.
+  //--------------------------------------------------------------------------
+  function void print_dlp_tlp_seq_ecrc(
+    input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,
+    input bit [`PCIe_DLP_BYTE_W-1:0][`PCIe_BYTE_W-1:0] dlp,
+    input bit [`PCIe_TL_ECRC_W-1:0] ecrc
+  );
+
+    string dump;
+
+    dump = $sformatf({"\n",
+      "============================================================\n",
+      "                 DLP PACKET DEBUG\n",
+      "============================================================\n",
+      "TLP\n",
+      "------------------------------------------------------------\n",
+      "  TLP SIZE = %0d bytes\n",
+      "  TLP HEADER + PAYLOAD:\n",
+      "  %p\n",
+      "\n",
+      "SEQUENCE NUMBER\n",
+      "------------------------------------------------------------\n",
+      "  SEQ_NUM = %0h\n",
+      "\n",
+      "ECRC\n",
+      "------------------------------------------------------------\n",
+      "  ECRC = %08h\n",
+      "\n",
+      "COMPLETE DLP FORMAT\n",
+      "------------------------------------------------------------\n",
+      "  TLP + SEQUENCE NUMBER + ECRC\n",
+      "============================================================\n"},
+      `PCIe_TLP_DATA_BYTE_W,
+      tlp_data,
+      {dlp[0][1:0],dlp[1]},
+      ecrc);
+
+    `uvm_info("RC_DL_TLP_SEQ_ECRC_DUMP", dump, UVM_LOW)
+
+  endfunction
 
 
   //--------------------------------------------------------------------------
