@@ -76,12 +76,16 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
 
   // Drive the flit task
   task drive_flit();
+   bit [`PCIe_BYTE_W-1:0] flit_full_q[$];
    wait(ep_pl_model.pl_sent);
   `uvm_info("EP_CONTROLLER",$sformatf("dl_flit_out is %p",ep_pl_model.dl_flit_out),UVM_LOW)
-   // FLIT is 242 bytes = 60.5 dwords, send 61 dwords (last dword partial)
-        for(int i=0 ; i<`PCIe_FLIT_DWORDS; i++) begin
+   // FEC/CRC : snapshot the full 256B flit (242B DL + 8B CRC + 6B FEC) so a
+   // mid-drive PL/DL update cannot corrupt it, then drive all 64 dwords.
+   flit_full_q = ep_pl_model.ep_flit_with_crc_fec_body;
+   // FULL FLIT is 256 bytes = 242 DL + 8 CRC + 6 FEC, send 64 dwords
+        for(int i=0 ; i<`PCIe_FLIT_DWORDS+3; i++) begin
             bit [`PCIe_MON_DATA_W-1:0] flit_dword;
-            flit_dword = {ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+3], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+2], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+1], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+0]};
+            flit_dword = {flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+3], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+2], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+1], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+0]};
  	    ep_pl_model.tx_process_executed = 1'b0;
  	    ep_pl_model.tx_process(flit_dword, scr_data,pcie_seq_item);
                   if (ep_pl_model.tx_process_executed) begin

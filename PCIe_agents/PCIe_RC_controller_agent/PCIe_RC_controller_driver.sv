@@ -84,16 +84,19 @@ task run_phase(uvm_phase phase);
   // Drive the flit task
   task drive_flit(PCIe_sequence_item pcie_seq_item);
    bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] flit_local;
+   bit [`PCIe_BYTE_W-1:0] flit_full_q[$];
    `uvm_info("RC_CONTROLLER","ENTERED_INTO_DRIVE_FLIT",UVM_LOW)
    wait(rc_pl_model.pl_sent);
    `uvm_info("RC_CONTROLLER","WAIT_INTO_DRIVE_FLIT",UVM_LOW)
-   // Snapshot the flit so a mid-drive PL/DL update cannot corrupt it.
+   // FEC/CRC : snapshot the full 256B flit (242B DL + 8B CRC + 6B FEC) so a
+   // mid-drive PL/DL update cannot corrupt it, then drive all 64 dwords.
    flit_local = rc_pl_model.dl_flit_out;
+   flit_full_q = rc_pl_model.flit_with_crc_fec_body;
   `uvm_info("RC_CONTROLLER",$sformatf("dl_flit_out is %p",rc_pl_model.dl_flit_out),UVM_LOW)
-   // FLIT is 242 bytes = 60.5 dwords, send 61 dwords (last dword partial)
-        for(int i=0 ; i<`PCIe_FLIT_DWORDS; i++) begin
+   // FULL FLIT is 256 bytes = 242 DL + 8 CRC + 6 FEC, send 64 dwords
+        for(int i=0 ; i<`PCIe_FLIT_DWORDS+3; i++) begin
             bit [`PCIe_MON_DATA_W-1:0] flit_dword;
-            flit_dword = {flit_local[i*`PCIe_PL_BYTES_PER_WORD+3], flit_local[i*`PCIe_PL_BYTES_PER_WORD+2], flit_local[i*`PCIe_PL_BYTES_PER_WORD+1], flit_local[i*`PCIe_PL_BYTES_PER_WORD+0]};
+            flit_dword = {flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+3], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+2], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+1], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+0]};
   `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_LOW)
 rc_pl_model.tx_process_executed = 1'b0;
             pcie_seq_item.print();

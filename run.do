@@ -7,11 +7,11 @@ set testname "PCIe_gen6_ltssm_basic_linkup_L0_test"
 
 vlib work
 vmap work work
-vlog -work work -sv PCIe_top/PCIe_PHY_interface.sv
-vlog -work work -sv PCIe_top/PCIe_PIPE_interface.sv
-vlog -work work -sv PCIe_config/enum_defs.sv
-vlog -work work -sv PCIe_top/PCIe_pkg.sv
-vlog -work work -sv PCIe_top/PCIe_top.sv
+vlog -work work -sv +define+PCIE_GEN6_FEC_CRC PCIe_top/PCIe_PHY_interface.sv
+vlog -work work -sv +define+PCIE_GEN6_FEC_CRC PCIe_top/PCIe_PIPE_interface.sv
+vlog -work work -sv +define+PCIE_GEN6_FEC_CRC PCIe_config/enum_defs.sv
+vlog -work work -sv +define+PCIE_GEN6_FEC_CRC PCIe_top/PCIe_pkg.sv
+vlog -work work -sv +define+PCIE_GEN6_FEC_CRC PCIe_top/PCIe_top.sv
 
 #set infile [open "logs/${testname}_log.log" w+]
 set infile [open "sim/${testname}_log.log" w+]
