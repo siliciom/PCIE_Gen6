@@ -437,5 +437,105 @@
 `define PCIe_FLIT_NOP_DW      32'h0000_0000
 `define PCIe_FLIT_DUMP_BPL         16
 
+
+//==============================================================================
+// TL MEMORY MODELS  (EP TL model)                              [ADDED]
+//   Three independent memory models live in the EP TL model:
+//     mem3dw  - target of 3DW-header (32-bit address) Memory Requests
+//     mem4dw  - target of 4DW-header (64-bit address) Memory Requests
+//     io3dw   - target of 3DW-header I/O Requests
+//   Every one of them is declared from the macros below, never with a
+//   hard-coded literal inside the model.
+//==============================================================================
+`define PCIe_TL_MEM_DATA_W          32          // one memory location = 1 DW
+`define PCIe_TL_MEM_ADDR_LSB         2          // byte address -> DW index shift
+
+`define PCIe_TL_MEM3DW_DEPTH      1024          // 1024 DW = 4 KB
+`define PCIe_TL_MEM4DW_DEPTH      1024          // 1024 DW = 4 KB
+`define PCIe_TL_IO3DW_DEPTH       1024          // 1024 DW = 4 KB
+
+`define PCIe_TL_MEM3DW_IDX_W        10          // $clog2(PCIe_TL_MEM3DW_DEPTH)
+`define PCIe_TL_MEM4DW_IDX_W        10          // $clog2(PCIe_TL_MEM4DW_DEPTH)
+`define PCIe_TL_IO3DW_IDX_W         10          // $clog2(PCIe_TL_IO3DW_DEPTH)
+
+`define PCIe_TL_MEM_INIT_VALUE      32'h0000_0000
+`define PCIe_TL_MEM_DUMP_DW_PER_LINE 4
+
+//==============================================================================
+// TLP DECODE HELPERS (EP TL model)                             [ADDED]
+//   Byte 0 of tlp_data[] is the first byte on the wire and is the MSB of DW0.
+//==============================================================================
+`define PCIe_TL_DW_BYTES             4
+`define PCIe_TL_MAX_PAYLOAD_DW       1024        // Length==0 encodes 1024 DW
+`define PCIe_TL_HDR3DW               3
+`define PCIe_TL_HDR4DW               4
+`define PCIe_TL_OHC_A_DW             1
+`define PCIe_TL_MAX_TLP_DW           (`PCIe_TL_HDR4DW + `PCIe_TL_OHC_A_DW + `PCIe_TL_MAX_PAYLOAD_DW)
+
+//==============================================================================
+// ECRC  -  PCIe Base 6.1 Section 2.7.1 / Table 2-55            [ADDED]
+//   Polynomial 04C1 1DB7h, seed FFFF FFFFh, bit 0 of byte 0 first (LSB first,
+//   hence the reflected polynomial below), result complemented and then
+//   byte-wise bit-reversed into the TLP Digest (NFM) / Trailer (FM) per
+//   Table 2-55.
+//==============================================================================
+`define PCIe_TL_ECRC_W               32
+`define PCIe_TL_ECRC_DW               1
+`define PCIe_TL_ECRC_POLY            32'h04C1_1DB7  // spec form (documentation)
+`define PCIe_TL_ECRC_POLY_REFLECTED  32'hEDB8_8320  // LSB-first implementation form
+`define PCIe_TL_ECRC_SEED            32'hFFFF_FFFF
+
+// Variant bits - "All Variant bits must be treated as Set for ECRC calculations"
+//   Non-Flit Mode : TLP Header symbol 0 bit 0 (Type[0]) , symbol 2 bit 6 (EP)
+//   Flit Mode     : TLP Header symbol 0 bit 0 (Type[0]) , symbol 6 bit 7 (EP)
+`define PCIe_TL_ECRC_VAR_SYM0         0
+`define PCIe_TL_ECRC_VAR_SYM0_BIT     0
+`define PCIe_TL_ECRC_NFM_VAR_SYM      2
+`define PCIe_TL_ECRC_NFM_VAR_SYM_BIT  6
+`define PCIe_TL_ECRC_FM_VAR_SYM       6
+`define PCIe_TL_ECRC_FM_VAR_SYM_BIT   7
+
+// TS[2:0] - Trailer Size / use, Flit Mode only (Section 2.2.1.2)
+`define PCIe_TL_TS_NO_TRAILER        3'b000
+`define PCIe_TL_TS_1DW_ECRC          3'b001
+
+//==============================================================================
+// COMPLETION (Cpl / CplD)  -  Section 2.2.9                    [ADDED]
+//==============================================================================
+`define PCIe_TL_CPL_HDR_DW            3          // 3 DW in both NFM and FM
+`define PCIe_TL_CPL_BYTE_COUNT_W     12
+`define PCIe_TL_CPL_LOWER_ADDR_W      7
+`define PCIe_TL_CPL_BCM_W             1
+`define PCIe_TL_CPL_DEFAULT_BYTE_CNT 12'd4       // all Cpl other than MemRd/AtomicOp
+`define PCIe_TL_CPL_COMPLETER_ID     16'h0100    // EP completer ID used by the model
+`define PCIe_TL_CPL_DEST_BDF         16'h0100    // FM: Destination BDF / BF (ARI)
+`define PCIe_TL_CPL_TAG_W            14
+
+// OHC-A5 field positions inside the single OHC DW (Figure 2-11)
+`define PCIe_TL_OHCA5_DEST_SEG_HI    31
+`define PCIe_TL_OHCA5_DEST_SEG_LO    24
+`define PCIe_TL_OHCA5_CPL_SEG_HI     23
+`define PCIe_TL_OHCA5_CPL_SEG_LO     16
+`define PCIe_TL_OHCA5_DSV            15
+`define PCIe_TL_OHCA5_LA_HI           4
+`define PCIe_TL_OHCA5_LA_LO           3
+`define PCIe_TL_OHCA5_STATUS_HI       2
+`define PCIe_TL_OHCA5_STATUS_LO       0
+
+//==============================================================================
+// IDLE / NOP FLIT  -  Table 4-16 / Table 4-17                  [ADDED]
+//   IDLE Flit : NOP TLPs across all 236 B, DLP0/DLP1 all 0s (Flit Seq Num 0),
+//               DLP2..5 = NOP2 DLLP (all zeros, Figure 3-8)
+//   NOP  Flit : NOP TLPs across all 236 B, Flit Usage 00b, Flit Seq Num =
+//               NEXT_TX_FLIT_SEQ_NUM - 1 when Replay Command is 00b
+//==============================================================================
+`define PCIe_FLIT_NOP_TLP_DW         32'h0000_0000  // a 1 DW NOP TLP (Type 00h)
+`define PCIe_FLIT_IDLE_SEQ_NUM       10'h000
+`define PCIe_FLIT_IDLE_DLP0          8'h00
+`define PCIe_FLIT_IDLE_DLP1          8'h00
+`define PCIe_FLIT_NOP2_DLLP          32'h0000_0000  // NOP2 DLLP, Flit Mode
+`define PCIe_FLIT_NOP_DLLP           32'h3100_0000  // NOP DLLP, Non-Flit Mode
+`define PCIe_FLIT_TLP_REGION_DW      59            // 236 B / 4
+
 `endif 
 // PCIe_DEFINES_SVH

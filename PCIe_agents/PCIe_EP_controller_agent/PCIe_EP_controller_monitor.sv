@@ -20,6 +20,10 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
   
    uvm_analysis_port #(PCIe_sequence_item) ep_ap_mon_dl; //RC to EP DLP
    uvm_analysis_port #(PCIe_sequence_item) ep_rc_ap_mon_dl; //EP to RC DLP
+
+   // [ADDED] 236 byte TLP region only (the 6 DLP bytes are stripped off) on its
+   // way from this monitor to the EP TL model. Works for FLIT and NON-FLIT.
+   uvm_analysis_port #(PCIe_sequence_item) ep_mon_tl_ap;
    PCIe_sequence_item            pcie_seq_item;
    PCIe_RC_PL_model              rc_pl_model;
    PCIe_EP_TL_model              ep_tl_model;
@@ -62,6 +66,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
       super.new(name,parent);
     ep_ap_mon_dl=new("ep_ap_mon_dl",this);
     ep_rc_ap_mon_dl=new("ep_rc_ap_mon_dl",this);
+    ep_mon_tl_ap=new("ep_mon_tl_ap",this);   // [ADDED] 236 B TLP -> EP TL model
    endfunction
 
    function void build_phase(uvm_phase phase);
@@ -515,7 +520,63 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
 
     `uvm_info("EP_CON_MONITOR",$sformatf("collected tlp_ep_rx from ep monitor is tlp=%p",tlp_ep_rx),UVM_LOW)
     `uvm_info("EP_CON_MONITOR",$sformatf("collected dlp_ep_rx from ep monitor is dlp=%p",dlp_ep_rx),UVM_LOW)
+
+    // [ADDED] 242 B flit -> keep only the 236 TLP bytes and hand them to the
+    // EP TL model through the analysis port.
+    send_tlp_to_ep_tl(tlp_ep_rx, "RC_TO_EP_RX");
   endtask
       
-endclass
+  //==========================================================================
+  // [ADDED] send_tlp_to_ep_tl
+  //
+  //   The flit reconstructed off the PIPE interface is 242 bytes:
+  //         [  0 .. 235 ]  TLP region   (236 B)
+  //         [236 .. 241 ]  DLP          (  6 B)
+  //   Only the 236 TLP bytes belong to the Transaction Layer, so they are
+  //   copied into a fresh sequence item and published on ep_mon_tl_ap using
+  //   the UVM analysis mechanism.  The DLP bytes stay with the DL model.
+  //
+  //   The same path is used for NON-FLIT traffic: a non-flit TLP
+  //   (3 DW or 4 DW header, optional OHC, 0 to 1024 DW of payload) is carried
+  //   in the very same 236 byte region by this testbench, and the EP TL model
+  //   recovers its true length from the header it decodes.
+  //==========================================================================
+  function void send_tlp_to_ep_tl(
+      input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_bytes,
+      input string direction);
 
+    PCIe_sequence_item tl_item;
+    string             dump;
+    string             line;
+    int                b;
+
+    tl_item = PCIe_sequence_item::type_id::create("ep_mon_to_tl_item");
+
+    for (b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++) begin
+      tl_item.tlp_from_mon[b] = tlp_bytes[b];
+      tl_item.tlp_data[b]     = tlp_bytes[b];
+    end
+
+    //tl_item.pkt_mode   = mon_pkt_mode;
+    tl_item.is_payload = 1'b1;
+    //tl_item.drive_flit = (mon_pkt_mode == FLIT);
+
+   // `uvm_info("EP_MON_TO_TL",$sformatf("PUBLISHING_%0d_TLP_BYTES_TO_EP_TL_MODEL dir=%s mode=%s (242 B flit minus %0d B DLP)",`PCIe_TLP_DATA_BYTE_W, direction, mon_pkt_mode.name(), `PCIe_DLP_BYTE_W), UVM_LOW)
+
+    dump = "\n";
+    line = "";
+    for (b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++) begin
+      if ((b % `PCIe_FLIT_DUMP_BPL) == 0)
+        line = $sformatf("  [%3d] :", b);
+      line = {line, $sformatf(" %02h", tl_item.tlp_from_mon[b])};
+      if (((b % `PCIe_FLIT_DUMP_BPL) == `PCIe_FLIT_DUMP_BPL-1) ||
+          (b == `PCIe_TLP_DATA_BYTE_W-1))
+        dump = {dump, line, "\n"};
+    end
+    `uvm_info("EP_MON_TO_TL_236B", dump, UVM_LOW)
+
+    ep_mon_tl_ap.write(tl_item);
+
+  endfunction
+
+endclass

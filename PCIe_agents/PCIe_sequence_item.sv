@@ -184,6 +184,120 @@ class PCIe_sequence_item extends uvm_sequence_item;
   bit [`PCIe_MON_DATA_W-1:0]   data_q_ep_mon_con_tx[$];
   bit [`PCIe_MON_DATA_W-1:0]   data_q_ep_mon_con_rx[$];
 
+
+  //==========================================================================
+  //   TL-LAYER ADDITIONS : monitor hand-off, ECRC, completion    [ADDED]
+  //==========================================================================
+
+  //--------------------------------------------------------------------------
+  // 236 byte TLP region carved out of the 242 byte flit by the EP controller
+  // monitor and handed to the EP TL model. Byte 0 is the first byte on the
+  // wire, i.e. the MSB of DW0 - same convention as tlp_data.
+  //--------------------------------------------------------------------------
+  bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_from_mon;
+
+  //--------------------------------------------------------------------------
+  // Which of the three flit types this item represents (Table 4-16)
+  //--------------------------------------------------------------------------
+  pcie_flit_kind_e flit_kind = PCIe_FLIT_KIND_PAYLOAD;
+
+  //--------------------------------------------------------------------------
+  // ECRC  (Section 2.7.1)
+  //   ecrc_present : TD==1 in NFM, or TS==001b in FM
+  //   ecrc         : the 32-bit value carried in the TLP Digest / Trailer
+  //   ecrc_rx      : the value the receiver recalculated over the same bytes
+  //   ecrc_state   : ABSENT / PASS / FAIL after the receive-side check
+  //--------------------------------------------------------------------------
+  bit                        ecrc_present;
+  bit [`PCIe_TL_ECRC_W-1:0]  ecrc;
+  bit [`PCIe_TL_ECRC_W-1:0]  ecrc_rx;
+  pcie_ecrc_state_e          ecrc_state = PCIe_ECRC_ABSENT;
+
+  //--------------------------------------------------------------------------
+  // Completion fields (Figure 2-73 NFM / Figure 2-76 FM)
+  //--------------------------------------------------------------------------
+  bit                                    is_completion;
+  bit [`PCIe_TL_CPL_BYTE_COUNT_W-1:0]    byte_count;
+  bit [`PCIe_TL_CPL_LOWER_ADDR_W-1:0]    lower_address;
+  bit                                    bcm;          // NFM only, always 0 here
+  bit [`PCIe_TL_CPL_ID_W-1:0]            dest_bdf;     // FM : Destination BDF / BF
+  bit                                    cpl_has_data; // CplD vs Cpl
+
+  //--------------------------------------------------------------------------
+  // FUNCTION: calc_byte_count - Table 2-40
+  //   Remaining Byte Count for the Request, derived from Length and the byte
+  //   enables. Returns 12 bits; 000h encodes 4096 bytes.
+  //--------------------------------------------------------------------------
+  function bit [`PCIe_TL_CPL_BYTE_COUNT_W-1:0] calc_byte_count();
+    int unsigned len_dw;
+    int          bc;
+
+    len_dw = get_payload_dw();
+
+    // Length == 1 DW : Last DW BE must be 0000b, count comes from First DW BE
+    if ((last_dw_be == 4'h0)) begin
+      casez (first_dw_be)
+        4'b1??1 : bc = 4;
+        4'b01?1 : bc = 3;
+        4'b1?10 : bc = 3;
+        4'b0011 : bc = 2;
+        4'b0110 : bc = 2;
+        4'b1100 : bc = 2;
+        4'b0001 : bc = 1;
+        4'b0010 : bc = 1;
+        4'b0100 : bc = 1;
+        4'b1000 : bc = 1;
+        4'b0000 : bc = 1;
+        default : bc = 4;
+      endcase
+      return bc[`PCIe_TL_CPL_BYTE_COUNT_W-1:0];
+    end
+
+    // Length > 1 DW : (Length * 4) minus the disabled leading/trailing bytes
+    bc = len_dw * 4;
+
+    casez (first_dw_be)
+      4'b???1 : bc = bc - 0;
+      4'b??10 : bc = bc - 1;
+      4'b?100 : bc = bc - 2;
+      4'b1000 : bc = bc - 3;
+      default : bc = bc - 0;
+    endcase
+
+    casez (last_dw_be)
+      4'b1??? : bc = bc - 0;
+      4'b01?? : bc = bc - 1;
+      4'b001? : bc = bc - 2;
+      4'b0001 : bc = bc - 3;
+      default : bc = bc - 0;
+    endcase
+
+    if (bc < 1)
+      bc = 1;
+
+    return bc[`PCIe_TL_CPL_BYTE_COUNT_W-1:0];
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // FUNCTION: calc_lower_address - Table 2-41
+  //   Lower Address[6:0] = address[6:2] concatenated with the 2 byte-level
+  //   bits implied by First DW BE.
+  //--------------------------------------------------------------------------
+  function bit [`PCIe_TL_CPL_LOWER_ADDR_W-1:0] calc_lower_address();
+    bit [1:0] la_lo;
+
+    casez (first_dw_be)
+      4'b0000 : la_lo = 2'b00;
+      4'b???1 : la_lo = 2'b00;
+      4'b??10 : la_lo = 2'b01;
+      4'b?100 : la_lo = 2'b10;
+      4'b1000 : la_lo = 2'b11;
+      default : la_lo = 2'b00;
+    endcase
+
+    return {address[6:2], la_lo};
+  endfunction
+
   //--------------------------------------------------------------------------
   // Field automation
   //--------------------------------------------------------------------------
@@ -217,6 +331,13 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_int  (msg_has_data,   UVM_ALL_ON)
     `uvm_field_array_int (cpl_data,  UVM_ALL_ON | UVM_HEX)
     `uvm_field_int  (cpl_status,     UVM_ALL_ON)
+    `uvm_field_int  (is_completion,  UVM_ALL_ON)
+    `uvm_field_int  (byte_count,     UVM_ALL_ON | UVM_HEX)
+    `uvm_field_int  (lower_address,  UVM_ALL_ON | UVM_HEX)
+    `uvm_field_int  (ecrc_present,   UVM_ALL_ON)
+    `uvm_field_int  (ecrc,           UVM_ALL_ON | UVM_HEX)
+    `uvm_field_enum (pcie_ecrc_state_e, ecrc_state, UVM_ALL_ON)
+    `uvm_field_enum (pcie_flit_kind_e,  flit_kind,  UVM_ALL_ON)
   `uvm_object_utils_end
 
    function void print_dlp_details(string label,  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp  );

@@ -170,6 +170,56 @@ package typedef_enums;
     OHC_A5
   } ohc_a_type_e;
 
+
+  //============================================================================
+  //          TL MEMORY-MODEL / COMPLETION / FLIT-KIND ENUMS       [ADDED]
+  //============================================================================
+
+  //--------------------------------------------------------------------------
+  // pcie_tl_mem_sel_e - which of the three EP TL memory models is targeted
+  //--------------------------------------------------------------------------
+  typedef enum bit [1:0] {
+    PCIe_TL_MEM_SEL_3DW = 2'd0,   // mem3dw : 3DW header (32-bit address) MEM
+    PCIe_TL_MEM_SEL_4DW = 2'd1,   // mem4dw : 4DW header (64-bit address) MEM
+    PCIe_TL_MEM_SEL_IO  = 2'd2    // io3dw  : 3DW header I/O
+  } pcie_tl_mem_sel_e;
+
+  //--------------------------------------------------------------------------
+  // pcie_tl_mem_op_e - direction handed to the memory access functions
+  //--------------------------------------------------------------------------
+  typedef enum bit {
+    PCIe_TL_MEM_OP_WRITE = 1'b0,
+    PCIe_TL_MEM_OP_READ  = 1'b1
+  } pcie_tl_mem_op_e;
+
+  //--------------------------------------------------------------------------
+  // pcie_cpl_status_e - Completion Status[2:0]  (Table 2-37)
+  //--------------------------------------------------------------------------
+  typedef enum bit [`PCIe_TL_CPL_STATUS_W-1:0] {
+    PCIe_CPL_SC  = `PCIe_CPL_STATUS_SC,   // 000b Successful Completion
+    PCIe_CPL_UR  = `PCIe_CPL_STATUS_UR,   // 001b Unsupported Request
+    PCIe_CPL_RRS = `PCIe_CPL_STATUS_CRS,  // 010b Request Retry Status
+    PCIe_CPL_CA  = `PCIe_CPL_STATUS_CA    // 100b Completer Abort
+  } pcie_cpl_status_e;
+
+  //--------------------------------------------------------------------------
+  // pcie_flit_kind_e - Flit Type as defined in Table 4-16
+  //--------------------------------------------------------------------------
+  typedef enum bit [1:0] {
+    PCIe_FLIT_KIND_IDLE    = 2'd0,  // NOP TLPs, DLP0/1 all 0s, NOP2 DLLP
+    PCIe_FLIT_KIND_NOP     = 2'd1,  // NOP TLPs, Flit Usage 00b, seq = NEXT-1
+    PCIe_FLIT_KIND_PAYLOAD = 2'd2   // at least one non-NOP TLP, Flit Usage 01b
+  } pcie_flit_kind_e;
+
+  //--------------------------------------------------------------------------
+  // pcie_ecrc_state_e - result of the receive-side ECRC recalculation
+  //--------------------------------------------------------------------------
+  typedef enum bit [1:0] {
+    PCIe_ECRC_ABSENT = 2'd0,   // TD==0 (NFM) / TS==000b (FM) : nothing to check
+    PCIe_ECRC_PASS   = 2'd1,
+    PCIe_ECRC_FAIL   = 2'd2
+  } pcie_ecrc_state_e;
+
   //============================================================================
   //                 DATA-LINK / PHYSICAL LAYER ENUMS  (unchanged)
   //============================================================================

@@ -61,49 +61,16 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
   `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
       `uvm_info("EP_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",ep_dl_model.DL_STATE.name()),UVM_LOW)
   forever begin
-     //if(!ep_pl_model.link_up) begin
-     //ep_pl_model.ep_ltssm();
-     //end
-     /*wait(ep_pl_model.link_up==1)
-     if (ep_dl_model.EP_REPLAY_IN_PROGRESS) begin
-        phase.raise_objection(this, "REPLAY");
-      `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_REPLAY_SECTION",UVM_LOW)
-      handle_replay_request(ep_dl_model.TX_REPLAY_FLIT_SEQ_NUM);
-        phase.drop_objection(this, "REPLAY");
-    end
-    else if (ep_dl_model.NAK_SCHEDULED) begin
-        phase.raise_objection(this, "NACK");
-      `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NACK_SECTION",UVM_LOW)
-        phase.drop_objection(this, "NACK");
-    end
-    else if (ep_dl_model.ACK_SCHEDULED) begin
-        phase.raise_objection(this, "ACK");
-      `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_ACK_SECTION",UVM_LOW)
-      ep_dl_model.form_dl_packet(tlp_data,0,dl_flit_out);
-      ack_item.dlp_flit_out = dl_flit_out;
-      ep_dl_model.dl_ap.write(ack_item);
-      drive_flit();
-       phase.drop_objection(this, "ACK");
-    end
-    else*/
-    begin
       seq_item_port.try_next_item(pcie_seq_item);
       if (pcie_seq_item != null) begin
         ep_pl_model.ep_ltssm(pcie_seq_item);
         `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-       //  tx_ap.write(pcie_seq_item);
-       //if (!pcie_seq_item.electrical_idle_test) begin
-         // drive_flit();
-        //end
         seq_item_port.item_done();
       end
       else begin
-        // No sequence item currently available.
-        // Give DL model a chance to schedule ACK/NAK/REPLAY.
         #1ns;
       end
     end
-  end
   endtask
 
   // Drive the flit task

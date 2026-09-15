@@ -55,7 +55,7 @@ class PCIe_RC_3DW_flit_sequence extends PCIe_RC_controller_base_sequence;
          //   Header Base 3 DW (12 B) + no OHC-A1  ->  payload = 224 B = 56 DW
          //   12 + 224 = 236 bytes
          //length == 10'd5;
-         length == 10'd56;
+         length == 10'd02;
 
                  // OHC-A1 is NOT emitted (see flit_ohc_c / determine_ohc_a).
          first_dw_be == 4'b1110;

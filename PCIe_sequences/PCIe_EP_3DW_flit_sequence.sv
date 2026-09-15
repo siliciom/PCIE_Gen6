@@ -76,9 +76,9 @@ class PCIe_EP_3DW_flit_sequence extends PCIe_EP_controller_base_sequence;
 
          //at == 2'b00;   
        })
-      `uvm_error("RC_3DW","randomize failed for 3DW MWr")
+      `uvm_error("EP_3DW","randomize failed for 3DW MWr")
 
-    `uvm_info("TL_RC_3DW",$sformatf("Sending 3DW MWr"), UVM_LOW)
+    `uvm_info("TL_EP_3DW",$sformatf("Linkup"), UVM_LOW)
     pcie_seq_item.print();
 
     finish_item(pcie_seq_item);

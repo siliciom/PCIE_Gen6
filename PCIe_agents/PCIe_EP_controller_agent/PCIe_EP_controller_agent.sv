@@ -47,6 +47,11 @@ class PCIe_EP_controller_agent extends uvm_agent;
        super.connect_phase(phase);
        ep_controller_driver.seq_item_port.connect(ep_controller_sequencer.seq_item_export);
 	   ep_controller_driver.tx_ap.connect(ep_tl_model.tl_imp);
+       // [ADDED] EP controller monitor hands the 236 byte TLP region (242 B flit
+       // minus the 6 DLP bytes) to the EP TL model over an analysis port.
+       ep_controller_monitor.ep_mon_tl_ap.connect(ep_tl_model.tl_mon_imp);
+       // TL -> DL : carries both forwarded TLPs and the Completions the EP TL
+       // model generates for Non-Posted Requests.
        ep_tl_model.tl_ap.connect(ep_dl_model.dl_imp);
        ep_dl_model.dl_ap.connect(ep_pl_model.pl_imp);
       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
