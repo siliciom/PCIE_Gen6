@@ -183,6 +183,28 @@ class PCIe_sequence_item extends uvm_sequence_item;
   bit [`PCIe_MON_DATA_W-1:0]   data_q_ep_mon_con_rx[$];
 
   //--------------------------------------------------------------------------
+  // RC -> EP 256B flit FEC/CRC check result (computed in EP controller monitor)
+  //--------------------------------------------------------------------------
+  bit              rc_to_ep_flit_fec_crc_check_done;            // 1 => FEC+CRC check finished for this flit
+  bit              rc_to_ep_flit_fec_match;                     // calculated 6B FEC(on 250B) == received 6B FEC
+  bit              rc_to_ep_flit_crc_match;                     // calculated 8B CRC(on 242B) == received 8B CRC
+  bit [0:5][7:0]   rc_to_ep_flit_received_6b_fec;               // 6B FEC received in RC->EP flit
+  bit [0:5][7:0]   rc_to_ep_flit_calculated_6b_fec_on_250b;     // 6B FEC calculated on 250B
+  bit [63:0]       rc_to_ep_flit_received_8b_crc;               // 8B CRC received in RC->EP flit
+  bit [63:0]       rc_to_ep_flit_calculated_8b_crc_on_242b;     // 8B CRC calculated on 242B
+
+  //--------------------------------------------------------------------------
+  // EP -> RC 256B flit FEC/CRC check result (computed in RC controller monitor)
+  //--------------------------------------------------------------------------
+  bit              ep_to_rc_flit_fec_crc_check_done;            // 1 => FEC+CRC check finished for this flit
+  bit              ep_to_rc_flit_fec_match;                     // calculated 6B FEC(on 250B) == received 6B FEC
+  bit              ep_to_rc_flit_crc_match;                     // calculated 8B CRC(on 242B) == received 8B CRC
+  bit [0:5][7:0]   ep_to_rc_flit_received_6b_fec;               // 6B FEC received in EP->RC flit
+  bit [0:5][7:0]   ep_to_rc_flit_calculated_6b_fec_on_250b;     // 6B FEC calculated on 250B
+  bit [63:0]       ep_to_rc_flit_received_8b_crc;               // 8B CRC received in EP->RC flit
+  bit [63:0]       ep_to_rc_flit_calculated_8b_crc_on_242b;     // 8B CRC calculated on 242B
+
+  //--------------------------------------------------------------------------
   // Field automation
   //--------------------------------------------------------------------------
   `uvm_object_utils_begin(PCIe_sequence_item)

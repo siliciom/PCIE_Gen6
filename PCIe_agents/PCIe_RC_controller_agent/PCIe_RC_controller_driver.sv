@@ -1,9 +1,9 @@
 //=========================================================================================
 // File         : PCIe_RC_controller_driver.sv
-// Project      : PCIE_Gen6
+// Project      : PCIe_Gen6
 // Description  : PCIe_agents\PCIe_RC_controller_agent\PCIe_RC_controller_driver.sv
 // Author       : 
-// Date         : 2026-09-09
+// Date         : 2026-08-14
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -31,7 +31,6 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
   bit[`PCIe_MON_DATA_W-1:0] scr_data;
   bit[0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
   bit[0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data;
-  bit rc_tlp_active;
 
 
 
@@ -66,14 +65,6 @@ task run_phase(uvm_phase phase);
      rc_pl_model.rc_ltssm();
           end
      wait(rc_pl_model.link_up==1)
-
-     // ---- DLCMSM addition: NEVER hardcode phy_linkup inside the DL model.
-     // Mirror it live, every pass, straight from the real LTSSM link_up bit
-     // that rc_state_l0() sets. This is the single source of truth DLCMSM
-     // waits on in dlcmsm_state_dl_inactive().
-     rc_dl_model.phy_linkup = rc_pl_model.link_up;
-     rc_tlp_active = rc_dl_model.dl_link_active;
-     
      if (rc_dl_model.RC_REPLAY_IN_PROGRESS) begin
         phase.raise_objection(this, "REPLAY");
       `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_REPLAY_SECTION",UVM_LOW)
@@ -95,30 +86,17 @@ task run_phase(uvm_phase phase);
        phase.drop_objection(this, "ACK");
     end
     else begin
-      // ---- DLCMSM addition: TL traffic only after DL_ACTIVE is reached.
-      // finish_item() in the sequence will simply block (try_next_item
-      // keeps returning null) until DLCMSM's FC_INIT1/FC_INIT2 counters
-      // both hit their targets and DL_STATE flips to DL_ACTIVE.
-      if (rc_dl_model.DL_STATE == DL_ACTIVE) begin
-         seq_item_port.try_next_item(pcie_seq_item);
-         if (pcie_seq_item != null) begin
-           `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-          wait(rc_tlp_active);
-           tx_ap.write(pcie_seq_item);
-           drive_flit();
-           seq_item_port.item_done();
-         end
-         else begin
-           // No sequence item currently available.
-           // Give DL model a chance to schedule ACK/NAK/REPLAY.
-           #1ns;
-         end
+      seq_item_port.try_next_item(pcie_seq_item);
+      if (pcie_seq_item != null) begin
+        `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+        tx_ap.write(pcie_seq_item);
+        drive_flit();
+        seq_item_port.item_done();
       end
       else begin
-         `uvm_info("RC_CONTROLLER",$sformatf(
-            "[DLCMSM_GATE] TL_HELD :: current_DL_STATE=%s :: waiting_for_DL_ACTIVE_before_pulling_TL_items",
-            rc_dl_model.DL_STATE.name()),UVM_LOW)
-         #1ns;
+        // No sequence item currently available.
+        // Give DL model a chance to schedule ACK/NAK/REPLAY.
+        #1ns;
       end
     end
   end
@@ -128,10 +106,10 @@ task run_phase(uvm_phase phase);
   task drive_flit();
    wait(rc_pl_model.pl_sent);
   `uvm_info("RC_CONTROLLER",$sformatf("dl_flit_out is %p",rc_pl_model.dl_flit_out),UVM_LOW)
-   // FLIT is 242 bytes = 60.5 dwords, send 61 dwords (last dword partial)
-        for(int i=0 ; i<`PCIe_FLIT_DWORDS; i++) begin
+   // FULL FLIT is 256 bytes = 242 DL + 8 CRC + 6 FEC, send 64 dwords
+        for(int i=0 ; i<`PCIe_FLIT_DWORDS+3; i++) begin
             bit [`PCIe_MON_DATA_W-1:0] flit_dword;
-            flit_dword = {rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+3], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+2], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+1], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+0]};
+            flit_dword = {rc_pl_model.flit_with_crc_fec_body[i*`PCIe_PL_BYTES_PER_WORD+3], rc_pl_model.flit_with_crc_fec_body[i*`PCIe_PL_BYTES_PER_WORD+2], rc_pl_model.flit_with_crc_fec_body[i*`PCIe_PL_BYTES_PER_WORD+1], rc_pl_model.flit_with_crc_fec_body[i*`PCIe_PL_BYTES_PER_WORD+0]};
   `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_LOW)
  	    rc_pl_model.tx_process_executed = 1'b0;
  	    rc_pl_model.tx_process(flit_dword, scr_data);
@@ -170,3 +148,7 @@ task run_phase(uvm_phase phase);
     
 
 endclass
+
+
+
+

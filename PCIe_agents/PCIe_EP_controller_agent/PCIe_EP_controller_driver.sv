@@ -1,9 +1,9 @@
 //=========================================================================================
 // File         : PCIe_EP_controller_driver.sv
-// Project      : PCIE_Gen6
+// Project      : PCIe_Gen6
 // Description  : PCIe_agents\PCIe_EP_controller_agent\PCIe_EP_controller_driver.sv
 // Author       : 
-// Date         : 2026-09-09
+// Date         : 2026-08-14
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -31,7 +31,7 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
    bit[`PCIe_PL_PIPE_WORD_W-1:0] scr_data;
    bit[0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data;
    bit[0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
-   bit ep_tlp_active;
+
    
    virtual PCIe_EP_interface     ep_pipe_intf_tx, ep_pipe_intf_rx;	
     
@@ -65,14 +65,6 @@ task run_phase(uvm_phase phase);
      ep_pl_model.ep_ltssm();
      end
      wait(ep_pl_model.link_up==1)
-
-     // ---- DLCMSM addition: NEVER hardcode phy_linkup inside the DL model.
-     // Mirror it live, every pass, straight from the real LTSSM link_up bit
-     // that ep_state_l0() sets. This is the single source of truth DLCMSM
-     // waits on in dlcmsm_state_dl_inactive().
-     ep_dl_model.phy_linkup = ep_pl_model.link_up;
-     ep_tlp_active = ep_dl_model.dl_link_active;
-
      if (ep_dl_model.EP_REPLAY_IN_PROGRESS) begin
         phase.raise_objection(this, "REPLAY");
       `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_REPLAY_SECTION",UVM_LOW)
@@ -94,30 +86,17 @@ task run_phase(uvm_phase phase);
        phase.drop_objection(this, "ACK");
     end
     else begin
-      // ---- DLCMSM addition: TL traffic only after DL_ACTIVE is reached.
-      // finish_item() in the sequence will simply block (try_next_item
-      // keeps returning null) until DLCMSM's FC_INIT1/FC_INIT2 counters
-      // both hit their targets and DL_STATE flips to DL_ACTIVE.
-      if (ep_dl_model.DL_STATE == DL_ACTIVE) begin
-         seq_item_port.try_next_item(pcie_seq_item);
-         if (pcie_seq_item != null) begin
-           `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-           wait(ep_tlp_active);
-           tx_ap.write(pcie_seq_item);
-           drive_flit();
-           seq_item_port.item_done();
-         end
-         else begin
-           // No sequence item currently available.
-           // Give DL model a chance to schedule ACK/NAK/REPLAY.
-           #1ns;
-         end
+      seq_item_port.try_next_item(pcie_seq_item);
+      if (pcie_seq_item != null) begin
+        `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+        tx_ap.write(pcie_seq_item);
+        drive_flit();
+        seq_item_port.item_done();
       end
       else begin
-         `uvm_info("EP_CONTROLLER",$sformatf(
-            "[DLCMSM_GATE] TL_HELD :: current_DL_STATE=%s :: waiting_for_DL_ACTIVE_before_pulling_TL_items",
-            ep_dl_model.DL_STATE.name()),UVM_LOW)
-         #1ns;
+        // No sequence item currently available.
+        // Give DL model a chance to schedule ACK/NAK/REPLAY.
+        #1ns;
       end
     end
   end
@@ -126,11 +105,11 @@ task run_phase(uvm_phase phase);
   // Drive the flit task
   task drive_flit();
    wait(ep_pl_model.pl_sent);
-  `uvm_info("EP_CONTROLLER",$sformatf("dl_flit_out is %p",ep_pl_model.dl_flit_out),UVM_LOW)
-   // FLIT is 242 bytes = 60.5 dwords, send 61 dwords (last dword partial)
-        for(int i=0 ; i<`PCIe_FLIT_DWORDS; i++) begin
-            bit [`PCIe_MON_DATA_W-1:0] flit_dword;
-            flit_dword = {ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+3], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+2], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+1], ep_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+0]};
+`uvm_info("EP_CONTROLLER",$sformatf("dl_flit_out is %p",ep_pl_model.dl_flit_out),UVM_LOW)
+   // FULL FLIT is 256 bytes = 242 DL + 8 CRC + 6 FEC, send 64 dwords
+        for(int i=0 ; i<`PCIe_FLIT_DWORDS+3; i++) begin
+            bit [`PCIe_PL_PIPE_WORD_W-1:0] flit_dword;
+            flit_dword = {ep_pl_model.ep_flit_with_crc_fec_body[i*`PCIe_PL_BYTES_PER_WORD+3], ep_pl_model.ep_flit_with_crc_fec_body[i*`PCIe_PL_BYTES_PER_WORD+2], ep_pl_model.ep_flit_with_crc_fec_body[i*`PCIe_PL_BYTES_PER_WORD+1], ep_pl_model.ep_flit_with_crc_fec_body[i*`PCIe_PL_BYTES_PER_WORD+0]};
  	    ep_pl_model.tx_process_executed = 1'b0;
  	    ep_pl_model.tx_process(flit_dword, scr_data);
                   if (ep_pl_model.tx_process_executed) begin
@@ -166,3 +145,7 @@ task run_phase(uvm_phase phase);
 
 
 endclass
+
+
+
+
