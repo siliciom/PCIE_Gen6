@@ -75,7 +75,6 @@ class PCIe_RC_PL_model extends uvm_component;
    function void build_phase(uvm_phase phase);
       `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_PL_MODEL_BUILD_PHASE",UVM_LOW)
        super.build_phase(phase);
-       pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
        if(!uvm_config_db#(PCIe_env_config)::get(this,"","PCIe_env_config",pcie_ecfg))
            `uvm_fatal("PL_MODEL","Cannot_get_PCIe_env_config");
        if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf_tx))
@@ -648,6 +647,7 @@ task rc_state_config_complete();
         `uvm_info("RC_LTSSM","==========================================",UVM_LOW)
         `uvm_info("RC_LTSSM","LTSSM_STATE=L0",UVM_LOW)
         `uvm_info("RC_LTSSM","ENTERING_L0_STATE",UVM_LOW)
+	item.print();
         // LINK UP
         link_up = 1'b1;
         `uvm_info("RC_LTSSM","LINK_UP=1",UVM_LOW)
@@ -946,12 +946,13 @@ task rc_state_config_complete();
       `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_PRE_ENCODE_TASK"),UVM_LOW)
     endtask
 
-    task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out, PCIe_sequence_item item);
+    task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out,input PCIe_sequence_item item);
       bit [31:0] scramble_data;
       bit [31:0] gray_data;
       bit [31:0] pre_data;
       bit        parity;
       `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_TX_PROCESS_TASK", UVM_LOW)
+      item.print();
       `uvm_info("PCIe_PL_MODEL",$sformatf("The data_in_from PL inside tx_prpcess is %d",data_in), UVM_LOW)
         tx_process_executed = 1'b1;
 

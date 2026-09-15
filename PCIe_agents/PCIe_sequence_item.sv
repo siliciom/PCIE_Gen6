@@ -199,7 +199,7 @@ class PCIe_sequence_item extends uvm_sequence_item;
   //--------------------------------------------------------------------------
   // Which of the three flit types this item represents (Table 4-16)
   //--------------------------------------------------------------------------
-  pcie_flit_kind_e flit_kind = PCIe_FLIT_KIND_PAYLOAD;
+  PCIe_flit_type_e flit_type = PCIe_PAYLOAD_flit;
 
   //--------------------------------------------------------------------------
   // ECRC  (Section 2.7.1)
@@ -337,7 +337,7 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_int  (ecrc_present,   UVM_ALL_ON)
     `uvm_field_int  (ecrc,           UVM_ALL_ON | UVM_HEX)
     `uvm_field_enum (pcie_ecrc_state_e, ecrc_state, UVM_ALL_ON)
-    `uvm_field_enum (pcie_flit_kind_e,  flit_kind,  UVM_ALL_ON)
+    `uvm_field_enum (PCIe_flit_type_e,  flit_type,  UVM_ALL_ON)
   `uvm_object_utils_end
 
    function void print_dlp_details(string label,  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp  );

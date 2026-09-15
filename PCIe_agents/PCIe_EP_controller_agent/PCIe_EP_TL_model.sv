@@ -294,7 +294,7 @@ class PCIe_EP_TL_model extends uvm_component;
     item.tlp_header_dw_count  = d_hdr_dw;
     item.tlp_payload_dw_count = d_payload_dw;
     item.tlp_total_dw_count   = d_total_dw;
-    item.flit_kind    = PCIe_FLIT_KIND_PAYLOAD;
+    item.flit_type    = PCIe_PAYLOAD_flit;
 
   endfunction
 
@@ -810,7 +810,7 @@ class PCIe_EP_TL_model extends uvm_component;
                                                                             : cpl_len_dw[9:0])
                                   : 10'd0;
     cpl.ohc_a_type    = OHC_A5;
-    cpl.flit_kind     = PCIe_FLIT_KIND_PAYLOAD;
+    cpl.flit_type     = PCIe_PAYLOAD_flit;
     cpl.is_payload    = 1'b1;
     cpl.drive_flit    = (d_mode == FLIT);
 

@@ -276,7 +276,8 @@ endfunction
   task run_phase(uvm_phase phase);
      `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] WAITING_FOR_rc_l0_to_dl_event (fired by PL model on LTSSM L0 entry)",UVM_LOW)
      forever begin
-       // @(rc_l0_to_dl_event);
+        @(rc_l0_to_dl_event);
+      `uvm_info("RC_DLCMSM","DLCMSM_RC_TO_DL_EVENT_TRIGGRED",UVM_LOW)
         wait(phy_linkup == 1);
         `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] rc_l0_to_dl_event_FIRED :: LTSSM_REACHED_L0 :: STARTING_DLCMSM_FSM",UVM_LOW)
         // Reset FSM state on every (re)start so a re-training link re-runs FC-Init cleanly.
@@ -284,7 +285,104 @@ endfunction
         dl_link_active = 1'b0;
         fc1_sent_count = 0;
         fc2_sent_count = 0;
-        run_dlcmsm();
+        NAK_SCHEDULED          = 1'b0;
+        ACK_SCHEDULED          = 1'b0;
+        REPLAY_SCHEDULED       = 1'b0;
+        RC_REPLAY_IN_PROGRESS  = 1'b0;
+        // Run the DLCMSM FSM and the concurrent DL data-processing thread
+        // (ACK/NAK/REPLAY) together. The fork returns as soon as run_dlcmsm()
+        // exits - which only happens in DL_ACTIVE when phy_linkup drops - and
+        // then the data-processing loop is killed so the link re-initializes.
+        fork : rc_dl_run
+           run_dlcmsm();
+           run_dl_data_processing();
+        join_any
+        disable fork;
+        DL_STATE       = DL_INACTIVE;
+        dl_link_active = 1'b0;
+        `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] phy_linkup=0 :: DL_RUN_TERMINATED :: WAITING_FOR_NEXT_LINKUP",UVM_LOW)
+     end
+  endtask
+
+  task run_dl_data_processing();
+     wait(dl_link_active);
+     `uvm_info("RC_DL_PROC","[DL_DATA_PROC] DL_ACTIVE :: STARTING_ACK_NAK_REPLAY_PROCESSING",UVM_LOW)
+     forever begin
+        if (RC_REPLAY_IN_PROGRESS) begin
+           `uvm_info("RC_DL_PROC","[DL_DATA_PROC] REPLAY_IN_PROGRESS :: REPLAYING_TX_RETRY_BUFFER",UVM_LOW)
+           handle_replay_from_buffer();
+        end
+        else if (NAK_SCHEDULED) begin
+           `uvm_info("RC_DL_PROC","[DL_DATA_PROC] NAK_SCHEDULED :: SENDING_NAK_FLIT",UVM_LOW)
+           send_dl_control_flit();
+           // Transmitted: once a NAK is put on the wire it is consumed. Any
+           // further NAK scheduling comes from the RX path (handle_incoming_flit).
+           NAK_SCHEDULED = 1'b0;
+        end
+        else if (ACK_SCHEDULED) begin
+           `uvm_info("RC_DL_PROC","[DL_DATA_PROC] ACK_SCHEDULED :: SENDING_ACK_FLIT",UVM_LOW)
+           // form_dl_packet() clears ACK_SCHEDULED itself when building an ACK.
+           send_dl_control_flit();
+        end
+        else begin
+           // Nothing to send right now - yield so other processes can run.
+           #1ns;
+        end
+     end
+  endtask
+
+  // Builds a control flit (ACK or NAK, is_payload=0) using the currently
+  // scheduled state, stamps LCRC, and pushes it to the PL model.
+  task send_dl_control_flit();
+     PCIe_sequence_item ctl_item;
+     ctl_item = PCIe_sequence_item::type_id::create("ctl_item");
+     ctl_item.pkt_mode = link_mode;
+     form_dl_packet(ctl_item.tlp_data, 1'b0, ctl_item.dlp_flit_out);
+     stamp_dl_lcrc(ctl_item);
+     dl_ap.write(ctl_item);
+  endtask
+
+  // Re-sends flits from the TX retry buffer that the peer has NAKed.
+  // Standard replay: all flits with seq_num >= the replay start point.
+  // Selective replay: only the single NAKed flit.
+  task handle_replay_from_buffer();
+     foreach (tx_retry_buffer[i]) begin
+        if ((REPLAY_SCHEDULED_TYPE == STANDARD_REPLAY) &&
+            (tx_retry_buffer[i].seq_num >= TX_REPLAY_FLIT_SEQ_NUM)) begin
+           send_replayed_buffer_entry(i);
+        end
+        else if (REPLAY_SCHEDULED_TYPE == SELECTIVE_REPLAY) begin
+           send_replayed_buffer_entry(i);
+           break;
+        end
+     end
+     RC_REPLAY_IN_PROGRESS = 1'b0;
+  endtask
+
+  // Re-forms a single retry-buffer entry as a payload flit and writes it to PL,
+  // bypassing the TL (the original driver sent replays back through tx_ap).
+  task send_replayed_buffer_entry(int unsigned idx);
+     PCIe_sequence_item r_item;
+     r_item = PCIe_sequence_item::type_id::create("r_item");
+     r_item.tlp_data = tx_retry_buffer[idx].tlp_data;
+     r_item.seq_num  = tx_retry_buffer[idx].seq_num;
+     r_item.pkt_mode = link_mode;
+     form_dl_packet(r_item.tlp_data, 1'b1, r_item.dlp_flit_out);
+     stamp_dl_lcrc(r_item);
+     dl_ap.write(r_item);
+  endtask
+
+  // Stamps LCRC on an outgoing item exactly like write()/send_dllp_flit().
+  task stamp_dl_lcrc(PCIe_sequence_item item);
+     if (item.pkt_mode == FLIT) begin
+        item.dl_lcrc = generate_lcrc_flit(item.dlp_flit_out);
+        `uvm_info("LCRC_FLIT_MODE",$sformatf("STAMPED_ON_CTRL_FLIT :: dl_lcrc=%08h",item.dl_lcrc),UVM_LOW)
+     end
+     else begin
+        int unsigned byte_len;
+        byte_len = (item.tlp_total_dw_count > 0) ? (item.tlp_total_dw_count * 4) : `PCIe_TLP_DATA_BYTE_W;
+        item.dl_lcrc = generate_lcrc_non_flit(item.tlp_data, byte_len);
+        `uvm_info("LCRC_NONFLIT_MODE",$sformatf("STAMPED_ON_CTRL_FLIT :: bytes_covered=%0d :: dl_lcrc=%08h",byte_len,item.dl_lcrc),UVM_LOW)
      end
   endtask
 
@@ -341,7 +439,7 @@ endfunction
    // ---------------- DL_INACTIVE ----------------
    task dlcmsm_state_dl_inactive();
       `uvm_info("RC_DLCMSM",$sformatf(
-         "[DL_INACTIVE] CHECKING_DEPENDENCY :: phy_linkup=%0b (mirrored live from LTSSM link_up by the driver) :: link_enabled=%0b",
+         "[DL_INACTIVE] CHECKING_DEPENDENCY :: phy_linkup=%0b (LTSSM link_up by the driver) :: link_enabled=%0b",
          phy_linkup, link_enabled),UVM_LOW)
       wait (phy_linkup && link_enabled);
       `uvm_info("RC_DLCMSM",$sformatf(

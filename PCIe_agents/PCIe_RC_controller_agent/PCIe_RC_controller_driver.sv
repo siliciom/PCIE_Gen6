@@ -59,66 +59,73 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
   	endfunction
 
 task run_phase(uvm_phase phase);
-  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
+      `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
       `uvm_info("RC_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",rc_dl_model.DL_STATE.name()),UVM_LOW)
   forever begin
-    begin
-      seq_item_port.try_next_item(pcie_seq_item);
-      if (pcie_seq_item != null) begin
-        `uvm_info("RC_CONTROLLER","LTSSM_INITIATED",UVM_LOW)
-	//pcie_seq_item.print();
-        rc_pl_model.rc_ltssm(pcie_seq_item);
-        `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-         // wait(rc_pl_model.link_up==1)
-         // if (rc_dl_model.RC_REPLAY_IN_PROGRESS) begin
-         //    phase.raise_objection(this, "REPLAY");
-         //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_REPLAY_SECTION",UVM_LOW)
-         //  handle_replay_request(rc_dl_model.TX_REPLAY_FLIT_SEQ_NUM);
-         //    phase.drop_objection(this, "REPLAY");
-         //end
-         //else if (rc_dl_model.NAK_SCHEDULED) begin
-         //    phase.raise_objection(this, "NACK");
-         //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NACK_SECTION",UVM_LOW)
-         //    phase.drop_objection(this, "NACK");
-         //end
-         //else if (rc_dl_model.ACK_SCHEDULED) begin
-         //    phase.raise_objection(this, "ACK");
-         //  `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_ACK_SECTION",UVM_LOW)
-         //  rc_dl_model.form_dl_packet(tlp_data,0,dl_flit_out);
-         //  ack_item.dlp_flit_out = dl_flit_out;
-         //  rc_dl_model.dl_ap.write(ack_item);
-         //  drive_flit();
-         //   phase.drop_objection(this, "ACK");
-         //end
-         ////else
-        //tx_ap.write(pcie_seq_item);
-       // if (!pcie_seq_item.electrical_idle_test) begin
-         // drive_flit();
-        //end
+     if (!rc_pl_model.link_up) begin
+        seq_item_port.try_next_item(pcie_seq_item);
+        if (pcie_seq_item != null) begin
+          `uvm_info("RC_CONTROLLER","LTSSM_INITIATED",UVM_LOW)
+          rc_pl_model.rc_ltssm(pcie_seq_item);
+          // ACK/NAK/REPLAY processing threads can start when L0 is reached.
+          rc_dl_model.phy_linkup = rc_pl_model.link_up;
+          drive_flit(pcie_seq_item);
+          `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+          tx_ap.write(pcie_seq_item);
+        end
         seq_item_port.item_done();
-      end
-      else begin
-        // No sequence item currently available.
-        // Give DL model a chance to schedule ACK/NAK/REPLAY.
-        #1ns;
-      end
-    end
-  end
+     end
+        else begin
+          // No sequence item currently available.
+          // Give DL model a chance to schedule ACK/NAK/REPLAY.
+          #1ns;
+        end
+     end
+     /*else begin
+        // Link is up: route normal TLPs through TL -> DL -> PL and push the
+        // resulting flit onto the PIPE interface.
+        rc_dl_model.phy_linkup = rc_pl_model.link_up;
+        seq_item_port.try_next_item(pcie_seq_item);
+        if (pcie_seq_item != null) begin
+          if (rc_pl_model.pl_sent && !pcie_seq_item.electrical_idle_test) begin
+             `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+            drive_flit(pcie_seq_item);
+            `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+            tx_ap.write(pcie_seq_item);
+          end
+          seq_item_port.item_done();
+        end
+        else begin
+          if (rc_pl_model.pl_sent) begin
+            drive_flit(pcie_seq_item);
+          end
+          else begin
+            #1ns;
+          end
+        end*/
+    // end
+  //end
   endtask
 
   
 
   // Drive the flit task
-  task drive_flit();
+  task drive_flit(PCIe_sequence_item pcie_seq_item);
+   bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] flit_local;
+   `uvm_info("RC_CONTROLLER","ENTERED_INTO_DRIVE_FLIT",UVM_LOW)
    wait(rc_pl_model.pl_sent);
+   `uvm_info("RC_CONTROLLER","WAIT_INTO_DRIVE_FLIT",UVM_LOW)
+   // Snapshot the flit so a mid-drive PL/DL update cannot corrupt it.
+   flit_local = rc_pl_model.dl_flit_out;
   `uvm_info("RC_CONTROLLER",$sformatf("dl_flit_out is %p",rc_pl_model.dl_flit_out),UVM_LOW)
    // FLIT is 242 bytes = 60.5 dwords, send 61 dwords (last dword partial)
         for(int i=0 ; i<`PCIe_FLIT_DWORDS; i++) begin
             bit [`PCIe_MON_DATA_W-1:0] flit_dword;
-            flit_dword = {rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+3], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+2], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+1], rc_pl_model.dl_flit_out[i*`PCIe_PL_BYTES_PER_WORD+0]};
+            flit_dword = {flit_local[i*`PCIe_PL_BYTES_PER_WORD+3], flit_local[i*`PCIe_PL_BYTES_PER_WORD+2], flit_local[i*`PCIe_PL_BYTES_PER_WORD+1], flit_local[i*`PCIe_PL_BYTES_PER_WORD+0]};
   `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_LOW)
- 	    rc_pl_model.tx_process_executed = 1'b0;
- 	    rc_pl_model.tx_process(flit_dword, scr_data,pcie_seq_item);
+rc_pl_model.tx_process_executed = 1'b0;
+            pcie_seq_item.print();
+ 	    rc_pl_model.tx_process(flit_dword, scr_data, pcie_seq_item);
   `uvm_info("SCR_DATA",$sformatf("scr_data is %h :: %d",scr_data,scr_data),UVM_LOW)
                   if (rc_pl_model.tx_process_executed) begin
                      @(posedge rc_pipe_intf_tx.pclk);

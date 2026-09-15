@@ -64,6 +64,7 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
       seq_item_port.try_next_item(pcie_seq_item);
       if (pcie_seq_item != null) begin
         ep_pl_model.ep_ltssm(pcie_seq_item);
+        ep_dl_model.phy_linkup = ep_pl_model.link_up;
         `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
         seq_item_port.item_done();
       end

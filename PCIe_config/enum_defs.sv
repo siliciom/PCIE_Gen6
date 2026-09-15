@@ -203,13 +203,13 @@ package typedef_enums;
   } pcie_cpl_status_e;
 
   //--------------------------------------------------------------------------
-  // pcie_flit_kind_e - Flit Type as defined in Table 4-16
+  // PCIe_flit_type_e - Flit Type as defined in Table 4-16
   //--------------------------------------------------------------------------
   typedef enum bit [1:0] {
-    PCIe_FLIT_KIND_IDLE    = 2'd0,  // NOP TLPs, DLP0/1 all 0s, NOP2 DLLP
-    PCIe_FLIT_KIND_NOP     = 2'd1,  // NOP TLPs, Flit Usage 00b, seq = NEXT-1
-    PCIe_FLIT_KIND_PAYLOAD = 2'd2   // at least one non-NOP TLP, Flit Usage 01b
-  } pcie_flit_kind_e;
+    PCIe_IDLE_flit    = 2'd0,  // NOP TLPs, DLP0/1 all 0s, NOP2 DLLP
+    PCIe_NOP_flit     = 2'd1,  // NOP TLPs, Flit Usage 00b, seq = NEXT-1
+    PCIe_PAYLOAD_flit = 2'd2   // at least one non-NOP TLP, Flit Usage 01b
+  } PCIe_flit_type_e;
 
   //--------------------------------------------------------------------------
   // pcie_ecrc_state_e - result of the receive-side ECRC recalculation
