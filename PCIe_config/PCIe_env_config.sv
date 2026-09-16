@@ -46,11 +46,8 @@ class PCIe_env_config extends uvm_object;
    //----------------------------------------
    bit has_subscriber             = 1;
 
-   pkt_mode_e mode;
-
    function new(string name="PCIe_env_config");
      super.new(name);
-     mode = FLIT; //by_default_nothing_is_config
    endfunction
    
 endclass

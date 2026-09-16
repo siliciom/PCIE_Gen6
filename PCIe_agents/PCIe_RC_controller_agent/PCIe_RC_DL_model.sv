@@ -42,7 +42,6 @@ class PCIe_RC_DL_model extends uvm_component;
   // ---- LCRC additions: mode awareness (mirrors EP DL model / PL model pattern) ----
   // Per-transaction mode comes from item.pkt_mode in write()
   // Link-wide mode for DLCMSM flits comes from config
-  pkt_mode_e       link_mode;
   PCIe_env_config   pcie_ecfg;
   // ---------------------------------------------------------------------------
 
@@ -122,8 +121,6 @@ function void build_phase(uvm_phase phase);
     // ---- LCRC addition: fetch link-wide mode for DLCMSM flits; per-transaction mode from item.pkt_mode ----
     if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
       `uvm_fatal("RC_DL_MODEL","Cannot_get_PCIe_env_config");
-    link_mode = pcie_ecfg.mode;
-    `uvm_info("RC_DL_MODEL",$sformatf("LINK_MODE_FOR_DLCMSM=%s",link_mode.name()),UVM_LOW)
     // ------------------------------------------------------------------
 
   endfunction
@@ -131,22 +128,23 @@ function void build_phase(uvm_phase phase);
 // DL model consumes TL output, creates the DLP, then publishes to PL.
 function void write(PCIe_sequence_item item);
   `uvm_info("RC_DL_MODEL","TL -> DL",UVM_LOW);
-   item.print();
+  // item.print();
   form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
 
   // ---- LCRC addition: stamp LCRC based on configured mode ----
   if (item.pkt_mode == FLIT) begin
     item.dl_lcrc = generate_lcrc_flit(item.dlp_flit_out);
-    `uvm_info("LCRC_FLIT_MODE",$sformatf("STAMPED_ON_ITEM :: dl_lcrc=%08h",item.dl_lcrc),UVM_LOW)
+    `uvm_info("DL_LCRC_FLIT_MODE",$sformatf("STAMPED_ON_ITEM :: dl_lcrc=%08h",item.dl_lcrc),UVM_LOW)
   end
   else begin
     int unsigned byte_len;
     byte_len = (item.tlp_total_dw_count > 0) ? (item.tlp_total_dw_count * 4) : `PCIe_TLP_DATA_BYTE_W;
     item.dl_lcrc = generate_lcrc_non_flit(item.tlp_data, byte_len);
-    `uvm_info("LCRC_NONFLIT_MODE",$sformatf("STAMPED_ON_ITEM :: bytes_covered=%0d :: dl_lcrc=%08h",byte_len,item.dl_lcrc),UVM_LOW)
+    `uvm_info("DL_LCRC_NONFLIT_MODE",$sformatf("STAMPED_ON_ITEM :: bytes_covered=%0d :: dl_lcrc=%08h",byte_len,item.dl_lcrc),UVM_LOW)
   end
   // -------------------------------------------------------------
 
+  print_dlp_packet(item.tlp_data,item.dlp_flit_out,item.dl_lcrc);
   `uvm_info("RC_DL_MODEL","SENT_DLP_TO_PL_236B", UVM_LOW)
   dlp_pl_ap.write(item);
 endfunction
@@ -337,10 +335,9 @@ endfunction
   task send_dl_control_flit();
      PCIe_sequence_item ctl_item;
      ctl_item = PCIe_sequence_item::type_id::create("ctl_item");
-     ctl_item.pkt_mode = link_mode;
      form_dl_packet(ctl_item.tlp_data, 1'b0, ctl_item.dlp_flit_out);
      stamp_dl_lcrc(ctl_item);
-     dlp_pl_ap.write(ctl_item);
+     //dlp_pl_ap.write(ctl_item);
   endtask
 
   // Re-sends flits from the TX retry buffer that the peer has NAKed.
@@ -367,11 +364,10 @@ endfunction
      r_item = PCIe_sequence_item::type_id::create("r_item");
      r_item.tlp_data = tx_retry_buffer[idx].tlp_data;
      r_item.seq_num  = tx_retry_buffer[idx].seq_num;
-     r_item.pkt_mode = link_mode;
      form_dl_packet(r_item.tlp_data, 1'b1, r_item.dlp_flit_out);
      stamp_dl_lcrc(r_item);
      `uvm_info("RC_DL_MODEL",$sformatf("SENDING_DLP_TO_PL_MODEL"),UVM_LOW)
-     dlp_pl_ap.write(r_item);
+     //dlp_pl_ap.write(r_item);
   endtask
 
   // Stamps LCRC on an outgoing item exactly like write()/send_dllp_flit().
@@ -522,7 +518,8 @@ endfunction
         `uvm_info("RC_DLCMSM",$sformatf("DLCMSM_FLIT_LCRC_STAMPED :: dl_lcrc=%08h",dcm_item.dl_lcrc),UVM_LOW)
         // ---------------------------------------------------------------------------------------------
 
-       dlp_pl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
+       //print_dlp_packet(tlp_data,dlp);
+       //dlp_pl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
        `uvm_info("RC_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h",content),UVM_LOW)
     endtask
   // =========================================================================
@@ -664,7 +661,7 @@ endfunction
     last_flit_was_payload = is_payload;
 
     print_dlp(dlp);
-    print_dlp_tlp_seq_ecrc(tlp_data,dlp,'0);
+    //print_dlp_packet(tlp_data,dlp);
   // Assemble Output
     for(int i=0;i<`PCIe_TLP_DATA_BYTE_W;i++)
       dl_flit_out[i] = tlp_data[i];
@@ -682,17 +679,18 @@ endfunction
   // ADDITIONAL DEBUG ONLY: TLP + Sequence Number + ECRC style dump.
   // Existing model code is intentionally unchanged.
   //--------------------------------------------------------------------------
-  function void print_dlp_tlp_seq_ecrc(
+  function void print_dlp_packet(
     input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,
     input bit [`PCIe_DLP_BYTE_W-1:0][`PCIe_BYTE_W-1:0] dlp,
-    input bit [`PCIe_TL_ECRC_W-1:0] ecrc
+    input bit [`PCIe_DL_LCRC_W-1:0]   dl_lcrc      
+
   );
 
     string dump;
 
     dump = $sformatf({"\n",
       "============================================================\n",
-      "                 DLP PACKET DEBUG\n",
+      "                 DLP PACKET \n",
       "============================================================\n",
       "TLP\n",
       "------------------------------------------------------------\n",
@@ -704,18 +702,18 @@ endfunction
       "------------------------------------------------------------\n",
       "  SEQ_NUM = %0h\n",
       "\n",
-      "ECRC\n",
+      "LCRC \n",
       "------------------------------------------------------------\n",
-      "  ECRC = %08h\n",
+      "  LCRC = %0h\n",
       "\n",
       "COMPLETE DLP FORMAT\n",
       "------------------------------------------------------------\n",
-      "  TLP + SEQUENCE NUMBER + ECRC\n",
+      "  TLP + SEQUENCE NUMBER + LCRC\n",
       "============================================================\n"},
       `PCIe_TLP_DATA_BYTE_W,
       tlp_data,
-      {dlp[0][1:0],dlp[1]},
-      ecrc);
+      {dlp[0][1:0],dlp[1]},dl_lcrc
+      );
 
     `uvm_info("RC_DL_TLP_SEQ_ECRC_DUMP", dump, UVM_LOW)
 
@@ -732,7 +730,7 @@ endfunction
 
     dump = $sformatf({"\n",
       "         ============================================================\n",
-      "                           DLP PACKET FORMAT \n",
+      "                           DLP BYTES FORMAT \n",
       "         ============================================================\n",
       "         DLP SIZE : %0d bytes\n",
       "         ------------------------------------------------------------\n",

@@ -47,7 +47,6 @@ class PCIe_EP_TL_model extends uvm_component;
   PCIe_sequence_item item;
 
   PCIe_env_config    pcie_ecfg;
-  pkt_mode_e         tl_pkt_mode = FLIT;
 
   //==========================================================================
   //                        THREE MEMORY MODELS
@@ -115,9 +114,6 @@ class PCIe_EP_TL_model extends uvm_component;
     tl_mon_imp = new("tl_mon_imp", this);
     tl_ap      = new("tl_ap",      this);
 
-    if (uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
-      tl_pkt_mode = pcie_ecfg.mode;
-    void'(uvm_config_db#(pkt_mode_e)::get(this, "", "EP_TL_PKT_MODE", tl_pkt_mode));
   endfunction
 
    task reset_phase(uvm_phase phase);
@@ -134,7 +130,6 @@ class PCIe_EP_TL_model extends uvm_component;
         "         mem4dw  : %0d x %0d-bit  (%0d bytes)\n",
         "         io3dw   : %0d x %0d-bit  (%0d bytes)\n",
         "         ============================================================"},
-        tl_pkt_mode.name(),
         `PCIe_TL_MEM3DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_MEM3DW_DEPTH*4,
         `PCIe_TL_MEM4DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_MEM4DW_DEPTH*4,
         `PCIe_TL_IO3DW_DEPTH,  `PCIe_TL_MEM_DATA_W, `PCIe_TL_IO3DW_DEPTH*4), UVM_LOW)
