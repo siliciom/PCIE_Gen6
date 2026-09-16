@@ -61,16 +61,16 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
 task run_phase(uvm_phase phase);
       `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
       `uvm_info("RC_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",rc_dl_model.DL_STATE.name()),UVM_LOW)
-  forever begin
-     if (!rc_pl_model.link_up) begin
-        seq_item_port.try_next_item(pcie_seq_item);
+      forever begin
+      if (!rc_pl_model.link_up) begin
+         seq_item_port.try_next_item(pcie_seq_item);
         if (pcie_seq_item != null) begin
           `uvm_info("RC_CONTROLLER","LTSSM_INITIATED",UVM_LOW)
           rc_pl_model.rc_ltssm(pcie_seq_item);
           // ACK/NAK/REPLAY processing threads can start when L0 is reached.
 	  if(rc_pl_model.link_up)begin
           rc_dl_model.phy_linkup = rc_pl_model.link_up;
-    @(dl_active_event);                  // fires once, the instant DL_ACTIVE is entered
+          @(dl_active_event);                  // fires once, the instant DL_ACTIVE is entered
 	  tl_link_active         = rc_dl_model.dl_link_active;
          // drive_flit(pcie_seq_item);
           `uvm_info("RC_CONTROLLER",$sformatf("ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION tl_link_active=%0d",tl_link_active),UVM_LOW)
@@ -78,15 +78,15 @@ task run_phase(uvm_phase phase);
 	  `uvm_info("RC_LTSSM","tl_link_active=1",UVM_LOW)
 	  tx_tl_ap.write(pcie_seq_item); 
         end
-end
         seq_item_port.item_done();
-
-     end
+      end
+      //seq_item_port.item_done();
         else begin
           // No sequence item currently available.
           // Give DL model a chance to schedule ACK/NAK/REPLAY.
           #1ns;
         end
+     end
      end
   endtask
 

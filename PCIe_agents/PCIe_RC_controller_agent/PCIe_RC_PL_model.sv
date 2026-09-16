@@ -115,7 +115,6 @@ class PCIe_RC_PL_model extends uvm_component;
      rc_main_state             = DETECT;
      rc_detect_state           = DETECT_QUIET;
      electrical_idle_test_done = 1'b0;
-     no_receiver_test           = 1'b0;
      detect_fail_count         = 0;
    
      polynomial     = `PCIe_PL_SCRAMBLER_POLYNOMIAL;

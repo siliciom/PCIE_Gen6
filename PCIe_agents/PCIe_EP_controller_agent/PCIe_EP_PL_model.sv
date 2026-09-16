@@ -96,7 +96,6 @@ bit            tx_process_executed;
        // polynomial = 23'b01000010000000100100101;
         reset_scrambler();
         electrical_idle_test_done = 1'b0;
-        no_receiver_test   = 1'b0;
         detect_fail_count  = 0;
         previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
 
