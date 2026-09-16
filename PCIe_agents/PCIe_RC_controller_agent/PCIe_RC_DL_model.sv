@@ -93,7 +93,6 @@ class PCIe_RC_DL_model extends uvm_component;
     int                 fc1_sent_count, fc1_rcvd_count;
     int                 fc2_sent_count, fc2_rcvd_count;
     bit                 phy_linkup;          
-    bit                 link_enabled = 1'b1;
 
     // ---- DLCMSM FSM additions (dependency-driven, mirrors LTSSM style) ----
     // NOTE: these are NOT hardcoded magic numbers scattered in a while() loop -
@@ -437,12 +436,12 @@ endfunction
    // ---------------- DL_INACTIVE ----------------
    task dlcmsm_state_dl_inactive();
       `uvm_info("RC_DLCMSM",$sformatf(
-         "[DL_INACTIVE] CHECKING_DEPENDENCY :: phy_linkup=%0b (LTSSM link_up by the driver) :: link_enabled=%0b",
-         phy_linkup, link_enabled),UVM_LOW)
-      wait (phy_linkup && link_enabled);
+         "[DL_INACTIVE] CHECKING_DEPENDENCY :: phy_linkup=%0b (LTSSM link_up by the driver) ",
+         phy_linkup),UVM_LOW)
+      wait (phy_linkup );
       `uvm_info("RC_DLCMSM",$sformatf(
-         "[DL_INACTIVE] DEPENDENCY_SATISFIED :: phy_linkup=%0b link_enabled=%0b :: TRANSITION -> DL_FEATURE",
-         phy_linkup, link_enabled),UVM_LOW)
+         "[DL_INACTIVE] DEPENDENCY_SATISFIED :: phy_linkup=%0b :: TRANSITION -> DL_FEATURE",
+         phy_linkup),UVM_LOW)
       DL_STATE = DL_FEATURE;
    endtask
 
@@ -496,10 +495,10 @@ endfunction
 
    // ---------------- DL_ACTIVE ----------------
    task dlcmsm_state_dl_active();
+      `uvm_info("RC_DLCMSM","ENTERED_INTO_DL_ACTIVE_STATE",UVM_LOW)
       dl_link_active = 1'b1;
-     // -> dl_active_event;
-      `uvm_info("RC_DLCMSM",
-         "[DL_ACTIVE] dl_link_active=1 :: dl_active_event_TRIGGERED :: TL_MAY_NOW_SEND_TLPs",UVM_LOW)
+      -> dl_active_event;
+      `uvm_info("RC_DLCMSM",$sformatf("[DL_ACTIVE] dl_active_event_TRIGGERED :: TL_MAY_NOW_SEND_TLPs link_active=%0d",dl_link_active),UVM_LOW)
    endtask
 
     // Builds a NOP/DLLP-only flit (is_payload=0) with given dllp_content and
@@ -507,6 +506,7 @@ endfunction
     task send_dllp_flit(bit [31:0] content);
        PCIe_sequence_item dcm_item;
        dcm_item = PCIe_sequence_item::type_id::create("dcm_item");
+        `uvm_info("RC_DLCMSM",$sformatf("DLCMSM_FLIT_LCRC_STAMPED :: dl_lcrc=%08h",dcm_item.dl_lcrc),UVM_LOW)
        dllp_content = content;
        form_dl_packet(dcm_item.tlp_data, 1'b0, dcm_item.dlp_flit_out); // is_payload=0
 
@@ -519,7 +519,7 @@ endfunction
         // ---------------------------------------------------------------------------------------------
 
        //print_dlp_packet(tlp_data,dlp);
-       //dlp_pl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
+       dlp_pl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
        `uvm_info("RC_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h",content),UVM_LOW)
     endtask
   // =========================================================================
@@ -1544,3 +1544,4 @@ endtask
     endtask*/ 
 
 endclass
+

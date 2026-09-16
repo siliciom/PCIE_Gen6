@@ -32,8 +32,10 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
   bit[`PCIe_MON_DATA_W-1:0] scr_data;
   bit[0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
   bit[0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data;
+  bit tl_link_active;
 
    virtual PCIe_RC_interface     rc_pipe_intf_tx, rc_pipe_intf_rx;	
+    event dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
 	
    function new(string name="PCIe_RC_controller_driver", uvm_component parent);
      super.new(name,parent);
@@ -66,12 +68,19 @@ task run_phase(uvm_phase phase);
           `uvm_info("RC_CONTROLLER","LTSSM_INITIATED",UVM_LOW)
           rc_pl_model.rc_ltssm(pcie_seq_item);
           // ACK/NAK/REPLAY processing threads can start when L0 is reached.
+	  if(rc_pl_model.link_up)begin
           rc_dl_model.phy_linkup = rc_pl_model.link_up;
-          drive_flit(pcie_seq_item);
-          `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
-          tx_tl_ap.write(pcie_seq_item);
+    @(dl_active_event);                  // fires once, the instant DL_ACTIVE is entered
+	  tl_link_active         = rc_dl_model.dl_link_active;
+         // drive_flit(pcie_seq_item);
+          `uvm_info("RC_CONTROLLER",$sformatf("ENTERED_INTO_RC_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION tl_link_active=%0d",tl_link_active),UVM_LOW)
+	  wait(tl_link_active);
+	  `uvm_info("RC_LTSSM","tl_link_active=1",UVM_LOW)
+	  tx_tl_ap.write(pcie_seq_item); 
         end
+end
         seq_item_port.item_done();
+
      end
         else begin
           // No sequence item currently available.
@@ -136,6 +145,7 @@ rc_pl_model.tx_process_executed = 1'b0;
     
 
 endclass
+
 
 
 
