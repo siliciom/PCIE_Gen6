@@ -36,9 +36,9 @@ class PCIe_gen6_3DW_Flit_DefMemWr_MinPayload_test extends PCIe_base_test;
     PCIe_RC_controller_base_sequence::type_id::set_type_override(
         PCIe_RC_3DW_Flit_DefMemWr_MinPayload_sequence::get_type());
 
-    // Run the SAME RC sequence on the EP controller sequencer as well.
+    // Override the EP controller sequence to run the common 3DW-Flit EP sequence for every test case.
     PCIe_EP_controller_base_sequence::type_id::set_type_override(
-        PCIe_RC_3DW_Flit_DefMemWr_MinPayload_sequence::get_type());
+        PCIe_EP_3DW_flit_sequence::get_type());
     super.build_phase(phase);
     `uvm_info("PCIE_GEN6_3DW_FLIT_DEFMEMWR_MINPAYLOAD_TEST","EXIT_FROM_PCIE_GEN6_3DW_FLIT_DEFMEMWR_MINPAYLOAD_TEST_BUILD_PHASE", UVM_LOW)
   endfunction
