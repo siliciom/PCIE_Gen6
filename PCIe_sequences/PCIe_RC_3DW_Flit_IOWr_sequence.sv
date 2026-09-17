@@ -1,7 +1,7 @@
 `ifndef PCIE_RC_3DW_FLIT_IOWR_SEQUENCE_SV
 `define PCIE_RC_3DW_FLIT_IOWR_SEQUENCE_SV
 
-class PCIe_RC_3DW_Flit_IOWr_sequence extends uvm_sequence #(PCIe_sequence_item);
+class PCIe_RC_3DW_Flit_IOWr_sequence extends PCIe_RC_controller_base_sequence;
   `uvm_object_utils(PCIe_RC_3DW_Flit_IOWr_sequence)
 
   function new(string name="PCIe_RC_3DW_Flit_IOWr_sequence");
