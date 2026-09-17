@@ -861,7 +861,7 @@ task ep_state_config_complete();
       `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_PRE_ENCODE_TASK"),UVM_LOW)
     endtask
 
-    task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out,PCIe_sequence_item item);
+    task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out,input PCIe_sequence_item item);
       bit [31:0] scramble_data;
       bit [31:0] gray_data;
       bit [31:0] pre_data;

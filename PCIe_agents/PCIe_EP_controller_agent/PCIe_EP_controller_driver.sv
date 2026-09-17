@@ -35,6 +35,7 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
    
    virtual PCIe_EP_interface     ep_pipe_intf_tx, ep_pipe_intf_rx;	
     
+    uvm_event ep_dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
    function new(string name="PCIe_EP_controller_driver", uvm_component parent);
      super.new(name,parent);
 	   tx_ap=new("tx_ap",this);
@@ -48,6 +49,7 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
       nak_item = PCIe_sequence_item::type_id::create("nak_item");
       ack_item=PCIe_sequence_item::type_id::create("ack_item");
   
+    ep_dl_active_event = uvm_event_pool::get_global("ep_dl_active_event");
     if (!uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf_tx))
         `uvm_fatal("NO_VIF", "EP_PIPE_INTERFACE_not_found")
 
@@ -61,21 +63,29 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
   `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
       `uvm_info("EP_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",ep_dl_model.DL_STATE.name()),UVM_LOW)
   forever begin
+      if(!ep_pl_model.link_up)begin
       seq_item_port.try_next_item(pcie_seq_item);
       if (pcie_seq_item != null) begin
+          `uvm_info("EP_CONTROLLER","LTSSM_INITIATED",UVM_LOW)
         ep_pl_model.ep_ltssm(pcie_seq_item);
         ep_dl_model.phy_linkup = ep_pl_model.link_up;
-        `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_NORMAL_TRANSFER_SECTION",UVM_LOW)
+
+	  `uvm_info("EP_LTSSM","tl_link_active=1",UVM_LOW)
+
+         ep_dl_active_event.wait_trigger();
+	 `uvm_info("EP_DLCMSM","Event_TL_Triggered",UVM_LOW)
+          drive_flit(pcie_seq_item);
         seq_item_port.item_done();
       end
       else begin
         #1ns;
       end
     end
+    end
   endtask
 
   // Drive the flit task
-  task drive_flit();
+  task drive_flit(PCIe_sequence_item pcie_seq_item);
    bit [`PCIe_BYTE_W-1:0] flit_full_q[$];
    wait(ep_pl_model.pl_sent);
   `uvm_info("EP_CONTROLLER",$sformatf("dl_flit_out is %p",ep_pl_model.dl_flit_out),UVM_LOW)

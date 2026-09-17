@@ -92,8 +92,8 @@ class PCIe_EP_DL_model extends uvm_component;
     // scattered in a bare while() loop, referenced by every debug print below.
     localparam int NUM_INITFC1_DLLP = 4;   // FC_INIT1 is "done" once this many INITFC1 DLLPs sent
     localparam int NUM_INITFC2_DLLP = 4;   // FC_INIT2 is "done" once this many INITFC2 DLLPs sent
-    event dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
     bit   dl_link_active;                   // stays 1 while in DL_ACTIVE - TL/driver can gate on this
+    uvm_event ep_dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
     // --------------------------------------------------------------------
 
   function new(string name = "PCIe_RC_DL_model", uvm_component parent);
@@ -104,6 +104,7 @@ class PCIe_EP_DL_model extends uvm_component;
     super.build_phase(phase);
     dl_imp = new("dl_imp", this);
     dl_ap = new("dl_ap", this);
+    ep_dl_active_event = uvm_event_pool::get_global("ep_dl_active_event");
     if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event", ep_l0_to_dl_event))
        `uvm_fatal("EVENT","ep_l0_to_dl_event not found") 
 
@@ -462,7 +463,7 @@ class PCIe_EP_DL_model extends uvm_component;
     // ---------------- DL_ACTIVE ----------------
     task dlcmsm_state_dl_active();
        dl_link_active = 1'b1;
-        -> dl_active_event;
+         ep_dl_active_event.trigger();
        `uvm_info("EP_DLCMSM",
           "[DL_ACTIVE] dl_link_active=1 :: dl_active_event_TRIGGERED :: TL_MAY_NOW_SEND_TLPs",UVM_LOW)
     endtask

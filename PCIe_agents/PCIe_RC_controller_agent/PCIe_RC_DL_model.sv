@@ -101,7 +101,7 @@ class PCIe_RC_DL_model extends uvm_component;
     // are used in the LTSSM (rc_check_ep_ts1/ts2).
     localparam int NUM_INITFC1_DLLP = 4;   // FC_INIT1 is "done" once this many INITFC1 DLLPs sent
     localparam int NUM_INITFC2_DLLP = 4;   // FC_INIT2 is "done" once this many INITFC2 DLLPs sent
-    event dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
+    uvm_event dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
     bit   dl_link_active;                   // stays 1 while in DL_ACTIVE - TL/driver can gate on this
     // --------------------------------------------------------------------
 
@@ -114,6 +114,7 @@ function void build_phase(uvm_phase phase);
     super.build_phase(phase);
     tlp_dl_imp = new("tlp_dl_imp",this);
     dlp_pl_ap = new("dlp_pl_ap",this);
+    dl_active_event = uvm_event_pool::get_global("dl_active_event");
      if (!uvm_config_db#(event)::get(this, "", "PCIE_rc_l0_to_dl_event", rc_l0_to_dl_event))
        `uvm_fatal("EVENT","rc_l0_to_dl_event not found") 
 
@@ -497,7 +498,7 @@ endfunction
    task dlcmsm_state_dl_active();
       `uvm_info("RC_DLCMSM","ENTERED_INTO_DL_ACTIVE_STATE",UVM_LOW)
       dl_link_active = 1'b1;
-      -> dl_active_event;
+         dl_active_event.trigger();
       `uvm_info("RC_DLCMSM",$sformatf("[DL_ACTIVE] dl_active_event_TRIGGERED :: TL_MAY_NOW_SEND_TLPs link_active=%0d",dl_link_active),UVM_LOW)
    endtask
 

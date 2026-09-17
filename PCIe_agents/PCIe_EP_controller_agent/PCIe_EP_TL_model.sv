@@ -47,7 +47,6 @@ class PCIe_EP_TL_model extends uvm_component;
   PCIe_sequence_item item;
 
   PCIe_env_config    pcie_ecfg;
-
   //==========================================================================
   //                        THREE MEMORY MODELS
   //   Depth and width come from PCIe_defines.sv - there is not one hard coded
