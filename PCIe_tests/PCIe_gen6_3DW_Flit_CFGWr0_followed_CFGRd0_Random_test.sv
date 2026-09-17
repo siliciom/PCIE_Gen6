@@ -35,6 +35,10 @@ class PCIe_gen6_3DW_Flit_CFGWr0_followed_CFGRd0_Random_test extends PCIe_base_te
     // Redirect the RC controller sequence to the PCIe_RC_3DW_Flit_CFGWr0_followed_CFGRd0_Random_sequence variant before build.
     PCIe_RC_controller_base_sequence::type_id::set_type_override(
         PCIe_RC_3DW_Flit_CFGWr0_followed_CFGRd0_Random_sequence::get_type());
+
+    // Run the SAME RC sequence on the EP controller sequencer as well.
+    PCIe_EP_controller_base_sequence::type_id::set_type_override(
+        PCIe_RC_3DW_Flit_CFGWr0_followed_CFGRd0_Random_sequence::get_type());
     super.build_phase(phase);
     `uvm_info("PCIE_GEN6_3DW_FLIT_CFGWR0_FOLLOWED_CFGRD0_RANDOM_TEST","EXIT_FROM_PCIE_GEN6_3DW_FLIT_CFGWR0_FOLLOWED_CFGRD0_RANDOM_TEST_BUILD_PHASE", UVM_LOW)
   endfunction

@@ -35,6 +35,10 @@ class PCIe_gen6_4DW_NonFlit_MemRdlock_MinPayload_test extends PCIe_base_test;
     // Redirect the RC controller sequence to the PCIe_RC_4DW_NonFlit_MemRdlock_MinPayload_sequence variant before build.
     PCIe_RC_controller_base_sequence::type_id::set_type_override(
         PCIe_RC_4DW_NonFlit_MemRdlock_MinPayload_sequence::get_type());
+
+    // Run the SAME RC sequence on the EP controller sequencer as well.
+    PCIe_EP_controller_base_sequence::type_id::set_type_override(
+        PCIe_RC_4DW_NonFlit_MemRdlock_MinPayload_sequence::get_type());
     super.build_phase(phase);
     `uvm_info("PCIE_GEN6_4DW_NONFLIT_MEMRDLOCK_MINPAYLOAD_TEST","EXIT_FROM_PCIE_GEN6_4DW_NONFLIT_MEMRDLOCK_MINPAYLOAD_TEST_BUILD_PHASE", UVM_LOW)
   endfunction

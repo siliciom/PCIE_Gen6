@@ -34,7 +34,11 @@ class PCIe_RC_4DW_Flit_MemRdlock_MinPayload_sequence extends PCIe_RC_controller_
     pcie_seq_item = PCIe_sequence_item::type_id::create("mrdlk");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
-         pkt_mode == FLIT;
+         // LTSSM information
+         electrical_idle_test == 1'b0;
+         no_receiver_test     == 1'b0;
+         tx_elec_idle         == 1'b1;
+         pkt_mode             == FLIT;
 
          txn_type == PCIe_TL_MEM;
          dir      == PCIe_TL_READ;
@@ -58,6 +62,18 @@ class PCIe_RC_4DW_Flit_MemRdlock_MinPayload_sequence extends PCIe_RC_controller_
          attr == 3'h0;
 
          at == 2'b00;
+
+         // Fields belonging to other transaction categories MUST be zero for a MEM transaction
+         cfg_reg_num          == '0;
+         cfg_ext_reg_num      == '0;
+         cfg_bus_num          == '0;
+         cfg_dev_num          == '0;
+         cfg_fn_num           == '0;
+         cfg_type1            == 1'b0;
+         io_data              == '0;
+         msg_code             == '0;
+         msg_route            == PCIe_MSG_ROUTE_TO_RC;
+         msg_has_data         == 1'b0;
        })
       `uvm_error("4DW_FLIT_MEMRDLOCK_MINPAYLOAD","randomize failed for mrdlk")
 

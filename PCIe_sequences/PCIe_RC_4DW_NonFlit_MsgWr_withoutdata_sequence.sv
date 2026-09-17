@@ -34,7 +34,11 @@ class PCIe_RC_4DW_NonFlit_MsgWr_withoutdata_sequence extends PCIe_RC_controller_
     pcie_seq_item = PCIe_sequence_item::type_id::create("msgwr");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
-         pkt_mode == NON_FLIT;
+         // LTSSM information
+         electrical_idle_test == 1'b0;
+         no_receiver_test     == 1'b0;
+         tx_elec_idle         == 1'b1;
+         pkt_mode             == NON_FLIT;
 
          txn_type     == PCIe_TL_MSG;
          msg_code     == 8'h7E;
@@ -51,6 +55,16 @@ class PCIe_RC_4DW_NonFlit_MsgWr_withoutdata_sequence extends PCIe_RC_controller_
          attr == 3'h0;
 
          at == 2'b00;
+
+         // Fields belonging to other transaction categories MUST be zero for a MSG transaction
+         cfg_reg_num          == '0;
+         cfg_ext_reg_num      == '0;
+         cfg_bus_num          == '0;
+         cfg_dev_num          == '0;
+         cfg_fn_num           == '0;
+         cfg_type1            == 1'b0;
+         io_data              == '0;
+         address              == '0;
        })
       `uvm_error("4DW_NONFLIT_MSGWR_WITHOUTDATA","randomize failed for msgwr")
 

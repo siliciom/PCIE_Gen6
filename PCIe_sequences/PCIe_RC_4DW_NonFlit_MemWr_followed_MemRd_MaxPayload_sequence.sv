@@ -34,7 +34,11 @@ class PCIe_RC_4DW_NonFlit_MemWr_followed_MemRd_MaxPayload_sequence extends PCIe_
     pcie_seq_item = PCIe_sequence_item::type_id::create("mwr");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
-         pkt_mode == NON_FLIT;
+         // LTSSM information
+         electrical_idle_test == 1'b0;
+         no_receiver_test     == 1'b0;
+         tx_elec_idle         == 1'b1;
+         pkt_mode             == NON_FLIT;
 
          txn_type == PCIe_TL_MEM;
          dir      == PCIe_TL_WRITE;
@@ -59,6 +63,18 @@ class PCIe_RC_4DW_NonFlit_MemWr_followed_MemRd_MaxPayload_sequence extends PCIe_
          attr == 3'b000;
 
          at == 2'b00;
+
+         // Fields belonging to other transaction categories MUST be zero for a MEM transaction
+         cfg_reg_num          == '0;
+         cfg_ext_reg_num      == '0;
+         cfg_bus_num          == '0;
+         cfg_dev_num          == '0;
+         cfg_fn_num           == '0;
+         cfg_type1            == 1'b0;
+         io_data              == '0;
+         msg_code             == '0;
+         msg_route            == PCIe_MSG_ROUTE_TO_RC;
+         msg_has_data         == 1'b0;
        })
       `uvm_error("4DW_NONFLIT_MEMWR_FOLLOWED_MEMRD_MAXPAYLOAD","randomize failed for mwr")
 
@@ -70,7 +86,11 @@ class PCIe_RC_4DW_NonFlit_MemWr_followed_MemRd_MaxPayload_sequence extends PCIe_
     pcie_seq_item = PCIe_sequence_item::type_id::create("mrd");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
-         pkt_mode == NON_FLIT;
+         // LTSSM information
+         electrical_idle_test == 1'b0;
+         no_receiver_test     == 1'b0;
+         tx_elec_idle         == 1'b1;
+         pkt_mode             == NON_FLIT;
 
          txn_type == PCIe_TL_MEM;
          dir      == PCIe_TL_READ;
@@ -95,6 +115,18 @@ class PCIe_RC_4DW_NonFlit_MemWr_followed_MemRd_MaxPayload_sequence extends PCIe_
          attr == 3'b000;
 
          at == 2'b00;
+
+         // Fields belonging to other transaction categories MUST be zero for a MEM transaction
+         cfg_reg_num          == '0;
+         cfg_ext_reg_num      == '0;
+         cfg_bus_num          == '0;
+         cfg_dev_num          == '0;
+         cfg_fn_num           == '0;
+         cfg_type1            == 1'b0;
+         io_data              == '0;
+         msg_code             == '0;
+         msg_route            == PCIe_MSG_ROUTE_TO_RC;
+         msg_has_data         == 1'b0;
        })
       `uvm_error("4DW_NONFLIT_MEMWR_FOLLOWED_MEMRD_MAXPAYLOAD","randomize failed for mrd")
 

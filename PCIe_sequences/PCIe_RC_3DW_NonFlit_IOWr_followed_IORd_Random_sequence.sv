@@ -34,7 +34,11 @@ class PCIe_RC_3DW_NonFlit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_con
     pcie_seq_item = PCIe_sequence_item::type_id::create("iowr");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
-         pkt_mode == NON_FLIT;
+         // LTSSM information
+         electrical_idle_test == 1'b0;
+         no_receiver_test     == 1'b0;
+         tx_elec_idle         == 1'b1;
+         pkt_mode             == NON_FLIT;
 
          txn_type == PCIe_TL_IO;
          dir      == PCIe_TL_WRITE;
@@ -45,6 +49,17 @@ class PCIe_RC_3DW_NonFlit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_con
 
          requester_id == 16'h0100;
 
+
+         // Fields belonging to other transaction categories MUST be zero for an IO transaction
+         cfg_reg_num          == '0;
+         cfg_ext_reg_num      == '0;
+         cfg_bus_num          == '0;
+         cfg_dev_num          == '0;
+         cfg_fn_num           == '0;
+         cfg_type1            == 1'b0;
+         msg_code             == '0;
+         msg_route            == PCIe_MSG_ROUTE_TO_RC;
+         msg_has_data         == 1'b0;
        })
       `uvm_error("3DW_NONFLIT_IOWR_FOLLOWED_IORD_RANDOM","randomize failed for iowr")
 
@@ -56,7 +71,11 @@ class PCIe_RC_3DW_NonFlit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_con
     pcie_seq_item = PCIe_sequence_item::type_id::create("iord");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
-         pkt_mode == NON_FLIT;
+         // LTSSM information
+         electrical_idle_test == 1'b0;
+         no_receiver_test     == 1'b0;
+         tx_elec_idle         == 1'b1;
+         pkt_mode             == NON_FLIT;
 
          txn_type == PCIe_TL_IO;
          dir      == PCIe_TL_READ;
@@ -67,6 +86,17 @@ class PCIe_RC_3DW_NonFlit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_con
 
          requester_id == 16'h0100;
 
+
+         // Fields belonging to other transaction categories MUST be zero for an IO transaction
+         cfg_reg_num          == '0;
+         cfg_ext_reg_num      == '0;
+         cfg_bus_num          == '0;
+         cfg_dev_num          == '0;
+         cfg_fn_num           == '0;
+         cfg_type1            == 1'b0;
+         msg_code             == '0;
+         msg_route            == PCIe_MSG_ROUTE_TO_RC;
+         msg_has_data         == 1'b0;
        })
       `uvm_error("3DW_NONFLIT_IOWR_FOLLOWED_IORD_RANDOM","randomize failed for iord")
 

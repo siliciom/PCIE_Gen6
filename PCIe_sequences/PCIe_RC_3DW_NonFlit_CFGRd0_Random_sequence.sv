@@ -34,7 +34,11 @@ class PCIe_RC_3DW_NonFlit_CFGRd0_Random_sequence extends PCIe_RC_controller_base
     pcie_seq_item = PCIe_sequence_item::type_id::create("cfg");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
-         pkt_mode == NON_FLIT;
+         // LTSSM information
+         electrical_idle_test == 1'b0;
+         no_receiver_test     == 1'b0;
+         tx_elec_idle         == 1'b1;
+         pkt_mode             == NON_FLIT;
 
          txn_type  == PCIe_TL_CFG;
          dir       == PCIe_TL_READ;
@@ -48,6 +52,13 @@ class PCIe_RC_3DW_NonFlit_CFGRd0_Random_sequence extends PCIe_RC_controller_base
 
          requester_id == 16'h0100;
 
+
+         // Fields belonging to other transaction categories MUST be zero for a CFG transaction
+         io_data              == '0;
+         msg_code             == '0;
+         msg_route            == PCIe_MSG_ROUTE_TO_RC;
+         msg_has_data         == 1'b0;
+         address              == '0;
        })
       `uvm_error("3DW_NONFLIT_CFGRD0_RANDOM","randomize failed for cfg")
 
