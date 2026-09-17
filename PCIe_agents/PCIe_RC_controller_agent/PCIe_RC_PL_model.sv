@@ -43,7 +43,7 @@ class PCIe_RC_PL_model extends uvm_component;
    bit               l0_entry_done = 0;
    bit [`PCIe_MON_DATA_W-1:0]        tx_data_q[$];
    bit               link_up;
-   event             rc_l0_to_dl_event;
+   uvm_event         uvm_rc_l0_to_dl_ev;
    bit               tx_process_executed;
 
    bit[0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
@@ -88,8 +88,9 @@ class PCIe_RC_PL_model extends uvm_component;
             `uvm_fatal("NO_VIF", "RC_PIPE_INTERFACE_not_found")
        if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf_rx))
             `uvm_fatal("NO_VIF", "RC_PIPE_INTERFACE_not_found")
-       if (!uvm_config_db#(event)::get(this, "", "PCIE_rc_l0_to_dl_event",rc_l0_to_dl_event))
-              `uvm_fatal("EVENT", "event not found")
+
+       uvm_rc_l0_to_dl_ev = uvm_event_pool::get_global("rc_l0_to_dl_event");
+    
         //if(pcie_ecfg.mode == FLIT)
         // LTSSM Initial State
        // rc_main_state   = DETECT;
@@ -657,7 +658,7 @@ task rc_state_config_complete();
         link_up = 1'b1;
         `uvm_info("RC_LTSSM","LINK_UP=1",UVM_LOW)
         // INFORM DL THAT LINK IS UP
-        -> rc_l0_to_dl_event;
+        uvm_rc_l0_to_dl_ev.trigger();
         `uvm_info("RC_LTSSM","RC_L0_TO_DL_EVENT_TRIGGERED",UVM_LOW)
         `uvm_info("RC_LTSSM","STARTING_RANDOM_DATA_GENERATION",UVM_LOW)
          //generate_random_data();

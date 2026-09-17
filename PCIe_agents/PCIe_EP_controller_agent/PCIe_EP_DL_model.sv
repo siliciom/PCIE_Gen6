@@ -81,7 +81,7 @@ class PCIe_EP_DL_model extends uvm_component;
         // ---- DLCMSM additions ----
     dl_state_e          DL_STATE = DL_INACTIVE;
     dl_init_substate_e  dl_init_substate;
-    event               ep_l0_to_dl_event;   // fired by PL model when LTSSM reaches L0
+    uvm_event           uvm_ep_l0_to_dl_ev;   // fired by PL model when LTSSM reaches L0
     int                 fc1_sent_count, fc1_rcvd_count;
     int                 fc2_sent_count, fc2_rcvd_count;
     bit                 phy_linkup;      
@@ -105,9 +105,7 @@ class PCIe_EP_DL_model extends uvm_component;
     dl_imp = new("dl_imp", this);
     dl_ap = new("dl_ap", this);
     ep_dl_active_event = uvm_event_pool::get_global("ep_dl_active_event");
-    if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event", ep_l0_to_dl_event))
-       `uvm_fatal("EVENT","ep_l0_to_dl_event not found") 
-
+    uvm_ep_l0_to_dl_ev = uvm_event_pool::get_global("ep_l0_to_dl_event");
     // ---- LCRC additions: mode comes from transaction (item.pkt_mode) in write() and check_lcrc_on_rx() ----
     if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
       `uvm_fatal("EP_DL_MODEL","Cannot_get_PCIe_env_config");
@@ -235,7 +233,7 @@ class PCIe_EP_DL_model extends uvm_component;
   task run_phase(uvm_phase phase);
      `uvm_info("EP_DLCMSM","[DLCMSM_TRACE] WAITING_FOR_ep_l0_to_dl_event (fired by PL model on LTSSM L0 entry)",UVM_LOW)
      forever begin
-         @(ep_l0_to_dl_event);
+         uvm_ep_l0_to_dl_ev.wait_trigger();
          wait(phy_linkup == 1);
         `uvm_info("EP_DLCMSM","[DLCMSM_TRACE] ep_l0_to_dl_event_FIRED :: LTSSM_REACHED_L0 :: STARTING_DLCMSM_FSM",UVM_LOW)
         DL_STATE       = DL_INACTIVE;

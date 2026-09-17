@@ -26,8 +26,8 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
         
     bit [31:0] rc_data_q [$];
     bit [31:0] ep_data_q [$];
-    event rc_to_ep_bit_event;
-    event ep_to_rc_bit_event;
+    uvm_event  uvm_rc_to_ep_ev;
+    uvm_event  uvm_ep_to_rc_ev;
     bit   receiver_present = 1;
 
     function new(string name="PCIe_EP_phy_driver", uvm_component parent);
@@ -46,10 +46,10 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
         `uvm_fatal("NO_VIF", "RC_PHY_INTERFACE_not_found")
      if (!uvm_config_db#(virtual PCIe_EP_PHY_interface)::get(this, "", "PCIe_EP_PHY_INTERFACE", ep_phy_intf_rx))
         `uvm_fatal("NO_VIF", "RC_PHY_INTERFACE_not_found")
-     if (!uvm_config_db#(event)::get(this,"","RC_TO_EP_BIT_EVENT",rc_to_ep_bit_event))
-        `uvm_fatal("NO_EVENT","RC_TO_EP_BIT_EVENT_not_found")
-     if (!uvm_config_db#(event)::get(this,"","EP_TO_RC_BIT_EVENT",ep_to_rc_bit_event))
-         `uvm_fatal("NO_EVENT","EP_TO_RC_BIT_EVENT_not_found")
+
+    uvm_rc_to_ep_ev = uvm_event_pool::get_global("rc_to_ep_bit_event");
+     uvm_ep_to_rc_ev = uvm_event_pool::get_global("ep_to_rc_bit_event");
+
         `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_DRIVER_BUILD_PHASE",UVM_LOW)
    endfunction
 
@@ -111,7 +111,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
        begin
           for(int i = 0; i < `PCIe_MON_DATA_W; i++)
           begin
-              @rc_to_ep_bit_event;		  
+              uvm_rc_to_ep_ev.wait_trigger();		  
               #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
               rx_bit = ep_phy_intf_rx.rx_plus;
               rx_data[i] = rx_bit;
@@ -188,7 +188,7 @@ task tx_piso(input bit [`PCIe_MON_DATA_W-1:0] data_in);
               ep_phy_intf_tx.tx_plus  <= piso_data_out;
               ep_phy_intf_tx.tx_minus <= ~piso_data_out;
              `uvm_info("EP_PHY_DRIVER", $sformatf("EP_PHY_DRIVER_PISO_DATA_IN_PHY_BIT_BY_BIT[%0d] = %0b TIME=%0t ",i, piso_data_out, $time), UVM_LOW)
-             -> ep_to_rc_bit_event;
+              uvm_ep_to_rc_ev.trigger();
               #`PCIe_PHY_TX_BIT_DELAY;
            end
             ep_phy_intf_tx.tx_plus  <= 1'b0;

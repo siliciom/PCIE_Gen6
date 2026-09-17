@@ -25,8 +25,8 @@ class PCIe_RC_phy_driver extends uvm_driver #(PCIe_sequence_item);
   
     bit [31:0] rc_data_q[$];
     bit [31:0] ep_data_q[$];
-    event rc_to_ep_bit_event;
-    event ep_to_rc_bit_event;
+    uvm_event  uvm_rc_to_ep_ev;
+    uvm_event  uvm_ep_to_rc_ev;
     bit   receiver_present = 1;
     PCIe_EP_PL_model                 ep_pl_model;  
     bit   ep_present;
@@ -52,11 +52,9 @@ class PCIe_RC_phy_driver extends uvm_driver #(PCIe_sequence_item);
        if (!uvm_config_db#(virtual PCIe_RC_PHY_interface)::get(this, "", "PCIe_RC_PHY_INTERFACE", rc_phy_intf_rx))
         `uvm_fatal("NO_VIF", "RC_PHY_INTERFACE_not_found")
 
-       if (!uvm_config_db#(event)::get(this,"","RC_TO_EP_BIT_EVENT",rc_to_ep_bit_event))
-         `uvm_fatal("NO_EVENT","RC_TO_EP_BIT_EVENT_not_found")
-       
-       if (!uvm_config_db#(event)::get(this,"","EP_TO_RC_BIT_EVENT",ep_to_rc_bit_event))
-         `uvm_fatal("NO_EVENT","EP_TO_RC_BIT_EVENT_not_found")
+       uvm_rc_to_ep_ev = uvm_event_pool::get_global("rc_to_ep_bit_event");
+       uvm_ep_to_rc_ev = uvm_event_pool::get_global("ep_to_rc_bit_event");
+
 
       `uvm_info("RC_PHY","EXIT_FROM_RC_PHY_DRIVER_BUILD_PHASE",UVM_LOW)
    endfunction
@@ -153,7 +151,7 @@ task tx_piso(input bit [`PCIe_MON_DATA_W-1:0] data_in);
               rc_phy_intf_tx.tx_plus  <= piso_data_out;
               rc_phy_intf_tx.tx_minus <= ~piso_data_out;
              `uvm_info("RC_PHY_DRIVER", $sformatf("PISO_DATA_IN_PHY_BIT_BY_BIT[%0d] = %0b TIME=%0t ",i, piso_data_out, $time), UVM_LOW)
-             -> rc_to_ep_bit_event;
+	      uvm_rc_to_ep_ev.trigger();
               #`PCIe_PHY_TX_BIT_DELAY;
            end
             rc_phy_intf_tx.tx_plus  <= 1'b0;
@@ -169,7 +167,7 @@ task rx_sipo(virtual PCIe_RC_PHY_interface rc_phy_intf_rx);
          begin
             for(int i = 0; i < `PCIe_MON_DATA_W; i++)
             begin
-                @ep_to_rc_bit_event;		  
+                uvm_ep_to_rc_ev.wait_trigger();		
                 #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
                 rx_bit = rc_phy_intf_rx.rx_plus;
                 rx_data[i] = rx_bit;

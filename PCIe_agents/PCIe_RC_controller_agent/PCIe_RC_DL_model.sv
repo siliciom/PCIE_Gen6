@@ -89,7 +89,7 @@ class PCIe_RC_DL_model extends uvm_component;
         // ---- DLCMSM additions ----
     dl_state_e          DL_STATE = DL_INACTIVE;
     dl_init_substate_e  dl_init_substate;
-    event               rc_l0_to_dl_event;   // fired by PL model when LTSSM reaches L0
+    uvm_event           uvm_rc_l0_to_dl_ev;   // fired by PL model when LTSSM reaches L0
     int                 fc1_sent_count, fc1_rcvd_count;
     int                 fc2_sent_count, fc2_rcvd_count;
     bit                 phy_linkup;          
@@ -115,9 +115,7 @@ function void build_phase(uvm_phase phase);
     tlp_dl_imp = new("tlp_dl_imp",this);
     dlp_pl_ap = new("dlp_pl_ap",this);
     dl_active_event = uvm_event_pool::get_global("dl_active_event");
-     if (!uvm_config_db#(event)::get(this, "", "PCIE_rc_l0_to_dl_event", rc_l0_to_dl_event))
-       `uvm_fatal("EVENT","rc_l0_to_dl_event not found") 
-
+    uvm_rc_l0_to_dl_ev = uvm_event_pool::get_global("rc_l0_to_dl_event");
     // ---- LCRC addition: fetch link-wide mode for DLCMSM flits; per-transaction mode from item.pkt_mode ----
     if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
       `uvm_fatal("RC_DL_MODEL","Cannot_get_PCIe_env_config");
@@ -146,7 +144,7 @@ function void write(PCIe_sequence_item item);
 
   print_dlp_packet(item.tlp_data,item.dlp_flit_out,item.dl_lcrc);
   `uvm_info("RC_DL_MODEL","SENT_DLP_TO_PL_236B", UVM_LOW)
-  dlp_pl_ap.write(item);
+   dlp_pl_ap.write(item);
 endfunction
 
 
@@ -275,7 +273,8 @@ endfunction
   task run_phase(uvm_phase phase);
      `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] WAITING_FOR_rc_l0_to_dl_event (fired by PL model on LTSSM L0 entry)",UVM_LOW)
      forever begin
-        @(rc_l0_to_dl_event);
+       //@(rc_l0_to_dl_event);
+       uvm_rc_l0_to_dl_ev.wait_trigger();
       `uvm_info("RC_DLCMSM","DLCMSM_RC_TO_DL_EVENT_TRIGGRED",UVM_LOW)
         wait(phy_linkup == 1);
         `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] rc_l0_to_dl_event_FIRED :: LTSSM_REACHED_L0 :: STARTING_DLCMSM_FSM",UVM_LOW)

@@ -55,7 +55,7 @@ class PCIe_EP_PL_model extends uvm_component;
    event           rc_to_ep_ts1_10;
    event           rc_to_ep_ts2_16;
    bit             link_up;
-   event           ep_l0_to_dl_event;
+   uvm_event       uvm_ep_l0_to_dl_ev;
    bit[`PCIe_MON_DATA_W-1:0]       scr_data;
    bit [7:0]        ep_link_num = 8'hFF;   // PAD until learned from RC in LinkWidth.Start
    bit [7:0]        ep_lane_num = 8'hFF;   // PAD until assigned in LinkWidth.Accept
@@ -81,8 +81,7 @@ bit            tx_process_executed;
             `uvm_fatal("NO_VIF", "EC_PIPE_INTERFACE_not_found")
       if (!uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf_rx))
             `uvm_fatal("NO_VIF", "EC_PIPE_INTERFACE_not_found")
-      if (!uvm_config_db#(event)::get(this, "", "PCIE_ep_l0_to_dl_event",ep_l0_to_dl_event))
-             `uvm_fatal("EVENT", "event not found")
+      uvm_ep_l0_to_dl_ev = uvm_event_pool::get_global("ep_l0_to_dl_event");
        //if(pcie_ecfg.mode == FLIT)
       `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
     endfunction
@@ -566,7 +565,7 @@ task ep_state_config_complete();
         link_up = 1'b1;
         `uvm_info("EP_LTSSM","LINK_UP=1",UVM_LOW)
         // INFORM DL THAT LINK IS UP
-        -> ep_l0_to_dl_event;
+        uvm_ep_l0_to_dl_ev.trigger();
         `uvm_info("EP_LTSSM","EP_L0_TO_DL_EVENT_TRIGGERED",UVM_LOW)
         // SELECT FLIT / NON-FLIT MODE
         //case (pcie_ecfg.mode)

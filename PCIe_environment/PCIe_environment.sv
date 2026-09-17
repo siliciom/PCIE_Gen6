@@ -24,12 +24,12 @@ class PCIe_environment extends uvm_env;
    PCIe_subscriber              pcie_subscriber;
 
    PCIe_env_config              pcie_ecfg;
-   event                        rc_to_ep_bit_event;
-   event                        ep_to_rc_bit_event;
-   event                        rc_l0_to_dl_event;
-   event                        ep_l0_to_dl_event;
-   event                        ep_tlp_to_dlp_event;
-   event                        rc_tlp_to_dlp_event;
+   uvm_event                    rc_to_ep_bit_event;
+   uvm_event                    ep_to_rc_bit_event;
+   uvm_event                    rc_l0_to_dl_event;
+   uvm_event                    ep_l0_to_dl_event;
+   uvm_event                    ep_tlp_to_dlp_event;
+   uvm_event                    rc_tlp_to_dlp_event;
    
    PCIe_RC_PL_model              rc_pl_model;
    PCIe_EP_PL_model              ep_pl_model;
@@ -41,12 +41,10 @@ class PCIe_environment extends uvm_env;
    function void build_phase(uvm_phase phase);
       super.build_phase(phase);
       `uvm_info(get_type_name(),"ENTER_BUILD_PHASE", UVM_LOW)
-       uvm_config_db#(event)::set(this,"*","RC_TO_EP_BIT_EVENT",rc_to_ep_bit_event);
-       uvm_config_db#(event)::set(this,"*","EP_TO_RC_BIT_EVENT",ep_to_rc_bit_event);
-       uvm_config_db#(event)::set(null,"","PCIE_rc_l0_to_dl_event",rc_l0_to_dl_event);
-       uvm_config_db#(event)::set(null,"","PCIE_ep_l0_to_dl_event",ep_l0_to_dl_event);
-       uvm_config_db#(event)::set(null,"","ep_tlp_to_dlp_event",ep_tlp_to_dlp_event);
-       uvm_config_db#(event)::set(null,"","rc_tlp_to_dlp_event",rc_tlp_to_dlp_event);
+       rc_to_ep_bit_event = uvm_event_pool::get_global("rc_to_ep_bit_event");
+       ep_to_rc_bit_event = uvm_event_pool::get_global("ep_to_rc_bit_event");
+       rc_l0_to_dl_event = uvm_event_pool::get_global("rc_l0_to_dl_event");
+       ep_l0_to_dl_event = uvm_event_pool::get_global("ep_l0_to_dl_event");
       if(!uvm_config_db #(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
       begin
          `uvm_fatal("PCIe_ENV","Cannot_get_ENV_CONFIG")

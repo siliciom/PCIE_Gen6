@@ -24,8 +24,8 @@ class PCIe_EP_phy_monitor extends uvm_monitor;
     uvm_analysis_port #(PCIe_sequence_item) ep_phy_rx_mon_ap;	
     uvm_analysis_port #(PCIe_sequence_item) ep_phy_tx_mon_ap;	
     
-    event rc_to_ep_bit_event;
-    event ep_to_rc_bit_event;
+    uvm_event uvm_rc_to_ep_ev;
+    uvm_event uvm_ep_to_rc_ev;
 
     function new(string name="PCIe_EP_phy_monitor", uvm_component parent);
       super.new(name,parent);
@@ -43,12 +43,11 @@ class PCIe_EP_phy_monitor extends uvm_monitor;
 
         if (!uvm_config_db#(virtual PCIe_EP_PHY_interface)::get(this, "", "PCIe_EP_PHY_INTERFACE", ep_phy_intf_rx))
           `uvm_fatal("NO_VIF", "RC_PHY_INTERFACE_not_found")
+
+        uvm_rc_to_ep_ev = uvm_event_pool::get_global("rc_to_ep_bit_event");
+        uvm_ep_to_rc_ev = uvm_event_pool::get_global("ep_to_rc_bit_event");
 	
-        if (!uvm_config_db#(event)::get(this,"","RC_TO_EP_BIT_EVENT",rc_to_ep_bit_event))
-          `uvm_fatal("NO_EVENT","RC_TO_EP_BIT_EVENT_not_found")
         
-        if (!uvm_config_db#(event)::get(this,"","EP_TO_RC_BIT_EVENT",ep_to_rc_bit_event))
-          `uvm_fatal("NO_EVENT","EP_TO_RC_BIT_EVENT_not_found")
       
       `uvm_info("EP_PHY_MONITOR","EXIT_FROM_EP_PHY_MONITOR_BUILD_PHASE",UVM_LOW)
     endfunction
@@ -73,7 +72,7 @@ task rx_sipo(virtual PCIe_EP_PHY_interface ep_phy_intf_rx);
           rx_data = 32'b0;
           for(int i = 0; i < `PCIe_MON_DATA_W; i++)
           begin
-              @rc_to_ep_bit_event;		  
+              uvm_rc_to_ep_ev.wait_trigger();		  
               #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
               rx_bit = ep_phy_intf_rx.rx_plus;
               rx_data[i] = rx_bit;
@@ -92,7 +91,7 @@ task rx_sipo(virtual PCIe_EP_PHY_interface ep_phy_intf_rx);
        `uvm_info("EP_PHY_MONITOR","ENTERED_INTO_TX_SIPO_EP_MONITOR", UVM_LOW)
            for(int i = 0; i < `PCIe_MON_DATA_W; i++)
            begin
-               @ep_to_rc_bit_event;		  
+               uvm_ep_to_rc_ev.wait_trigger();		  
                #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
                tx_bit = ep_phy_intf_tx.tx_plus;
                tx_data[i] = tx_bit;
