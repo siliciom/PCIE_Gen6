@@ -60,6 +60,7 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_EP_phy_base_sequence.sv"
 
         `include "../PCIe_sequences/PCIe_RC_3DW_flit_sequence.sv"
+        `include "../PCIe_sequences/PCIe_EP_3DW_flit_sequence.sv"
       //`include "../PCIe_sequences/PCIe_IO_3DW_FLIT_sequence.sv"
 	`include "../PCIe_sequences/PCIe_EP_electrical_idle_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_electrical_idle_sequence.sv"
