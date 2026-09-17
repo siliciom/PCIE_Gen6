@@ -61,6 +61,9 @@ package PCIe_pkg;
 
         `include "../PCIe_sequences/PCIe_RC_3DW_flit_sequence.sv"
         `include "../PCIe_sequences/PCIe_EP_3DW_flit_sequence.sv"
+		`include "../PCIe_sequences/PCIe_RC_flit_idle_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_flit_nop_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_flit_payload_sequence.sv"
       //`include "../PCIe_sequences/PCIe_IO_3DW_FLIT_sequence.sv"
 	`include "../PCIe_sequences/PCIe_EP_electrical_idle_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_electrical_idle_sequence.sv"
@@ -182,6 +185,9 @@ package PCIe_pkg;
 
         `include "../PCIe_tests/PCIe_3DW_flit_test.sv"
       //`include "../PCIe_tests/PCIe_IO_3DW_FLIT_test.sv"
+	`include "../PCIe_tests/PCIe_RC_flit_idle_test.sv"
+	`include "../PCIe_tests/PCIe_RC_flit_nop_test.sv"
+	`include "../PCIe_tests/PCIe_RC_flit_payload_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_electrical_idle_during_training_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_detect_no_receiver_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_basic_linkup_L0_test.sv"

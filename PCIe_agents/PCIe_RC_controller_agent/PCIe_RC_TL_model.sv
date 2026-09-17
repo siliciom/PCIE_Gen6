@@ -28,6 +28,9 @@ class PCIe_RC_TL_model extends uvm_component;
   // Output toward RC DL model.
   uvm_analysis_port #(PCIe_sequence_item) tlp_dl_ap;
 
+  uvm_analysis_port #(PCIe_sequence_item) tl_ap;
+
+
   PCIe_sequence_item item;
 
   //--------------------------------------------------------------------------
@@ -51,6 +54,7 @@ class PCIe_RC_TL_model extends uvm_component;
     `uvm_info("RC_TL_MODEL","ENTERED_INTO_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
      tx_tl_imp = new("tx_tl_imp", this);
      tlp_dl_ap  = new("tlp_dl_ap",  this);
+     tl_ap  = new("tl_ap",  this);
     `uvm_info("RC_TL_MODEL","EXIT_FROM_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
   endfunction
 
@@ -68,11 +72,27 @@ class PCIe_RC_TL_model extends uvm_component;
   virtual function void send_tlp(PCIe_sequence_item tr);
 
     bit [`PCIe_TL_DATA_DW_W-1:0] hdr[];
+       //----------------------------------------------------------------------
+    // IDLE / NOP FLIT (Table 4-16) : both carry NOP TLPs across all 236 bytes,
+    // so there is no header to serialize and no payload to append.
+    //----------------------------------------------------------------------
+    if ((tr.pkt_mode == FLIT) && (tr.flit_type != PCIe_PAYLOAD_flit)) begin
+      build_idle_or_nop_flit(tr);
+      return;
+    end
+
 
     serialize_header(tr, hdr);       // Header Base + OHC
     tr.hdr_dw_count = hdr.size();
 
     build_complete_tlp(tr, hdr);     // Header + OHC + Payload -> serialized_tlp
+
+     // ---- ECRC (Section 2.7.1) --------------------------------------------
+    // Non-Flit Mode : appended as the TLP Digest when TD == 1
+    // Flit Mode     : appended as a 1 DW Trailer when TS[2:0] == 001b
+    append_ecrc(tr);
+    // ----------------------------------------------------------------------
+
 
     // FLIT MODE : pack the TLP into the 236 byte FLIT TLP region and pad the
     // remainder with NOP TLPs (Sec 2.2.1.2). Non-Flit Mode has no such region.
@@ -888,5 +908,252 @@ class PCIe_RC_TL_model extends uvm_component;
     end
 
   endfunction
+
+   //==========================================================================
+  //                   ECRC GENERATION  -  Section 2.7.1        [ADDED]
+  //
+  //   "A 32-bit ECRC is calculated for the TLP (End-End TLP Prefixes/OHC,
+  //    header, and data payload) ... and appended to the end of the TLP"
+  //
+  //     * polynomial 04C1 1DB7h
+  //     * seed FFFF FFFFh
+  //     * calculation starts with bit 0 of byte 0 and proceeds from bit 0 to
+  //       bit 7 of each byte  ->  LSB-first, hence the reflected polynomial
+  //     * all Variant bits are treated as Set:
+  //         Non-Flit Mode : header symbol 0 bit 0 (Type[0])
+  //                         header symbol 2 bit 6 (EP)
+  //         Flit Mode     : header symbol 0 bit 0 (Type[0])
+  //                         header symbol 6 bit 7 (EP)
+  //     * the result is complemented and mapped into the 32-bit TLP Digest
+  //       (NFM) / Trailer (FM) through Table 2-55 - a byte-wise bit reversal
+  //
+  //   ECRC is generated HERE, on the transmitting side. The EP TL model
+  //   recalculates it on the receiving side (PCIe_EP_TL_model::check_ecrc_rx).
+  //==========================================================================
+
+  // ---- Core byte-serial CRC-32, LSB-first ----
+  function automatic bit [31:0] ecrc_byte_update(bit [31:0] crc_in, bit [7:0] data_byte);
+    bit [31:0] crc;
+    bit [7:0]  b;
+    crc = crc_in;
+    b   = data_byte;
+    for (int i = 0; i < 8; i++) begin
+      if ((crc[0] ^ b[0]) == 1'b1) crc = (crc >> 1) ^ `PCIe_TL_ECRC_POLY_REFLECTED;
+      else                         crc = (crc >> 1);
+      b = b >> 1;
+    end
+    return crc;
+  endfunction
+
+  // ---- Table 2-55 : ECRC result bit n -> TLP Digest bit position ----
+  function automatic bit [`PCIe_TL_ECRC_W-1:0] ecrc_map_bits(bit [31:0] crc_result);
+    bit [`PCIe_TL_ECRC_W-1:0] digest;
+    digest = '0;
+    for (int byte_i = 0; byte_i < 4; byte_i++)
+      for (int bit_i = 0; bit_i < 8; bit_i++)
+        digest[(byte_i*8) + (7 - bit_i)] = crc_result[(byte_i*8) + bit_i];
+    return digest;
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // generate_ecrc - run the CRC over the serialized TLP (header + OHC +
+  // payload). dw_stream[] is DW oriented; byte 0 of the TLP is the MSB of
+  // dw_stream[0], matching pack_to_tlp_data / print_flit_region.
+  //--------------------------------------------------------------------------
+  virtual function bit [`PCIe_TL_ECRC_W-1:0] generate_ecrc(
+      input bit [`PCIe_TL_DATA_DW_W-1:0] dw_stream [],
+      input pkt_mode_e                   mode);
+
+    bit [31:0] crc;
+    bit [7:0]  b;
+    int        nbytes;
+    int        var_sym;
+    int        var_bit;
+
+    crc     = `PCIe_TL_ECRC_SEED;
+    nbytes  = dw_stream.size() * `PCIe_TL_DW_BYTES;
+    var_sym = (mode == FLIT) ? `PCIe_TL_ECRC_FM_VAR_SYM     : `PCIe_TL_ECRC_NFM_VAR_SYM;
+    var_bit = (mode == FLIT) ? `PCIe_TL_ECRC_FM_VAR_SYM_BIT : `PCIe_TL_ECRC_NFM_VAR_SYM_BIT;
+
+    `uvm_info("ECRC_TX",
+      $sformatf("ECRC_START : mode=%s bytes_covered=%0d variant_bits={sym%0d.bit%0d , sym%0d.bit%0d}",
+                 mode.name(), nbytes,
+                 `PCIe_TL_ECRC_VAR_SYM0, `PCIe_TL_ECRC_VAR_SYM0_BIT, var_sym, var_bit), UVM_LOW)
+
+    for (int i = 0; i < nbytes; i++) begin
+      b = dw_stream[i/4][ 8*(3-(i%4)) +: 8 ];
+
+      // "All Variant bits must be treated as Set for ECRC calculations"
+      if (i == `PCIe_TL_ECRC_VAR_SYM0) b[`PCIe_TL_ECRC_VAR_SYM0_BIT] = 1'b1;
+      if (i == var_sym)                b[var_bit]                    = 1'b1;
+
+      crc = ecrc_byte_update(crc, b);
+      `uvm_info("ECRC_TX",
+        $sformatf("  byte[%0d]=%02h running_crc=%08h", i, b, crc), UVM_HIGH)
+    end
+
+    crc = ~crc;                          // complement the result
+    return ecrc_map_bits(crc);           // Table 2-55 bit mapping
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // append_ecrc - decide whether this TLP carries an ECRC and, if so, append
+  // it to serialized_tlp.
+  //
+  //   NON-FLIT : TD == 1  ->  32-bit TLP Digest field at the end of the TLP
+  //   FLIT     : TS == 001b ->  1 DW Trailer containing ECRC
+  //              (a sequence that sets td == 1 in FLIT mode is treated as a
+  //               request for the ECRC trailer and TS is forced to 001b)
+  //--------------------------------------------------------------------------
+  virtual function void append_ecrc(PCIe_sequence_item tr);
+
+    bit [`PCIe_TL_ECRC_W-1:0]    digest;
+    bit [`PCIe_TL_DATA_DW_W-1:0] tmp [];
+    int i;
+
+    tr.ecrc_present = 1'b0;
+    tr.ecrc_state   = PCIe_ECRC_ABSENT;
+
+    if (tr.pkt_mode == NON_FLIT) begin
+      if (tr.td != 1'b1) begin
+        `uvm_info("ECRC_TX",
+          "NON_FLIT TD=0 : no TLP Digest appended (Section 2.7.1)", UVM_LOW)
+        return;
+      end
+    end
+    else begin
+      // FLIT : the trailer is selected by TS[2:0]. Accept td==1 as a request
+      // for it so the existing sequences keep working unchanged.
+      if ((tr.ts != `PCIe_TL_TS_1DW_ECRC) && (tr.td != 1'b1)) begin
+        `uvm_info("ECRC_TX",
+          $sformatf("FLIT TS=%03b TD=%0b : no ECRC trailer appended", tr.ts, tr.td), UVM_LOW)
+        return;
+      end
+      if (tr.ts != `PCIe_TL_TS_1DW_ECRC) begin
+        tr.ts = `PCIe_TL_TS_1DW_ECRC;
+        // DW0[15:13] carries TS - patch the already serialized header.
+        if (tr.serialized_tlp.size() > 0) begin
+          tr.serialized_tlp[0][15:13] = `PCIe_TL_TS_1DW_ECRC;
+        end
+        `uvm_info("ECRC_TX",
+          "FLIT TD=1 : TS[2:0] forced to 001b (1 DW Trailer containing ECRC)", UVM_LOW)
+      end
+    end
+
+    digest = generate_ecrc(tr.serialized_tlp, tr.pkt_mode);
+
+    tmp = new[tr.serialized_tlp.size() + `PCIe_TL_ECRC_DW];
+    for (i = 0; i < tr.serialized_tlp.size(); i++)
+      tmp[i] = tr.serialized_tlp[i];
+    tmp[tr.serialized_tlp.size()] = digest;
+    tr.serialized_tlp = tmp;
+
+    tr.ecrc         = digest;
+    tr.ecrc_present = 1'b1;
+
+    tr.tlp_total_dw_count = tr.serialized_tlp.size();
+
+    `uvm_info("ECRC_TX",
+      $sformatf({"\n",
+        "         ============================================================\n",
+        "                    ECRC APPENDED BY THE RC TL MODEL\n",
+        "         ============================================================\n",
+        "         Packet Mode       : %s\n",
+        "         Carried in        : %s\n",
+        "         Bytes covered     : %0d  (header + OHC + payload)\n",
+        "         TLP Digest value  : 0x%08h\n",
+        "         New total TLP DWs : %0d\n",
+        "         ============================================================"},
+        tr.pkt_mode.name(),
+        (tr.pkt_mode == FLIT) ? "1 DW Trailer (TS=001b)" : "TLP Digest field (TD=1)",
+        (tr.serialized_tlp.size() - `PCIe_TL_ECRC_DW) * `PCIe_TL_DW_BYTES,
+        digest,
+        tr.serialized_tlp.size()), UVM_LOW)
+
+  endfunction
+
+  //==========================================================================
+  //         IDLE FLIT / NOP FLIT BUILDER  -  Table 4-16        [ADDED]
+  //
+  //   Flit Type   TLP Bytes                       DLP 0,1                        DLP 2..5
+  //   ---------   -----------------------------   ----------------------------   --------------
+  //   IDLE Flit   NOP TLPs across all 236 Bytes   All 0s (Flit Seq Num = 0)      NOP2 DLLP
+  //   NOP  Flit   NOP TLPs across all 236 Bytes   Flit Usage = 00b,              Any valid
+  //                                               Flit Seq Num =                 encoding
+  //                                               NEXT_TX_FLIT_SEQ_NUM - 1
+  //                                               when Replay Command is 00b
+  //
+  //   Both are built entirely inside the Transaction Layer: the 236 byte TLP
+  //   region is filled with 1 DW NOP TLPs (Type 00h, all zeros). The DLP bytes
+  //   are the Data Link Layer's business and are left to the DL model.
+  //==========================================================================
+  virtual function void build_idle_or_nop_flit(PCIe_sequence_item tr);
+
+    int i;
+
+    tr.serialized_tlp = new[0];
+
+    tr.flit_tlp_region = new[`PCIe_FLIT_TLP_REGION_DW];
+    for (i = 0; i < `PCIe_FLIT_TLP_REGION_DW; i++)
+      tr.flit_tlp_region[i] = `PCIe_FLIT_NOP_TLP_DW;
+
+    tr.flit_tlp_dw_count = 0;
+    tr.flit_nop_dw_count = `PCIe_FLIT_TLP_REGION_DW;
+
+    tr.tlp_header_dw_count  = 0;
+    tr.tlp_payload_dw_count = 0;
+    tr.tlp_total_dw_count   = 0;
+    tr.hdr_dw_count         = 0;
+
+    // 236 bytes of NOP TLPs handed to the DL
+    tr.tlp_data   = '0;
+    tr.is_payload = 1'b0;            // Flit Usage = 00b
+    tr.drive_flit = 1'b1;
+    tr.ecrc_present = 1'b0;
+    tr.ecrc_state   = PCIe_ECRC_ABSENT;
+
+    if (tr.flit_type == PCIe_IDLE_flit) begin
+      // IDLE : DLP0 and DLP1 all 0s (so Flit Sequence Number 0) and a NOP2
+      // DLLP (all zeros, Figure 3-8) in DLP 2..5.
+      tr.dllp_content            = `PCIe_FLIT_NOP2_DLLP;
+      tr.NEXT_TX_FLIT_SEQ_NUM    = `PCIe_FLIT_IDLE_SEQ_NUM;
+      tr.TX_ACKNACK_FLIT_SEQ_NUM = `PCIe_FLIT_IDLE_SEQ_NUM;
+      tr.seq_num                 = `PCIe_FLIT_IDLE_SEQ_NUM;
+    end
+    else begin
+      // NOP : any valid DLLP encoding is allowed in DLP 2..5; NOP2 is used
+      // here. The Flit Sequence Number rule (NEXT_TX_FLIT_SEQ_NUM - 1) is a
+      // Data Link Layer rule and is applied by the DL model.
+      tr.dllp_content = `PCIe_FLIT_NOP2_DLLP;
+    end
+
+    `uvm_info("FLIT_IDLE_NOP",
+      $sformatf({"\n",
+        "         ============================================================\n",
+        "                       %s FLIT BUILT BY THE RC TL MODEL\n",
+        "                       (PCIe Base 6.1 Table 4-16)\n",
+        "         ============================================================\n",
+        "         Flit Kind         : %s\n",
+        "         TLP region        : %0d DW of NOP TLPs (%0d bytes, all 0x00)\n",
+        "         Flit Usage        : 00b (IDLE Flit or NOP Flit)\n",
+        "         DLLP payload      : 0x%08h %s\n",
+        "         Flit Seq Num rule : %s\n",
+        "         ============================================================"},
+        (tr.flit_type == PCIe_IDLE_flit) ? "IDLE" : "NOP",
+        tr.flit_type.name(),
+        `PCIe_FLIT_TLP_REGION_DW, `PCIe_FLIT_TLP_BYTES,
+        tr.dllp_content,
+        (tr.flit_type == PCIe_IDLE_flit) ? "(NOP2 DLLP)" : "(NOP2 DLLP - any valid encoding allowed)",
+        (tr.flit_type == PCIe_IDLE_flit) ? "Flit Sequence Number = 0"
+                                              : "Flit Sequence Number = NEXT_TX_FLIT_SEQ_NUM - 1"),
+      UVM_LOW)
+
+    print_tlp_data(tr);
+
+    `uvm_info(get_type_name(), "[TL->DL] IDLE/NOP FLIT SENT TO DL", UVM_MEDIUM)
+    tl_ap.write(tr);
+
+  endfunction
+
 
 endclass
