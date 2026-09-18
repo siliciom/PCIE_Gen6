@@ -216,16 +216,6 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
     ep_dl_model.handle_incoming_flit(dlp_ep_rx,is_valid);
       pcie_seq_item.dlp=dlp_ep_rx;
 
-      // ---- LCRC addition: recompute LCRC over the ACTUAL reconstructed flit bytes ----
-      begin
-        bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] mon_full_flit;
-        for (int k = 0; k < `PCIe_TLP_DATA_BYTE_W; k++) mon_full_flit[k] = tlp_ep_rx[k];
-        for (int k = 0; k < `PCIe_DLP_BYTE_W; k++) mon_full_flit[`PCIe_TLP_DATA_BYTE_W+k] = dlp_ep_rx[k];
-        pcie_seq_item.dl_lcrc = ep_dl_model.generate_lcrc_flit(mon_full_flit);
-        `uvm_info("LCRC_MON_EP_RX",$sformatf("EP_MON_RX_COMPUTED_LCRC=%08h",pcie_seq_item.dl_lcrc),UVM_LOW)
-      end
-      // -------------------------------------------------------------------------------
-
       ep_ap_mon_dl.write(pcie_seq_item);
        end
        end
@@ -330,16 +320,6 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
       if(ep_pl_model.link_up ==1 && pcie_seq_item.data_q_ep_mon_con_tx.size() > 292)begin
      collect_dlp_EP_tx(dlp_ep_tx,pcie_seq_item);
       pcie_seq_item.dlp=dlp_ep_tx;
-
-      // ---- LCRC addition: recompute LCRC over the ACTUAL reconstructed flit bytes ----
-      begin
-        bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] mon_full_flit;
-        for (int k = 0; k < `PCIe_TLP_DATA_BYTE_W; k++) mon_full_flit[k] = tlp_ep_tx[k];
-        for (int k = 0; k < `PCIe_DLP_BYTE_W; k++) mon_full_flit[`PCIe_TLP_DATA_BYTE_W+k] = dlp_ep_tx[k];
-        pcie_seq_item.dl_lcrc = ep_dl_model.generate_lcrc_flit(mon_full_flit);
-        `uvm_info("LCRC_MON_EP_TX",$sformatf("EP_MON_TX_COMPUTED_LCRC=%08h",pcie_seq_item.dl_lcrc),UVM_LOW)
-      end
-      // -------------------------------------------------------------------------------
 
       ep_rc_ap_mon_dl.write(pcie_seq_item);
      end

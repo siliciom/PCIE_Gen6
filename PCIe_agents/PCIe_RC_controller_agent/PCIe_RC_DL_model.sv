@@ -39,12 +39,6 @@ class PCIe_RC_DL_model extends uvm_component;
   // Usage in DL Model or Struct
   replay_scheduled_type_e REPLAY_SCHEDULED_TYPE;
 
-  // ---- LCRC additions: mode awareness (mirrors EP DL model / PL model pattern) ----
-  // Per-transaction mode comes from item.pkt_mode in write()
-  // Link-wide mode for DLCMSM flits comes from config
-  PCIe_env_config   pcie_ecfg;
-  // ---------------------------------------------------------------------------
-
   // Sequence numbers for handshake
   bit [`PCIe_SEQ_NUM_W-1:0] TX_ACKNAK_FLIT_SEQ_NUM = {`PCIe_SEQ_NUM_W{1'b1}};
   bit [`PCIe_SEQ_NUM_W-1:0] NEXT_TX_FLIT_SEQ_NUM = {{(`PCIe_SEQ_NUM_W-1){1'b0}},1'b1};
@@ -116,10 +110,6 @@ function void build_phase(uvm_phase phase);
     dlp_pl_ap = new("dlp_pl_ap",this);
     dl_active_event = uvm_event_pool::get_global("dl_active_event");
     uvm_rc_l0_to_dl_ev = uvm_event_pool::get_global("rc_l0_to_dl_event");
-    // ---- LCRC addition: fetch link-wide mode for DLCMSM flits; per-transaction mode from item.pkt_mode ----
-    if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
-      `uvm_fatal("RC_DL_MODEL","Cannot_get_PCIe_env_config");
-    // ------------------------------------------------------------------
 
   endfunction
 
@@ -129,20 +119,7 @@ function void write(PCIe_sequence_item item);
   // item.print();
   form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
 
-  // ---- LCRC addition: stamp LCRC based on configured mode ----
-  if (item.pkt_mode == FLIT) begin
-    item.dl_lcrc = generate_lcrc_flit(item.dlp_flit_out);
-    `uvm_info("DL_LCRC_FLIT_MODE",$sformatf("STAMPED_ON_ITEM :: dl_lcrc=%08h",item.dl_lcrc),UVM_LOW)
-  end
-  else begin
-    int unsigned byte_len;
-    byte_len = (item.tlp_total_dw_count > 0) ? (item.tlp_total_dw_count * 4) : `PCIe_TLP_DATA_BYTE_W;
-    item.dl_lcrc = generate_lcrc_non_flit(item.tlp_data, byte_len);
-    `uvm_info("DL_LCRC_NONFLIT_MODE",$sformatf("STAMPED_ON_ITEM :: bytes_covered=%0d :: dl_lcrc=%08h",byte_len,item.dl_lcrc),UVM_LOW)
-  end
-  // -------------------------------------------------------------
-
-  print_dlp_packet(item.tlp_data,item.dlp_flit_out,item.dl_lcrc);
+  print_dlp_packet(item.tlp_data,item.dlp_flit_out);
   `uvm_info("RC_DL_MODEL","SENT_DLP_TO_PL_236B", UVM_LOW)
    dlp_pl_ap.write(item);
 endfunction
@@ -165,95 +142,6 @@ endfunction
     if (diff < 0) diff += 1023;
     return diff;
   endfunction
-
-  // =========================================================================
-  // LCRC LOGIC — ADDED BLOCK (Gen5 non-flit + Gen6 flit, shared CRC-32 core)
-  // Polynomial 0x04C11DB7 (reflected form 0xEDB88320), init all-1s,
-  // final complement. Identical algorithm to Ethernet FCS / standard PCIe LCRC.
-  // Mirrors PCIe_EP_DL_model's LCRC block exactly.
-  // =========================================================================
-
-  // ---- Core byte-serial CRC-32 update ----
-  function automatic bit [31:0] lcrc_byte_update(bit [31:0] crc_in, bit [7:0] data_byte);
-    bit [31:0] crc;
-    bit [7:0]  b;
-    crc = crc_in;
-    b   = data_byte;
-    for (int i = 0; i < 8; i++) begin
-      if ((crc[0] ^ b[0]) == 1'b1)
-        crc = (crc >> 1) ^ 32'hEDB88320;
-      else
-        crc = crc >> 1;
-      b = b >> 1;
-    end
-    return crc;
-  endfunction
-
-  // ---- FLIT MODE (Gen6) LCRC generate: covers full 242-byte flit ----
-  function automatic bit [`PCIe_DL_LCRC_W-1:0] generate_lcrc_flit(
-    input bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] flit_data
-  );
-    bit [31:0] crc;
-    crc = 32'hFFFF_FFFF;
-
-    `uvm_info("LCRC_FLIT_MODE",
-      $sformatf("FLIT_LCRC :: STARTING :: bytes_to_cover=%0d",`PCIe_DLP_FLIT_BYTE_W),UVM_LOW)
-
-    for (int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++) begin
-      crc = lcrc_byte_update(crc, flit_data[i]);
-      `uvm_info("LCRC_FLIT_MODE",
-        $sformatf("FLIT_LCRC :: byte[%0d]=%02h :: running_crc=%08h",i,flit_data[i],crc),
-        UVM_HIGH)
-    end
-
-    crc = ~crc;
-    `uvm_info("LCRC_FLIT_MODE",
-      $sformatf("FLIT_LCRC :: GENERATED :: FINAL_LCRC=%08h",crc),UVM_LOW)
-    return crc;
-  endfunction
-
-  // ---- NON-FLIT MODE (Gen5/legacy) LCRC generate: covers only valid TLP bytes ----
-  function automatic bit [`PCIe_DL_LCRC_W-1:0] generate_lcrc_non_flit(
-    input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,
-    input int unsigned tlp_byte_len
-  );
-    bit [31:0] crc;
-    crc = 32'hFFFF_FFFF;
-
-    `uvm_info("LCRC_NONFLIT_MODE",
-      $sformatf("NONFLIT_LCRC :: STARTING :: bytes_to_cover=%0d",tlp_byte_len),UVM_LOW)
-
-    for (int i = 0; i < tlp_byte_len; i++) begin
-      crc = lcrc_byte_update(crc, tlp_data[i]);
-      `uvm_info("LCRC_NONFLIT_MODE",
-        $sformatf("NONFLIT_LCRC :: byte[%0d]=%02h :: running_crc=%08h",i,tlp_data[i],crc),
-        UVM_HIGH)
-    end
-
-    crc = ~crc;
-    `uvm_info("LCRC_NONFLIT_MODE",
-      $sformatf("NONFLIT_LCRC :: GENERATED :: bytes_covered=%0d :: FINAL_LCRC=%08h",
-                tlp_byte_len,crc),UVM_LOW)
-    return crc;
-  endfunction
-
-  // ---- RX-side compare (works for either mode) ----
-  function automatic bit lcrc_check(bit [`PCIe_DL_LCRC_W-1:0] computed_crc,
-                                     bit [`PCIe_DL_LCRC_W-1:0] received_crc,
-                                     string mode_tag);
-    bit pass;
-    pass = (computed_crc == received_crc);
-    if (pass)
-      `uvm_info({"LCRC_CHECK_",mode_tag},
-        $sformatf("LCRC_MATCH :: computed=%08h received=%08h",computed_crc,received_crc),UVM_LOW)
-    else
-      `uvm_error({"LCRC_CHECK_",mode_tag},
-        $sformatf("LCRC_MISMATCH :: computed=%08h received=%08h",computed_crc,received_crc))
-    return pass;
-  endfunction
-  // =========================================================================
-  // END LCRC LOGIC BLOCK
-  // =========================================================================
 
   // =========================================================================
   // DLCMSM FSM — ADDED / ACTIVATED BLOCK
@@ -330,12 +218,11 @@ endfunction
   endtask
 
   // Builds a control flit (ACK or NAK, is_payload=0) using the currently
-  // scheduled state, stamps LCRC, and pushes it to the PL model.
+  // scheduled state, and pushes it to the PL model.
   task send_dl_control_flit();
      PCIe_sequence_item ctl_item;
      ctl_item = PCIe_sequence_item::type_id::create("ctl_item");
      form_dl_packet(ctl_item.tlp_data, 1'b0, ctl_item.dlp_flit_out);
-     stamp_dl_lcrc(ctl_item);
      //dlp_pl_ap.write(ctl_item);
   endtask
 
@@ -364,23 +251,8 @@ endfunction
      r_item.tlp_data = tx_retry_buffer[idx].tlp_data;
      r_item.seq_num  = tx_retry_buffer[idx].seq_num;
      form_dl_packet(r_item.tlp_data, 1'b1, r_item.dlp_flit_out);
-     stamp_dl_lcrc(r_item);
      `uvm_info("RC_DL_MODEL",$sformatf("SENDING_DLP_TO_PL_MODEL"),UVM_LOW)
      //dlp_pl_ap.write(r_item);
-  endtask
-
-  // Stamps LCRC on an outgoing item exactly like write()/send_dllp_flit().
-  task stamp_dl_lcrc(PCIe_sequence_item item);
-     if (item.pkt_mode == FLIT) begin
-        item.dl_lcrc = generate_lcrc_flit(item.dlp_flit_out);
-        `uvm_info("LCRC_FLIT_MODE",$sformatf("STAMPED_ON_CTRL_FLIT :: dl_lcrc=%08h",item.dl_lcrc),UVM_LOW)
-     end
-     else begin
-        int unsigned byte_len;
-        byte_len = (item.tlp_total_dw_count > 0) ? (item.tlp_total_dw_count * 4) : `PCIe_TLP_DATA_BYTE_W;
-        item.dl_lcrc = generate_lcrc_non_flit(item.tlp_data, byte_len);
-        `uvm_info("LCRC_NONFLIT_MODE",$sformatf("STAMPED_ON_CTRL_FLIT :: bytes_covered=%0d :: dl_lcrc=%08h",byte_len,item.dl_lcrc),UVM_LOW)
-     end
   endtask
 
    task run_dlcmsm();
@@ -506,17 +378,8 @@ endfunction
     task send_dllp_flit(bit [31:0] content);
        PCIe_sequence_item dcm_item;
        dcm_item = PCIe_sequence_item::type_id::create("dcm_item");
-        `uvm_info("RC_DLCMSM",$sformatf("DLCMSM_FLIT_LCRC_STAMPED :: dl_lcrc=%08h",dcm_item.dl_lcrc),UVM_LOW)
        dllp_content = content;
        form_dl_packet(dcm_item.tlp_data, 1'b0, dcm_item.dlp_flit_out); // is_payload=0
-
-// ---- LCRC addition: stamp LCRC on this DLCMSM flit before sending, same as any other flit ----
-        if (dcm_item.pkt_mode == FLIT)
-           dcm_item.dl_lcrc = generate_lcrc_flit(dcm_item.dlp_flit_out);
-        else
-           dcm_item.dl_lcrc = generate_lcrc_non_flit(dcm_item.tlp_data, `PCIe_TLP_DATA_BYTE_W);
-        `uvm_info("RC_DLCMSM",$sformatf("DLCMSM_FLIT_LCRC_STAMPED :: dl_lcrc=%08h",dcm_item.dl_lcrc),UVM_LOW)
-        // ---------------------------------------------------------------------------------------------
 
        //print_dlp_packet(tlp_data,dlp);
        dlp_pl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
@@ -681,9 +544,7 @@ endfunction
   //--------------------------------------------------------------------------
   function void print_dlp_packet(
     input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,
-    input bit [`PCIe_DLP_BYTE_W-1:0][`PCIe_BYTE_W-1:0] dlp,
-    input bit [`PCIe_DL_LCRC_W-1:0]   dl_lcrc      
-
+    input bit [`PCIe_DLP_BYTE_W-1:0][`PCIe_BYTE_W-1:0] dlp
   );
 
     string dump;
@@ -702,17 +563,13 @@ endfunction
       "------------------------------------------------------------\n",
       "  SEQ_NUM = %0h\n",
       "\n",
-      "LCRC \n",
-      "------------------------------------------------------------\n",
-      "  LCRC = %0h\n",
-      "\n",
       "COMPLETE DLP FORMAT\n",
       "------------------------------------------------------------\n",
-      "  TLP + SEQUENCE NUMBER + LCRC\n",
+      "  TLP + SEQUENCE NUMBER\n",
       "============================================================\n"},
       `PCIe_TLP_DATA_BYTE_W,
       tlp_data,
-      {dlp[0][1:0],dlp[1]},dl_lcrc
+      {dlp[0][1:0],dlp[1]}
       );
 
     `uvm_info("RC_DL_TLP_SEQ_ECRC_DUMP", dump, UVM_LOW)
@@ -1131,7 +988,7 @@ endfunction
   // Storing the tx_retry_buffer
   task store_tx_retry_buffer(input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,input bit [`PCIe_SEQ_NUM_W-1:0] seq_num);
     tx_retry_buffer.push_back('{tlp_data:tlp_data,seq_num:seq_num});
-    `uvm_info("RC_DL_MODEL",$sformatf("The Retry Buffer Content is %p",tx_retry_buffer),UVM_LOW);
+  //  `uvm_info("RC_DL_MODEL",$sformatf("The Retry Buffer Content is %p",tx_retry_buffer),UVM_LOW);
   endtask
 
 
@@ -1544,4 +1401,3 @@ endtask
     endtask*/ 
 
 endclass
-

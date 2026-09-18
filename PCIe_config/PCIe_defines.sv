@@ -266,7 +266,6 @@
 // Data-Link / Physical layer field widths and framing tokens
 //==============================================================================
 `define PCIe_DL_SEQNUM_W     12    // TLP sequence number (DL)
-`define PCIe_DL_LCRC_W       32    // Link CRC (DL)
 `define PCIe_PL_FRAME_W       8    // STP/END framing token width (PL)
 
 `define PCIe_PL_STP          8'hFB // Start TLP

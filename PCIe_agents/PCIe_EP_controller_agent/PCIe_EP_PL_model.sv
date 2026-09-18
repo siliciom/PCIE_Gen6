@@ -917,7 +917,7 @@ task ep_state_config_complete();
           end
           pl_qu.push_back(temp);
       end
-      `uvm_info("EP_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",pl_qu),UVM_MEDIUM)
+     // `uvm_info("EP_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",pl_qu),UVM_MEDIUM)
 
        // ===== Gen6 Flit-Mode CRC/FEC Computation =====
        // Build the 256-byte Flit: 242B payload + 8B CRC + 6B FEC

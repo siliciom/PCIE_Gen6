@@ -196,9 +196,8 @@ class PCIe_RC_TL_model extends uvm_component;
   // Dump full packet fields separately.
   // Existing 236-byte tlp_data dump is retained.
   //
-  // NON-FLIT : Header + Payload + LCRC
-  // FLIT     : Header + Payload; LCRC is part of the FLIT CRC mechanism and
-  //            is not part of the 236-byte TLP region.
+  // NON-FLIT : Header + Payload
+  // FLIT     : Header + payload
   //--------------------------------------------------------------------------
   virtual function void print_full_packet(PCIe_sequence_item tr);
 
@@ -268,7 +267,7 @@ class PCIe_RC_TL_model extends uvm_component;
           dump = {dump, line, "\n"};
       end
     end
-
+/*
     // LCRC BYTES
     dump = {dump,
       "         ------------------------------------------------------------\n",
@@ -290,7 +289,7 @@ class PCIe_RC_TL_model extends uvm_component;
             (`PCIe_DL_LCRC_W / `PCIe_BYTE_W) - 1,
           `PCIe_DL_LCRC_W / `PCIe_BYTE_W),
         "           Value      : <LCRC_generation_not_present_in_RC_TL_model>\n"};
-    end
+    end*/
 
     `uvm_info("FULL_PACKET", dump, UVM_LOW)
 

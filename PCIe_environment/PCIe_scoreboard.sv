@@ -63,13 +63,6 @@ class PCIe_scoreboard extends uvm_scoreboard;
   bit[0:5][7:0]dlp_ep_qu[$]; // EP-->RC
   bit[0:5][7:0]dlp_rc_qu[$]; // EP-->RC
 
-  // ---- LCRC additions: parallel queues for TX-side-computed vs RX-side-computed LCRC ----
-  bit [`PCIe_DL_LCRC_W-1:0] lcrc_ep_q[$]; // RC-->EP
-  bit [`PCIe_DL_LCRC_W-1:0] lcrc_rc_q[$]; // RC-->EP
-  bit [`PCIe_DL_LCRC_W-1:0] lcrc_ep_qu[$]; // EP-->RC
-  bit [`PCIe_DL_LCRC_W-1:0] lcrc_rc_qu[$]; // EP-->RC
-  
-
   function new(string name="PCIe_scoreboard",uvm_component parent);
     super.new(name,parent);
   endfunction
@@ -279,9 +272,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
     `uvm_info("PCIe_SCOREBOARD","ACTUAL_PACKET_RC_TO_EP_DLP",UVM_HIGH)
     `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p", pkt.dlp), UVM_HIGH)
     dlp_rc_q.push_back(pkt.dlp);
-    lcrc_rc_q.push_back(pkt.dl_lcrc);          // ---- LCRC addition ----
     compare_rc_ep_dl(pkt);
-    compare_lcrc_rc_ep();                      // ---- LCRC addition ----
   endfunction
 
   // Packet going from the EP Controller to Scoreboard
@@ -289,9 +280,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
     `uvm_info("PCIe_SCOREBOARD","EXPECTED_PACKET_RC_TO_EP_DLP",UVM_HIGH)
     `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p", pkt.dlp), UVM_HIGH)
     dlp_ep_q.push_back(pkt.dlp);
-    lcrc_ep_q.push_back(pkt.dl_lcrc);          // ---- LCRC addition ----
     compare_rc_ep_dl(pkt);
-    compare_lcrc_rc_ep();                      // ---- LCRC addition ----
   endfunction
 
   // EP TO RC
@@ -301,10 +290,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
     `uvm_info("PCIe_SCOREBOARD","EXPECTED_PACKET_EP_TO_RC",UVM_HIGH)
     `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p", pkt.dlp), UVM_HIGH)
     dlp_rc_qu.push_back(pkt.dlp);
-    lcrc_rc_qu.push_back(pkt.dl_lcrc);         // ---- LCRC addition ----
     compare_ep_rc_dl(pkt);
-    compare_lcrc_ep_rc();                      // ---- LCRC addition ----
-     
   endfunction
 
   // Packet going from the EP Controller to Scoreboard
@@ -312,9 +298,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
     `uvm_info("PCIe_SCOREBOARD","ACTUAL_PACKET_EP_TO_RC",UVM_HIGH)
     `uvm_info("PCIe_SCOREBOARD",$sformatf("pkt.dlp=%p", pkt.dlp), UVM_HIGH)
     dlp_ep_qu.push_back(pkt.dlp);
-    lcrc_ep_qu.push_back(pkt.dl_lcrc);         // ---- LCRC addition ----
     compare_ep_rc_dl(pkt);
-    compare_lcrc_ep_rc();                      // ---- LCRC addition ----
   endfunction
   
 
@@ -372,46 +356,6 @@ class PCIe_scoreboard extends uvm_scoreboard;
 		  item.print_dlp_details("ACTUAL_DLP", actual_dlp_ep_rc);
 	  end
           end
-  endfunction
-
-  // ---- LCRC additions: compare functions, mirroring compare_rc_ep_dl / compare_ep_rc_dl ----
-
-  function compare_lcrc_rc_ep();
-     bit [`PCIe_DL_LCRC_W-1:0] expected_lcrc_rc_ep;
-     bit [`PCIe_DL_LCRC_W-1:0] actual_lcrc_rc_ep;
-
-     `uvm_info("PCIe_SCOREBOARD",$sformatf("LCRC_Queues_RC_EP: Expected=%0d, Actual=%0d", lcrc_ep_q.size(), lcrc_rc_q.size()), UVM_HIGH)
-
-     while((lcrc_ep_q.size() > 0) && (lcrc_rc_q.size() > 0)) begin
-        expected_lcrc_rc_ep = lcrc_ep_q.pop_front();
-        actual_lcrc_rc_ep   = lcrc_rc_q.pop_front();
-
-        if(expected_lcrc_rc_ep == actual_lcrc_rc_ep) begin
-           `uvm_info("PCIE_SCOREBOARD",$sformatf("PASS_LCRC_RC_TO_EP :: expected=%08h :: actual=%08h",expected_lcrc_rc_ep,actual_lcrc_rc_ep),UVM_HIGH)
-        end
-        else begin
-           `uvm_error("PCIE_SCOREBOARD",$sformatf("FAIL_LCRC_RC_TO_EP :: expected=%08h :: actual=%08h",expected_lcrc_rc_ep,actual_lcrc_rc_ep))
-        end
-     end
-  endfunction
-
-  function compare_lcrc_ep_rc();
-     bit [`PCIe_DL_LCRC_W-1:0] expected_lcrc_ep_rc;
-     bit [`PCIe_DL_LCRC_W-1:0] actual_lcrc_ep_rc;
-
-     `uvm_info("PCIe_SCOREBOARD",$sformatf("LCRC_Queues_EP_RC: Expected=%0d, Actual=%0d", lcrc_ep_qu.size(), lcrc_rc_qu.size()), UVM_HIGH)
-
-     while((lcrc_ep_qu.size() > 0) && (lcrc_rc_qu.size() > 0)) begin
-        expected_lcrc_ep_rc = lcrc_ep_qu.pop_front();
-        actual_lcrc_ep_rc   = lcrc_rc_qu.pop_front();
-
-        if(expected_lcrc_ep_rc == actual_lcrc_ep_rc) begin
-           `uvm_info("PCIE_SCOREBOARD",$sformatf("PASS_LCRC_EP_TO_RC :: expected=%08h :: actual=%08h",expected_lcrc_ep_rc,actual_lcrc_ep_rc),UVM_HIGH)
-        end
-        else begin
-           `uvm_error("PCIE_SCOREBOARD",$sformatf("FAIL_LCRC_EP_TO_RC :: expected=%08h :: actual=%08h",expected_lcrc_ep_rc,actual_lcrc_ep_rc))
-        end
-     end
   endfunction
 
    `ifdef PCIE_GEN6_FEC_CRC
@@ -563,4 +507,3 @@ class PCIe_scoreboard extends uvm_scoreboard;
    `endif
 
 endclass
-

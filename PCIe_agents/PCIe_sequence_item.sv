@@ -88,7 +88,6 @@ class PCIe_sequence_item extends uvm_sequence_item;
   // Data-Link layer fields (stamped by the DL model)
   //--------------------------------------------------------------------------
   bit [`PCIe_DL_SEQNUM_W-1:0] dl_seq_num;   // TLP sequence number
-  bit [`PCIe_DL_LCRC_W-1:0]   dl_lcrc;      // Link CRC
   pcie_dllp_type_e            dllp_type = PCIe_DLLP_NONE; // ACK/NAK when a DLLP
 
   //--------------------------------------------------------------------------
