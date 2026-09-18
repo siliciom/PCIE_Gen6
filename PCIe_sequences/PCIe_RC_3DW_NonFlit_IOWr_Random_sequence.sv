@@ -42,6 +42,7 @@ class PCIe_RC_3DW_NonFlit_IOWr_Random_sequence extends PCIe_RC_controller_base_s
 
          txn_type == PCIe_TL_IO;
          dir      == PCIe_TL_WRITE;
+         length   == `PCIe_TL_LEN_MIN;
 
          address == 32'h0000_00E0;
 

@@ -42,6 +42,7 @@ class PCIe_RC_3DW_NonFlit_IORd_Random_sequence extends PCIe_RC_controller_base_s
 
          txn_type == PCIe_TL_IO;
          dir      == PCIe_TL_READ;
+         length   == `PCIe_TL_LEN_MIN;
 
          first_dw_be == 4'hF;
 

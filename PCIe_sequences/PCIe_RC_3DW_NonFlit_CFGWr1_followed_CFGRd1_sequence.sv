@@ -42,6 +42,7 @@ class PCIe_RC_3DW_NonFlit_CFGWr1_followed_CFGRd1_sequence extends PCIe_RC_contro
 
          txn_type  == PCIe_TL_CFG;
          dir       == PCIe_TL_WRITE;
+         length   == `PCIe_TL_LEN_MIN;
          cfg_type1 == 1'b1;
 
          cfg_bus_num     == 8'h01;
@@ -88,6 +89,7 @@ class PCIe_RC_3DW_NonFlit_CFGWr1_followed_CFGRd1_sequence extends PCIe_RC_contro
 
          txn_type  == PCIe_TL_CFG;
          dir       == PCIe_TL_READ;
+         length   == `PCIe_TL_LEN_MIN;
          cfg_type1 == 1'b1;
 
          cfg_bus_num     == 8'h01;

@@ -42,6 +42,7 @@ class PCIe_RC_3DW_Flit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC_co
 
          txn_type  == PCIe_TL_CFG;
          dir       == PCIe_TL_WRITE;
+         length   == `PCIe_TL_LEN_MIN;
          cfg_type1 == 1'b1;
 
          cfg_bus_num     == 8'h01;
@@ -78,6 +79,7 @@ class PCIe_RC_3DW_Flit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC_co
 
          txn_type  == PCIe_TL_CFG;
          dir       == PCIe_TL_READ;
+         length   == `PCIe_TL_LEN_MIN;
          cfg_type1 == 1'b1;
 
          cfg_bus_num     == 8'h01;
@@ -88,7 +90,16 @@ class PCIe_RC_3DW_Flit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC_co
 
          first_dw_be == 4'hF;
 
+         ep == 1'b0;
+
+         tag          == 14'h0031;
          requester_id == 16'h0100;
+
+         tc   == 3'h0;
+         ts   == 3'b000;
+         attr == 3'h0;
+
+         at == 2'b00;
 
          // Fields belonging to other transaction categories MUST be zero for a CFG transaction
          io_data              == '0;

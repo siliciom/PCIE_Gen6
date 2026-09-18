@@ -1,7 +1,7 @@
 `ifndef PCIE_RC_3DW_FLIT_IOWR_FOLLOWED_IORD_RANDOM_SEQUENCE_SV
 `define PCIE_RC_3DW_FLIT_IOWR_FOLLOWED_IORD_RANDOM_SEQUENCE_SV
 
-class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_controller_base_sequence;
+class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends uvm_sequence #(PCIe_sequence_item);
   `uvm_object_utils(PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence)
 
   function new(string name="PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence");
@@ -23,8 +23,10 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_contro
 
       txn_type == PCIe_TL_IO;
       dir      == PCIe_TL_WRITE;
-      length   == 10'd1;
-    
+      length   == `PCIe_TL_LEN_MIN;
+      first_dw_be == 4'hF;
+      last_dw_be  == 4'h0;
+
       // Fields belonging to other transaction categories MUST be zero for an IO transaction
       cfg_reg_num          == '0;
       cfg_ext_reg_num      == '0;
@@ -49,7 +51,9 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_contro
 
       txn_type == PCIe_TL_IO;
       dir      == PCIe_TL_READ;
-      length   == 10'd1;
+      length   == `PCIe_TL_LEN_MIN;
+      first_dw_be == 4'hF;
+      last_dw_be  == 4'h0;
 
       // Fields belonging to other transaction categories MUST be zero for an IO transaction
       cfg_reg_num          == '0;

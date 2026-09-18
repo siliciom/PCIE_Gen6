@@ -42,6 +42,7 @@ class PCIe_RC_3DW_NonFlit_IOWr_followed_IORd_sequence extends PCIe_RC_controller
 
          txn_type == PCIe_TL_IO;
          dir      == PCIe_TL_WRITE;
+         length   == `PCIe_TL_LEN_MIN;
 
          address == 32'h0000_00E0;
 
@@ -87,6 +88,7 @@ class PCIe_RC_3DW_NonFlit_IOWr_followed_IORd_sequence extends PCIe_RC_controller
 
          txn_type == PCIe_TL_IO;
          dir      == PCIe_TL_READ;
+         length   == `PCIe_TL_LEN_MIN;
 
          address == 32'h0000_00E0;
 

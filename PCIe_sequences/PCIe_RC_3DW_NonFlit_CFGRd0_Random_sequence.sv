@@ -42,6 +42,7 @@ class PCIe_RC_3DW_NonFlit_CFGRd0_Random_sequence extends PCIe_RC_controller_base
 
          txn_type  == PCIe_TL_CFG;
          dir       == PCIe_TL_READ;
+         length   == `PCIe_TL_LEN_MIN;
          cfg_type1 == 1'b0;
 
          cfg_bus_num     == 8'h00;
