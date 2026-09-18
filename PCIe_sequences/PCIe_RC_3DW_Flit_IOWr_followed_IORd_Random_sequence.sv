@@ -1,7 +1,7 @@
 `ifndef PCIE_RC_3DW_FLIT_IOWR_FOLLOWED_IORD_RANDOM_SEQUENCE_SV
 `define PCIE_RC_3DW_FLIT_IOWR_FOLLOWED_IORD_RANDOM_SEQUENCE_SV
 
-class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends uvm_sequence #(PCIe_sequence_item);
+class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_controller_base_sequence;
   `uvm_object_utils(PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence)
 
   function new(string name="PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence");
