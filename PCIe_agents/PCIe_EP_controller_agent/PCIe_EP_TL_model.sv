@@ -580,9 +580,11 @@ class PCIe_EP_TL_model extends uvm_component;
     int unsigned idx;
     int unsigned depth;
     string       mem_name;
+    string       data_str;
 
     depth    = is_4dw ? `PCIe_TL_MEM4DW_DEPTH : `PCIe_TL_MEM3DW_DEPTH;
     mem_name = is_4dw ? "mem4dw" : "mem3dw";
+    data_str = "";
 
     `uvm_info("EP_TL_MEM",
       $sformatf("%s_%s : mode=%s addr=0x%016h len=%0d DW depth=%0d",
@@ -599,6 +601,7 @@ class PCIe_EP_TL_model extends uvm_component;
         if (i < wdata.size()) begin
           if (is_4dw) mem4dw[idx] = wdata[i];
           else        mem3dw[idx] = wdata[i];
+          data_str = {data_str, (i == 0) ? "" : ", ", $sformatf("DW%0d=0x%08h", i, wdata[i])};
           `uvm_info("EP_TL_MEM",
             $sformatf("  %s[%0d] <= %08h   (byte addr 0x%016h)",
                        mem_name, idx, wdata[i], addr + (64'(i)*`PCIe_TL_DW_BYTES)), UVM_HIGH)
@@ -606,6 +609,7 @@ class PCIe_EP_TL_model extends uvm_component;
       end
       else begin
         rdata[i] = is_4dw ? mem4dw[idx] : mem3dw[idx];
+        data_str = {data_str, (i == 0) ? "" : ", ", $sformatf("DW%0d=0x%08h", i, rdata[i])};
         `uvm_info("EP_TL_MEM",
           $sformatf("  %s[%0d] => %08h   (byte addr 0x%016h)",
                      mem_name, idx, rdata[i], addr + (64'(i)*`PCIe_TL_DW_BYTES)), UVM_HIGH)
@@ -613,8 +617,8 @@ class PCIe_EP_TL_model extends uvm_component;
     end
 
     `uvm_info("EP_TL_MEM",
-      $sformatf("%s_%s_COMPLETE : %0d DW touched",
-                 mem_name, (op == PCIe_TL_MEM_OP_WRITE) ? "WRITE" : "READ", len_dw), UVM_LOW)
+      $sformatf("%s_%s_COMPLETE : %0d DW touched : data = [ %s ]",
+                 mem_name, (op == PCIe_TL_MEM_OP_WRITE) ? "WRITE" : "READ", len_dw, data_str), UVM_LOW)
 
   endfunction
 

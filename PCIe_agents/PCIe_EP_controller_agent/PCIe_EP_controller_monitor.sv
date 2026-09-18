@@ -32,7 +32,17 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
 
    bit tx_parity;
    bit rx_parity;
-  
+
+   // [ADDED] mon_pkt_mode : FLIT vs NON_FLIT for TLPs this monitor reconstructs
+   // off the wire and republishes to the EP TL model (send_tlp_to_ep_tl()).
+   // The link-training FSM in ep_pl_model decides FLIT/NON_FLIT once at L0
+   // entry but never stores it anywhere persistent, so there is currently no
+   // live signal to read it from here. PCIe Gen6 mandates FLIT mode, and
+   // every test in this suite (e.g. PCIe_3DW_flit_test) runs in FLIT mode,
+   // so this defaults to FLIT. If a genuine NON_FLIT test is added later,
+   // drive this from the real negotiated mode instead of this default.
+   pkt_mode_e mon_pkt_mode = FLIT;
+
    bit[`PCIe_MON_DATA_W-1:0]dl_flit_in[$];
    bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp_ep_tx;
     bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_ep_tx;
@@ -547,9 +557,9 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
       tl_item.tlp_data[b]     = tlp_bytes[b];
     end
 
-    //tl_item.pkt_mode   = mon_pkt_mode;
+    tl_item.pkt_mode   = mon_pkt_mode;
     tl_item.is_payload = 1'b1;
-    //tl_item.drive_flit = (mon_pkt_mode == FLIT);
+    tl_item.drive_flit = (mon_pkt_mode == FLIT);
 
    // `uvm_info("EP_MON_TO_TL",$sformatf("PUBLISHING_%0d_TLP_BYTES_TO_EP_TL_MODEL dir=%s mode=%s (242 B flit minus %0d B DLP)",`PCIe_TLP_DATA_BYTE_W, direction, mon_pkt_mode.name(), `PCIe_DLP_BYTE_W), UVM_LOW)
 
