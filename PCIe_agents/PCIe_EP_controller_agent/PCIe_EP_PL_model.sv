@@ -200,7 +200,7 @@ task ep_ltssm( PCIe_sequence_item pcie_seq_item);
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
        //================Drive Default PIPE Signals=======================
        ep_pipe_intf_tx.tx_elec_idle   <= item.tx_elec_idle;
-       ep_pipe_intf_tx.tx_valid      <= item.tx_valid;
+       ep_pipe_intf_tx.tx_valid      <= 1'b0;
        ep_pipe_intf_tx.rate          <= item.rate;
        `uvm_info("EP_LTSSM","Driving_PIPE_Signals",UVM_LOW)
        `uvm_info("EP_LTSSM",$sformatf("TxElecIdle  = %0b",item.tx_elec_idle),UVM_LOW)

@@ -324,6 +324,21 @@ class PCIe_sequence_item extends uvm_sequence_item;
   bit [63:0]       ep_to_rc_flit_calculated_8b_crc_on_242b;     // 8B CRC calculated on 242B
 
   //--------------------------------------------------------------------------
+  // 256B FLIT carry fields : scoreboard compares RC-TX vs EP-RX (RC->EP dir)
+  // . rc_ep_tx_256b_flit : full 256B flit that the RC controller monitor
+  //   reconstructed after full reverse process (de-precode / gray-decode /
+  //   descramble) of the RC tx_data stream, sent to the scoreboard via write().
+  // . rc_ep_rx_256b_flit : full 256B flit that the EP controller monitor
+  //   reconstructed after full reverse process of the EP rx_data stream
+  //   (the same RC->EP bytes), sent to the scoreboard via write().
+  // The scoreboard compares all 256 bytes and reports INFO on match / ERROR
+  // on mismatch, so the team can see the transmitted bytes on RC tx.data
+  // equal the received bytes on EP rx.data.
+  //--------------------------------------------------------------------------
+  bit [`PCIe_BYTE_W-1:0] rc_ep_tx_256b_flit[$];
+  bit [`PCIe_BYTE_W-1:0] rc_ep_rx_256b_flit[$];
+
+  //--------------------------------------------------------------------------
   // Field automation
   //--------------------------------------------------------------------------
   `uvm_object_utils_begin(PCIe_sequence_item)

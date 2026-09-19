@@ -115,6 +115,10 @@ ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_dl_model = ep_top_agen
           ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_con_rx_mon_ap.connect(pcie_scoreboard.ep_con_rx_imp);
           rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_con_rx_mon_ap.connect(pcie_scoreboard.rc_con_rx_imp);
           ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_con_tx_mon_ap.connect(pcie_scoreboard.ep_con_tx_imp);
+          // [ADDED] RC->EP 256B flit compare : RC tx.data (RC controller monitor)
+          //         vs EP rx.data (EP controller monitor)
+          rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_con_tx_256b_mon_ap.connect(pcie_scoreboard.rc_con_tx_256b_imp);
+          ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_con_rx_256b_mon_ap.connect(pcie_scoreboard.ep_con_rx_256b_imp);
        end
 
       // Subscriber Connections

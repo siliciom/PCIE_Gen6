@@ -23,6 +23,9 @@
 `uvm_analysis_imp_decl(_rc_controller_rx)
 `uvm_analysis_imp_decl(_ep_controller_tx)
 
+`uvm_analysis_imp_decl(_rc_con_tx_256b)
+`uvm_analysis_imp_decl(_ep_con_rx_256b)
+
 `uvm_analysis_imp_decl(_rc_controller_dl_RC_EP)
 `uvm_analysis_imp_decl(_ep_controller_dl_RC_EP)
 `uvm_analysis_imp_decl(_rc_controller_dl_EP_RC)
@@ -41,6 +44,13 @@ class PCIe_scoreboard extends uvm_scoreboard;
   uvm_analysis_imp_rc_controller_rx #(PCIe_sequence_item,PCIe_scoreboard) rc_con_rx_imp;
   uvm_analysis_imp_ep_controller_tx #(PCIe_sequence_item,PCIe_scoreboard) ep_con_tx_imp;
 
+  // [ADDED] RC->EP 256B flit : RC controller monitor (tx.data) vs EP controller
+  // monitor (rx.data). The RC monitor sends the 256B flit it transmitted, the EP
+  // monitor sends the matching 256B flit it received; the scoreboard compares all
+  // 256 bytes and reports INFO on match / ERROR on mismatch.
+  uvm_analysis_imp_rc_con_tx_256b #(PCIe_sequence_item,PCIe_scoreboard) rc_con_tx_256b_imp;
+  uvm_analysis_imp_ep_con_rx_256b #(PCIe_sequence_item,PCIe_scoreboard) ep_con_rx_256b_imp;
+
 
   uvm_analysis_imp_rc_controller_dl_RC_EP #(PCIe_sequence_item,PCIe_scoreboard) rc_con_dl_rcep_imp;
   uvm_analysis_imp_ep_controller_dl_RC_EP #(PCIe_sequence_item,PCIe_scoreboard) ep_con_dl_rcep_imp;
@@ -56,6 +66,13 @@ class PCIe_scoreboard extends uvm_scoreboard;
   bit [31:0] ep_controller_rx_q[$];
   bit [31:0] rc_controller_rx_q[$];
   bit [31:0] ep_controller_tx_q[$];
+
+  // [ADDED] 256B flit queues : RC->EP direction (tx.data vs rx.data)
+  bit [`PCIe_BYTE_W-1:0] rc_ep_tx_256b_q[$];   // 256B flits transmitted by RC (from RC controller monitor)
+  bit [`PCIe_BYTE_W-1:0] rc_ep_rx_256b_q[$];   // 256B flits received at EP (from EP controller monitor)
+  int  rc_ep_256b_flits_compared = 0;          // number of 256B flits compared so far
+  int  rc_ep_256b_flits_matched   = 0;         // number of flits with all 256 bytes matched
+  int  rc_ep_256b_flits_mismatched= 0;         // number of flits with at least one byte mismatch
 
 
   bit[0:5][7:0]dlp_ep_q[$]; // RC-->EP
@@ -79,6 +96,10 @@ class PCIe_scoreboard extends uvm_scoreboard;
        ep_con_rx_imp = new("ep_con_rx_imp",this);
        rc_con_rx_imp = new("rc_con_rx_imp",this);
        ep_con_tx_imp = new("ep_con_tx_imp",this);
+
+       // [ADDED] RC->EP 256B flit compare handles
+       rc_con_tx_256b_imp = new("rc_con_tx_256b_imp",this);
+       ep_con_rx_256b_imp = new("ep_con_rx_256b_imp",this);
 
 
        rc_con_dl_rcep_imp = new("rc_con_dl_rcep_imp",this);
@@ -120,8 +141,8 @@ class PCIe_scoreboard extends uvm_scoreboard;
       while ((rc_phy_tx_q.size() > 0) && (ep_phy_rx_q.size() > 0)) begin
            rc_phy_tx_data = rc_phy_tx_q.pop_front();
            ep_phy_rx_data = ep_phy_rx_q.pop_front();
-           `uvm_info("PCIe_SCOREBOARD", $sformatf("COMPARING_RC_PHY_TX = %08h  EP_PHY_RX = %08h",  rc_phy_tx_data, ep_phy_rx_data), UVM_HIGH)
-            if (rc_phy_tx_data == ep_phy_rx_data) begin
+`uvm_info("PCIe_SCOREBOARD", $sformatf("COMPARING_RC_PHY_TX = %08h  EP_PHY_RX = %08h",  rc_phy_tx_data, ep_phy_rx_data), UVM_HIGH)
+             if (rc_phy_tx_data == ep_phy_rx_data) begin
             `uvm_info("PCIe_SCOREBOARD",$sformatf("************PASS******************: PASS_RC_PHY_TX_TO_EP_PHY_RX_EXPECTED_DATA = %08h  EP_PHY_RX_ACTUAL_DATA = %08h", rc_phy_tx_data, ep_phy_rx_data), UVM_HIGH)
             end
             else begin
@@ -160,8 +181,8 @@ class PCIe_scoreboard extends uvm_scoreboard;
       while ((rc_phy_rx_q.size() > 0) && (ep_phy_tx_q.size() > 0)) begin
            rc_phy_rx_data = rc_phy_rx_q.pop_front();
            ep_phy_tx_data = ep_phy_tx_q.pop_front();
-           `uvm_info("PCIe_SCOREBOARD", $sformatf("COMPARING_RC_PHY_TX = %08h  EP_PHY_RX = %08h",  rc_phy_rx_data, ep_phy_tx_data), UVM_HIGH)
-            if (rc_phy_rx_data == ep_phy_tx_data) begin
+`uvm_info("PCIe_SCOREBOARD", $sformatf("COMPARING_RC_PHY_TX = %08h  EP_PHY_RX = %08h",  rc_phy_rx_data, ep_phy_tx_data), UVM_HIGH)
+             if (rc_phy_rx_data == ep_phy_tx_data) begin
             `uvm_info("PCIe_SCOREBOARD",$sformatf("************PASS******************: PASS_EP_PHY_TX_TO_RC_PHY_RX_EXPECTED_DATA = %08h  EP_PHY_RX_ACTUAL_DATA = %08h", rc_phy_rx_data, ep_phy_tx_data), UVM_HIGH)
             end
             else begin
@@ -191,12 +212,6 @@ class PCIe_scoreboard extends uvm_scoreboard;
       end
     `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_EP_CONTROLLER_RX_DATA",UVM_HIGH)
      compare_controller_rc_to_ep_data();
-     `ifdef PCIE_GEN6_FEC_CRC
-     // ---- FEC/CRC addition : single report for the RC->EP 256B flit ----
-     // The EP controller monitor computes FEC(on 250B body) and CRC(on 242B
-     // payload) for the RC->EP flit; report PASS/FAIL here once per flit.
-     report_rc_to_ep_flit_fec_crc(pkt);
-     `endif
   endfunction
 
   function void compare_controller_rc_to_ep_data();
@@ -227,12 +242,6 @@ class PCIe_scoreboard extends uvm_scoreboard;
      end
     `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_RC_CONTROLLER_RX_DATA",UVM_HIGH)
      compare_controller_ep_to_rc_data();
-     `ifdef PCIE_GEN6_FEC_CRC
-     // ---- FEC/CRC addition : single report for the EP->RC 256B flit ----
-     // The RC controller monitor computes FEC(on 250B body) and CRC(on 242B
-     // payload) for the EP->RC flit; report PASS/FAIL here once per flit.
-     report_ep_to_rc_flit_fec_crc(pkt);
-     `endif
   endfunction
 
   function void write_ep_controller_tx(PCIe_sequence_item pkt);
@@ -358,152 +367,82 @@ class PCIe_scoreboard extends uvm_scoreboard;
           end
   endfunction
 
-   `ifdef PCIE_GEN6_FEC_CRC
-   // ============================================================================
-   // ---- FEC/CRC addition : compare + report for the RC->EP 256B flit ---------
-   // The EP controller monitor computes FEC(on 250B body) and CRC(on 242B
-   // payload) on the 256B flit received from RC PHY, and carries the received
-   // and calculated values here via pcie_seq_item. THE COMPARISON IS DONE ONLY
-   // HERE (this scoreboard).
-   // FEC: compares all 6 bytes of received FEC vs calculated FEC, prints all
-   //      6 bytes of each side + FEC_MATCH (PASS/FAIL).
-   // CRC: compares all 8 bytes of received CRC vs calculated CRC (on 242B),
-   //      prints all 8 bytes of each side + CRC_MATCH (PASS/FAIL).
-   // Reported once per flit.
-   // ============================================================================
-   function void report_rc_to_ep_flit_fec_crc(PCIe_sequence_item pkt);
-      bit             fec_6b_match;                        // 1 = all 6 received FEC bytes == calculated FEC bytes
-      bit             crc_8b_match;                        // 1 = all 8 received CRC bytes == calculated CRC bytes
-      string          fec_received_bytes_log;              // all 6 received FEC bytes as hex (byte[0]..byte[5])
-      string          fec_calculated_bytes_log;            // all 6 calculated FEC bytes as hex (byte[0]..byte[5])
-      string          crc_received_bytes_log;              // all 8 received CRC bytes as hex (byte[0]..byte[7])
-      string          crc_calculated_bytes_log;            // all 8 calculated CRC bytes as hex (byte[0]..byte[7])
+// [ADDED] RC controller monitor -> scoreboard :: 256B RC->EP flit on tx.data
+  // Written once per flit by the RC controller monitor after the full reverse
+  // process (de-precode / gray-decode / descramble) of the RC tx_data stream.
+  function void write_rc_con_tx_256b(PCIe_sequence_item pkt);
+    `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_RC_CON_TX_256B_FLIT",UVM_HIGH)
+    foreach(pkt.rc_ep_tx_256b_flit[i])
+      rc_ep_tx_256b_q.push_back(pkt.rc_ep_tx_256b_flit[i]);
+    `uvm_info("PCIe_SCOREBOARD",$sformatf("RC_TX_256B_FLIT : SENT 256 BYTES FROM RC tx.data TO SCOREBOARD (rc_ep_tx_256b_q_size=%0d)", rc_ep_tx_256b_q.size()),UVM_LOW)
+    compare_rc_ep_256b_flit(pkt);
+  endfunction
 
-      if(!pkt.rc_to_ep_flit_fec_crc_check_done) return;    // report only once per flit
-      pkt.rc_to_ep_flit_fec_crc_check_done = 1'b0;
+  // [ADDED] EP controller monitor -> scoreboard :: 256B RC->EP flit on rx.data
+  // Written once per flit by the EP controller monitor after the full reverse
+  // process (de-precode / gray-decode / descramble) of the EP rx_data stream.
+  function void write_ep_con_rx_256b(PCIe_sequence_item pkt);
+    `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_EP_CON_RX_256B_FLIT",UVM_HIGH)
+    foreach(pkt.rc_ep_rx_256b_flit[i])
+      rc_ep_rx_256b_q.push_back(pkt.rc_ep_rx_256b_flit[i]);
+    `uvm_info("PCIe_SCOREBOARD",$sformatf("EP_RX_256B_FLIT : SENT 256 BYTES RECEIVED AT EP FROM rx.data TO SCOREBOARD (rc_ep_rx_256b_q_size=%0d)", rc_ep_rx_256b_q.size()),UVM_LOW)
+    compare_rc_ep_256b_flit(pkt);
+  endfunction
 
-      // ---- FEC : compare all 6 bytes (received vs calculated on 250B body) ----
-      fec_6b_match            = 1'b1;
-      fec_received_bytes_log  = "";
-      fec_calculated_bytes_log = "";
-      for(int i = 0; i < `PCIe_FLIT_FEC_BYTES; i++) begin
-         fec_received_bytes_log   = $sformatf("%s FEC6_BYTE[%0d]=0x%02h",
-                                              fec_received_bytes_log, i,
-                                              pkt.rc_to_ep_flit_received_6b_fec[i]);
-         fec_calculated_bytes_log = $sformatf("%s FEC6_BYTE[%0d]=0x%02h",
-                                              fec_calculated_bytes_log, i,
-                                              pkt.rc_to_ep_flit_calculated_6b_fec_on_250b[i]);
-         if(pkt.rc_to_ep_flit_received_6b_fec[i] !== pkt.rc_to_ep_flit_calculated_6b_fec_on_250b[i])
-            fec_6b_match = 1'b0;
+  // [ADDED] Compare all 256 bytes of every RC->EP flit : RC tx.data (transmitted
+  // by RC controller monitor) vs EP rx.data (received by EP controller monitor).
+  // INFO when all 256 bytes match; ERROR when any byte does not match.
+  // Prints the compared bytes (hex, both directions) and explains to the team
+  // that the same 256 bytes sent on RC tx.data arrived at EP rx.data.
+  function compare_rc_ep_256b_flit(PCIe_sequence_item pkt);
+    bit [`PCIe_BYTE_W-1:0] tx_256b [256];
+    bit [`PCIe_BYTE_W-1:0] rx_256b [256];
+    int  byte_mismatch_count;
+    string tx_dec;
+    string rx_dec;
+    int  i;
+
+    while ((rc_ep_tx_256b_q.size() >= 256) && (rc_ep_rx_256b_q.size() >= 256)) begin
+      // pop one full 256B flit from each side (all 256 bytes)
+      for(i = 0; i < 256; i++) begin
+        tx_256b[i] = rc_ep_tx_256b_q.pop_front();
+        rx_256b[i] = rc_ep_rx_256b_q.pop_front();
       end
+      rc_ep_256b_flits_compared++;
 
-      if(fec_6b_match)
-         `uvm_info("PCIe_SCOREBOARD",
-                   $sformatf("RC_TO_EP_FLIT_FEC_CHECK : PASS : RECEIVED_6B_FEC{%s } CALCULATED_6B_FEC_ON_250B{%s } | FEC_MATCH=1",
-                             fec_received_bytes_log, fec_calculated_bytes_log), UVM_LOW)
-      else
-         `uvm_error("PCIe_SCOREBOARD",
-                    $sformatf("RC_TO_EP_FLIT_FEC_CHECK : FAIL : RECEIVED_6B_FEC{%s } CALCULATED_6B_FEC_ON_250B{%s } | FEC_MATCH=0",
-                              fec_received_bytes_log, fec_calculated_bytes_log))
+      // byte-by-byte comparison over all 256 bytes
+      byte_mismatch_count = 0;
+      for(i = 0; i < 256; i++)
+        if (tx_256b[i] !== rx_256b[i])
+          byte_mismatch_count++;
 
-      // ---- CRC : compare all 8 bytes (received vs calculated on 242B payload) ----
-      crc_8b_match            = 1'b1;
-      crc_received_bytes_log  = "";
-      crc_calculated_bytes_log = "";
-      for(int b = 0; b < `PCIe_FLIT_CRC_BYTES; b++) begin
-         crc_received_bytes_log   = $sformatf("%s CRC8_BYTE[%0d]=0x%02h",
-                                              crc_received_bytes_log, b,
-                                              pkt.rc_to_ep_flit_received_8b_crc[((7-b)*8) +: 8]);
-         crc_calculated_bytes_log = $sformatf("%s CRC8_BYTE[%0d]=0x%02h",
-                                              crc_calculated_bytes_log, b,
-                                              pkt.rc_to_ep_flit_calculated_8b_crc_on_242b[((7-b)*8) +: 8]);
-         if(pkt.rc_to_ep_flit_received_8b_crc[((7-b)*8) +: 8] !==
-            pkt.rc_to_ep_flit_calculated_8b_crc_on_242b[((7-b)*8) +: 8])
-            crc_8b_match = 1'b0;
+      tx_dec = "";
+      rx_dec = "";
+      for(i = 0; i < 256; i++)
+        tx_dec = $sformatf("%s%0d ", tx_dec, tx_256b[i]);
+      for(i = 0; i < 256; i++)
+        rx_dec = $sformatf("%s%0d ", rx_dec, rx_256b[i]);
+
+      if (byte_mismatch_count == 0) begin
+        rc_ep_256b_flits_matched++;
+        `uvm_info("PCIe_SCOREBOARD",
+                  $sformatf("RC_EP_256B_FLIT_COMPARE :: FLIT[%0d] MATCH_IS_THERE : ALL_256_BYTES_MATCHED : SAME_DECIMAL_BYTES_SENT_ON_RC_TX_DATA_ARRIVED_ON_EP_RX_DATA (RC_TX_BYTE_0=%0d EP_RX_BYTE_0=%0d) : RC_TX_256B_DECIMAL=%s : EP_RX_256B_DECIMAL=%s",
+                            rc_ep_256b_flits_compared, tx_256b[0], rx_256b[0], tx_dec, rx_dec), UVM_LOW)
       end
-
-      if(crc_8b_match)
-         `uvm_info("PCIe_SCOREBOARD",
-                   $sformatf("RC_TO_EP_FLIT_CRC_CHECK : PASS : RECEIVED_8B_CRC{%s } CALCULATED_8B_CRC_ON_242B{%s } | CRC_MATCH=1",
-                             crc_received_bytes_log, crc_calculated_bytes_log), UVM_LOW)
-      else
-         `uvm_error("PCIe_SCOREBOARD",
-                    $sformatf("RC_TO_EP_FLIT_CRC_CHECK : FAIL : RECEIVED_8B_CRC{%s } CALCULATED_8B_CRC_ON_242B{%s } | CRC_MATCH=0",
-                              crc_received_bytes_log, crc_calculated_bytes_log))
-   endfunction : report_rc_to_ep_flit_fec_crc
-
-   // ============================================================================
-   // ---- FEC/CRC addition : compare + report for the EP->RC 256B flit ---------
-   // The RC controller monitor computes FEC(on 250B body) and CRC(on 242B
-   // payload) on the 256B flit received from EP PHY, and carries the received
-   // and calculated values here via pcie_seq_item. THE COMPARISON IS DONE ONLY
-   // HERE (this scoreboard).
-   // FEC: compares all 6 bytes of received FEC vs calculated FEC, prints all
-   //      6 bytes of each side + FEC_MATCH (PASS/FAIL).
-   // CRC: compares all 8 bytes of received CRC vs calculated CRC (on 242B),
-   //      prints all 8 bytes of each side + CRC_MATCH (PASS/FAIL).
-   // Reported once per flit.
-   // ============================================================================
-   function void report_ep_to_rc_flit_fec_crc(PCIe_sequence_item pkt);
-      bit             fec_6b_match;                        // 1 = all 6 received FEC bytes == calculated FEC bytes
-      bit             crc_8b_match;                        // 1 = all 8 received CRC bytes == calculated CRC bytes
-      string          fec_received_bytes_log;              // all 6 received FEC bytes as hex (byte[0]..byte[5])
-      string          fec_calculated_bytes_log;            // all 6 calculated FEC bytes as hex (byte[0]..byte[5])
-      string          crc_received_bytes_log;              // all 8 received CRC bytes as hex (byte[0]..byte[7])
-      string          crc_calculated_bytes_log;            // all 8 calculated CRC bytes as hex (byte[0]..byte[7])
-
-      if(!pkt.ep_to_rc_flit_fec_crc_check_done) return;    // report only once per flit
-      pkt.ep_to_rc_flit_fec_crc_check_done = 1'b0;
-
-      // ---- FEC : compare all 6 bytes (received vs calculated on 250B body) ----
-      fec_6b_match            = 1'b1;
-      fec_received_bytes_log  = "";
-      fec_calculated_bytes_log = "";
-      for(int i = 0; i < `PCIe_FLIT_FEC_BYTES; i++) begin
-         fec_received_bytes_log   = $sformatf("%s FEC6_BYTE[%0d]=0x%02h",
-                                              fec_received_bytes_log, i,
-                                              pkt.ep_to_rc_flit_received_6b_fec[i]);
-         fec_calculated_bytes_log = $sformatf("%s FEC6_BYTE[%0d]=0x%02h",
-                                              fec_calculated_bytes_log, i,
-                                              pkt.ep_to_rc_flit_calculated_6b_fec_on_250b[i]);
-         if(pkt.ep_to_rc_flit_received_6b_fec[i] !== pkt.ep_to_rc_flit_calculated_6b_fec_on_250b[i])
-            fec_6b_match = 1'b0;
+      else begin
+        rc_ep_256b_flits_mismatched++;
+        `uvm_error("PCIe_SCOREBOARD",
+                   $sformatf("RC_EP_256B_FLIT_COMPARE :: FLIT[%0d] 256B_MATCH_NOT_THERE : %0d_OF_256_BYTES_MISMATCHED : RC_TX_256B_DECIMAL=%s : EP_RX_256B_DECIMAL=%s",
+                             rc_ep_256b_flits_compared, byte_mismatch_count, tx_dec, rx_dec))
       end
+    end
 
-      if(fec_6b_match)
-         `uvm_info("PCIe_SCOREBOARD",
-                   $sformatf("EP_TO_RC_FLIT_FEC_CHECK : PASS : RECEIVED_6B_FEC{%s } CALCULATED_6B_FEC_ON_250B{%s } | FEC_MATCH=1",
-                             fec_received_bytes_log, fec_calculated_bytes_log), UVM_LOW)
-      else
-         `uvm_error("PCIe_SCOREBOARD",
-                    $sformatf("EP_TO_RC_FLIT_FEC_CHECK : FAIL : RECEIVED_6B_FEC{%s } CALCULATED_6B_FEC_ON_250B{%s } | FEC_MATCH=0",
-                              fec_received_bytes_log, fec_calculated_bytes_log))
-
-      // ---- CRC : compare all 8 bytes (received vs calculated on 242B payload) ----
-      crc_8b_match            = 1'b1;
-      crc_received_bytes_log  = "";
-      crc_calculated_bytes_log = "";
-      for(int b = 0; b < `PCIe_FLIT_CRC_BYTES; b++) begin
-         crc_received_bytes_log   = $sformatf("%s CRC8_BYTE[%0d]=0x%02h",
-                                              crc_received_bytes_log, b,
-                                              pkt.ep_to_rc_flit_received_8b_crc[((7-b)*8) +: 8]);
-         crc_calculated_bytes_log = $sformatf("%s CRC8_BYTE[%0d]=0x%02h",
-                                              crc_calculated_bytes_log, b,
-                                              pkt.ep_to_rc_flit_calculated_8b_crc_on_242b[((7-b)*8) +: 8]);
-         if(pkt.ep_to_rc_flit_received_8b_crc[((7-b)*8) +: 8] !==
-            pkt.ep_to_rc_flit_calculated_8b_crc_on_242b[((7-b)*8) +: 8])
-            crc_8b_match = 1'b0;
-      end
-
-      if(crc_8b_match)
-         `uvm_info("PCIe_SCOREBOARD",
-                   $sformatf("EP_TO_RC_FLIT_CRC_CHECK : PASS : RECEIVED_8B_CRC{%s } CALCULATED_8B_CRC_ON_242B{%s } | CRC_MATCH=1",
-                             crc_received_bytes_log, crc_calculated_bytes_log), UVM_LOW)
-      else
-         `uvm_error("PCIe_SCOREBOARD",
-                    $sformatf("EP_TO_RC_FLIT_CRC_CHECK : FAIL : RECEIVED_8B_CRC{%s } CALCULATED_8B_CRC_ON_242B{%s } | CRC_MATCH=0",
-                              crc_received_bytes_log, crc_calculated_bytes_log))
-   endfunction : report_ep_to_rc_flit_fec_crc
-   `endif
+    // [ADDED] summary understanding message for the team : how many 256B flits
+    // were compared and that RX data == TX data (RC->EP).
+    if (rc_ep_256b_flits_compared > 0)
+      `uvm_info("PCIe_SCOREBOARD",
+                $sformatf("RC_EP_256B_FLIT_SUMMARY : TOTAL_256B_FLITS_COMPARED=%0d ALL_256_BYTES_MATCHED_FLITS=%0d MISMATCHED_FLITS=%0d : UNDERSTANDING : THE_SAME_256_BYTES_SENT_ON_RC_tx.data_ARE_RECEIVED_ON_EP_rx.data (RC->EP direction checked)",
+                          rc_ep_256b_flits_compared, rc_ep_256b_flits_matched, rc_ep_256b_flits_mismatched), UVM_LOW)
+  endfunction
 
 endclass

@@ -65,6 +65,7 @@ task run_phase(uvm_phase phase);
 	  `uvm_info("EP_LTSSM","tl_link_active=1",UVM_LOW)
          ep_dl_active_event.wait_trigger();
 	 `uvm_info("EP_DLCMSM","Event_TL_Triggered",UVM_LOW)
+	 tx_ap.write(pcie_seq_item);
           drive_flit(pcie_seq_item);
         end
         seq_item_port.item_done();

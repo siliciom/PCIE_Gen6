@@ -55,6 +55,13 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
     uvm_analysis_port #(PCIe_sequence_item) rc_con_tx_mon_ap;
     uvm_analysis_port #(PCIe_sequence_item) rc_con_rx_mon_ap;	
  
+    // [ADDED] RC controller monitor -> scoreboard : 256B RC->EP flit (tx.data)
+    // Full 256B flit reconstructed after full reverse process (de-precode /
+    // gray-decode / descramble) of the RC tx_data stream. Written once per flit
+    // so the scoreboard compares all 256 transmitted bytes vs EP rx.data.
+    uvm_analysis_port #(PCIe_sequence_item) rc_con_tx_256b_mon_ap;
+    bit [`PCIe_MON_DATA_W-1:0] rc_tx_256b_flit_dword_q[$];  // last 64 tx dwords = current 256B flit	
+ 
     function new(string name="PCIe_RC_controller_monitor", uvm_component parent);
      super.new(name,parent);
       rc_mon_ap_dl=new("rc_mon_ap_dl",this);
@@ -66,6 +73,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
       super.build_phase(phase);
  	  rc_con_tx_mon_ap =new("rc_con_tx_mon_ap",this);
  	  rc_con_rx_mon_ap =new("rc_con_rx_mon_ap",this);
+ 	  rc_con_tx_256b_mon_ap =new("rc_con_tx_256b_mon_ap",this);
       rc_pl_model = PCIe_RC_PL_model::type_id::create("rc_pl_model", this);
     
       if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf_tx))
@@ -180,6 +188,33 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                descrambled_data, pcie_seq_item.data_q_rc_mon_con_tx.size()), UVM_LOW)
             rc_con_tx_mon_ap.write(pcie_seq_item);
 
+            // [ADDED] keep only the trailing 64 tx dwords = current 256B flit (RC->EP)
+            rc_tx_256b_flit_dword_q.push_back(descrambled_data);
+            if (rc_tx_256b_flit_dword_q.size() > 64)
+               rc_tx_256b_flit_dword_q.pop_front();
+
+            // [ADDED] once per 64-dword flit boundary (after the 232 training
+            // dwords), rebuild the full 256B flit sent by RC on tx.data after
+            // full reverse process (de-precode / gray-decode / descramble) and
+            // send it to the scoreboard with write() for the 256-byte compare.
+            if ((rc_pl_model.link_up == 1) &&
+                (tx_os_dword_count >= 232) &&
+                (((tx_os_dword_count + 1 - 232) % 64) == 0) &&
+                (rc_tx_256b_flit_dword_q.size() == 64)) begin
+               pcie_seq_item.rc_ep_tx_256b_flit.delete();
+               for (int i = 0; i < 64; i++) begin
+                  bit [31:0] dword = rc_tx_256b_flit_dword_q[i];
+                  pcie_seq_item.rc_ep_tx_256b_flit.push_back(dword[7:0]);
+                  pcie_seq_item.rc_ep_tx_256b_flit.push_back(dword[15:8]);
+                  pcie_seq_item.rc_ep_tx_256b_flit.push_back(dword[23:16]);
+                  pcie_seq_item.rc_ep_tx_256b_flit.push_back(dword[31:24]);
+               end
+               `uvm_info("RC_CONTROLLER_MONITOR",
+                         $sformatf("RC_TX_256B_FLIT_RC_TO_EP : 256-BYTE_TX_FLIT_SENT_TO_SCOREBOARD (flit_bytes=%0d)",
+                                   pcie_seq_item.rc_ep_tx_256b_flit.size()), UVM_LOW)
+               rc_con_tx_256b_mon_ap.write(pcie_seq_item);
+            end
+
             tx_os_dword_count++;
             dword_in_os++;
 
@@ -223,13 +258,18 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
 
       dword_in_os = 0;
 
-      while (rc_pipe_intf_rx.rx_valid) begin
+      // [CAPTURE-EXT] Keep sampling across rx_valid gaps so every received
+      // burst is captured (do NOT exit on the first rx_valid de-assert).
+      while (1) begin
          @(negedge rc_pipe_intf_rx.pclk);
 
          pcie_seq_item.rx_valid     = rc_pipe_intf_rx.rx_valid;
          pcie_seq_item.rx_elec_idle = rc_pipe_intf_rx.rx_elec_idle;
          pcie_seq_item.rx_status    = rc_pipe_intf_rx.rx_status;
          pcie_seq_item.phy_status   = rc_pipe_intf_rx.phy_status;
+
+         if (rx_os_dword_count > 1500) break;
+         if (!pcie_seq_item.rx_valid) continue;
 
          if (pcie_seq_item.rx_valid) begin
             rx_data = rc_pipe_intf_rx.rx_data;
@@ -288,9 +328,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
              // FEC/CRC addition : 256B flit received from EP PHY -> RC controller
              // monitor after all reverse process. FEC and CRC are computed HERE
              // (FEC logic and CRC logic each kept at one place) and the
-             // received/calculated values are carried to the scoreboard. The
-             // comparison (received vs calculated) and the PASS/FAIL report are
-             // done ONLY in the scoreboard.
+             // comparison (received vs calculated) + MATCH/ERROR report is done
+             // HERE, once per flit.
              check_ep_to_rc_flit_fec_crc(pcie_seq_item.data_q_rc_mon_con_rx, rx_os_dword_count);
              `endif
             rc_con_rx_mon_ap.write(pcie_seq_item);
@@ -702,8 +741,9 @@ endtask
    //                      (242B payload + 8B received CRC).
    // STEP 2 (CRC next)  : 8B CRC calculated over the received 242B payload.
    // Received AND calculated values are carried in pcie_seq_item.
-   // The comparison (received vs calculated) is done ONLY in the scoreboard,
-   // which prints all 6 FEC bytes + all 8 CRC bytes with PASS/FAIL once per flit.
+   // THE COMPARISON (received vs calculated) IS DONE HERE in the RC controller
+   // monitor: all 6 FEC bytes + all 8 CRC bytes are printed with MATCH (info)
+   // or ERROR per flit.
    // ============================================================================
    task check_ep_to_rc_flit_fec_crc(input bit [`PCIe_MON_DATA_W-1:0] ep_flit_dword_q[$],
                                     input int total_dword_count);
@@ -721,14 +761,14 @@ endtask
       pcie_seq_item.ep_to_rc_flit_fec_crc_check_done = 1'b0;
 
       // --- gating : check a complete 256B flit, exactly once per flit ---
-      // The EP drives 232 training DWORDs then flit DWORDs. The RX queue
-      // accumulates all of them. The first flit occupies DWORD indices
-      // 232..295 (64 dwords); the check must fire only when the last
-      // dword of a 64-dword flit has just been pushed.
-      // Use the trailing 64 dwords of the queue -> always the just-finished flit.
-      if (total_dword_count < (232 + 64)) return;                 // need at least one complete flit after training
-      if (((total_dword_count + 1 - 232) % 64) != 0) return;      // fire only at each 64-dword flit boundary
-      if (ep_flit_dword_q.size() < 64) return;                   // full 256B flit not captured yet
+      // The RC receive queue is drained to hold only the trailing dwords
+      // (size == total_dword_count - 231). The first EP->RC flit therefore
+      // occupies queue indices [0..63] exactly when total_dword_count == 295,
+      // i.e. window base = 232 (same as the EP receiver). Firing at any later
+      // count would leave trailing non-flit dwords in the window.
+      if (total_dword_count < 232) return;                // first EP->RC flit ends at count 295
+      if (((total_dword_count + 1 - 232) % 64) != 0) return;     // fire only at each 64-dword flit boundary
+      if (ep_flit_dword_q.size() != 64) return;                  // window aligned only when queue holds exactly the flit
       flit_start = ep_flit_dword_q.size() - 64;                  // current flit = last 64 dwords
 
       // ---- step 0 : rebuild the received 256B flit (4 bytes per dword, little-endian) ----
@@ -750,25 +790,42 @@ endtask
       for(int i = 0; i < `PCIe_FLIT_FEC_BYTES; i++)
          received_6b_fec_from_ep_flit[i] = rc_mon_256b_flit_received_from_ep[`PCIe_DLP_FLIT_BYTE_W + `PCIe_FLIT_CRC_BYTES + i];
 
+      // ---- [ADDED] received EP->RC flit print : 242B flit + 8B CRC + 6B FEC ----
+      begin : ep_to_rc_rx_flit_print
+         string ep_to_rc_flit_242b;
+         string ep_to_rc_crc_8b;
+         string ep_to_rc_fec_6b;
+         ep_to_rc_flit_242b = "";
+         ep_to_rc_crc_8b    = "";
+         ep_to_rc_fec_6b    = "";
+         for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
+            ep_to_rc_flit_242b = $sformatf("%s%0d ", ep_to_rc_flit_242b, received_242b_payload_from_ep[i]);
+         for(int i = 0; i < `PCIe_FLIT_CRC_BYTES; i++)
+            ep_to_rc_crc_8b = $sformatf("%s%0d ", ep_to_rc_crc_8b, received_8b_crc_from_ep_flit[i]);
+         for(int i = 0; i < `PCIe_FLIT_FEC_BYTES; i++)
+            ep_to_rc_fec_6b = $sformatf("%s%0d ", ep_to_rc_fec_6b, received_6b_fec_from_ep_flit[i]);
+          `uvm_info("RC_CONTROLLER_MONITOR",
+                    $sformatf("EP_TO_RC : RECEIVED_256B_FLIT (242B PAYLOAD + 8B CRC + 6B FEC) = %s",
+                              $sformatf("%s%s%s", ep_to_rc_flit_242b, ep_to_rc_crc_8b, ep_to_rc_fec_6b)), UVM_LOW)
+      end : ep_to_rc_rx_flit_print
+
       // ==== STEP 1 : FEC CHECK (first) - FEC calculated over the 250B body ====
       fec_body_250b_payload_plus_ep_crc.delete();
+      // ---- [ADDED] 242B flit print + FEC/CRC check (EP->RC direction) ----
+      // Prints the received 242B flit ONCE here at the flit boundary, where the
+      // FEC/CRC match flags are fresh and the exact 242B payload is available.
+      // NOTE : per user decision, NO is_valid gating / NO rx_retry_buffer push
+      // is done on the RC side for EP->RC; only the EP receiver (RC->EP) gates.
       for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
          fec_body_250b_payload_plus_ep_crc.push_back(received_242b_payload_from_ep[i]);
       for(int i = 0; i < `PCIe_FLIT_CRC_BYTES; i++)
          fec_body_250b_payload_plus_ep_crc.push_back(received_8b_crc_from_ep_flit[i]);
       calculate_fec_on_250b_body(fec_body_250b_payload_plus_ep_crc, calculated_6b_fec_on_250b);
 
-      // NOTE : FEC comparison (received 6B vs calculated 6B) is done ONLY in the
-      // SCOREBOARD. Here we only calculate the 6B FEC and carry the received +
-      // calculated FEC values in pcie_seq_item.
-
       // ==== STEP 2 : CRC CHECK (next) - CRC calculated over the 242B payload ====
       calculated_8b_crc_on_242b = calculate_crc_on_242b_payload(received_242b_payload_from_ep);
 
-      // NOTE : CRC comparison (received 8B vs calculated 8B on 242B) is also done
-      // ONLY in the SCOREBOARD. Here we only carry the received + calculated CRC.
-
-      // ---- carry received / calculated values to the scoreboard (report once per flit) ----
+      // ---- carry received / calculated values in pcie_seq_item ----
       for(int i = 0; i < `PCIe_FLIT_FEC_BYTES; i++) begin
          pcie_seq_item.ep_to_rc_flit_received_6b_fec[i]           = received_6b_fec_from_ep_flit[i];
          pcie_seq_item.ep_to_rc_flit_calculated_6b_fec_on_250b[i] = calculated_6b_fec_on_250b[i];
@@ -778,9 +835,78 @@ endtask
                                                          received_8b_crc_from_ep_flit[4], received_8b_crc_from_ep_flit[5],
                                                          received_8b_crc_from_ep_flit[6], received_8b_crc_from_ep_flit[7]};
       pcie_seq_item.ep_to_rc_flit_calculated_8b_crc_on_242b = calculated_8b_crc_on_242b;
-      pcie_seq_item.ep_to_rc_flit_fec_crc_check_done         = 1'b1;
+
+      // ==== FEC/CRC COMPARISON DONE HERE (RC controller monitor, EP->RC flit) ====
+      // Prints all 6 FEC bytes (received vs calculated on 250B body) and all 8 CRC
+      // bytes (received vs calculated on 242B payload). Info "match" when they
+      // match, error when they don't.
+      begin : ep_to_rc_flit_fec_crc_compare
+         bit             fec_6b_match;                 // 1 = all 6 received FEC bytes == calculated FEC bytes
+         bit             crc_8b_match;                 // 1 = all 8 received CRC bytes == calculated CRC bytes
+         string          fec_received_bytes_log;       // all 6 received FEC bytes as hex (byte[0]..byte[5])
+         string          fec_calculated_bytes_log;     // all 6 calculated FEC bytes as hex (byte[0]..byte[5])
+         string          crc_received_bytes_log;       // all 8 received CRC bytes as hex (byte[0]..byte[7])
+         string          crc_calculated_bytes_log;     // all 8 calculated CRC bytes as hex (byte[0]..byte[7])
+
+         // ---- FEC : compare all 6 bytes (received vs calculated on 250B body) ----
+         fec_6b_match             = 1'b1;
+         fec_received_bytes_log   = "";
+         fec_calculated_bytes_log = "";
+         for(int i = 0; i < `PCIe_FLIT_FEC_BYTES; i++) begin
+            fec_received_bytes_log   = $sformatf("%s FEC6_BYTE[%0d]=0x%02h",
+                                                 fec_received_bytes_log, i,
+                                                 pcie_seq_item.ep_to_rc_flit_received_6b_fec[i]);
+            fec_calculated_bytes_log = $sformatf("%s FEC6_BYTE[%0d]=0x%02h",
+                                                 fec_calculated_bytes_log, i,
+                                                 pcie_seq_item.ep_to_rc_flit_calculated_6b_fec_on_250b[i]);
+            if(pcie_seq_item.ep_to_rc_flit_received_6b_fec[i] !==
+               pcie_seq_item.ep_to_rc_flit_calculated_6b_fec_on_250b[i])
+               fec_6b_match = 1'b0;
+         end
+
+         if(fec_6b_match)
+            `uvm_info("RC_CONTROLLER_MONITOR",
+                      $sformatf("EP_TO_RC_FLIT_FEC_CHECK : MATCH : RECEIVED_6B_FEC{%s } CALCULATED_6B_FEC_ON_250B{%s } | FEC_MATCH=1",
+                                fec_received_bytes_log, fec_calculated_bytes_log), UVM_LOW)
+         else
+            `uvm_error("RC_CONTROLLER_MONITOR",
+                       $sformatf("EP_TO_RC_FLIT_FEC_CHECK : ERROR/MISMATCH : RECEIVED_6B_FEC{%s } CALCULATED_6B_FEC_ON_250B{%s } | FEC_MATCH=0",
+                                 fec_received_bytes_log, fec_calculated_bytes_log))
+
+         // ---- CRC : compare all 8 bytes (received vs calculated on 242B payload) ----
+         crc_8b_match             = 1'b1;
+         crc_received_bytes_log   = "";
+         crc_calculated_bytes_log = "";
+         for(int b = 0; b < `PCIe_FLIT_CRC_BYTES; b++) begin
+            crc_received_bytes_log   = $sformatf("%s CRC8_BYTE[%0d]=0x%02h",
+                                                 crc_received_bytes_log, b,
+                                                 pcie_seq_item.ep_to_rc_flit_received_8b_crc[((7-b)*8) +: 8]);
+            crc_calculated_bytes_log = $sformatf("%s CRC8_BYTE[%0d]=0x%02h",
+                                                 crc_calculated_bytes_log, b,
+                                                 pcie_seq_item.ep_to_rc_flit_calculated_8b_crc_on_242b[((7-b)*8) +: 8]);
+            if(pcie_seq_item.ep_to_rc_flit_received_8b_crc[((7-b)*8) +: 8] !==
+               pcie_seq_item.ep_to_rc_flit_calculated_8b_crc_on_242b[((7-b)*8) +: 8])
+               crc_8b_match = 1'b0;
+         end
+
+         pcie_seq_item.ep_to_rc_flit_fec_match = fec_6b_match;
+         pcie_seq_item.ep_to_rc_flit_crc_match = crc_8b_match;
+
+         if(crc_8b_match)
+            `uvm_info("RC_CONTROLLER_MONITOR",
+                      $sformatf("EP_TO_RC_FLIT_CRC_CHECK : MATCH : RECEIVED_8B_CRC{%s } CALCULATED_8B_CRC_ON_242B{%s } | CRC_MATCH=1",
+                                crc_received_bytes_log, crc_calculated_bytes_log), UVM_LOW)
+         else
+            `uvm_error("RC_CONTROLLER_MONITOR",
+                       $sformatf("EP_TO_RC_FLIT_CRC_CHECK : ERROR/MISMATCH : RECEIVED_8B_CRC{%s } CALCULATED_8B_CRC_ON_242B{%s } | CRC_MATCH=0",
+                                 crc_received_bytes_log, crc_calculated_bytes_log))
+      end : ep_to_rc_flit_fec_crc_compare
+
+      // ---- [KEPT] EP->RC flit FEC/CRC match flags : carried in pcie_seq_item ----
+      pcie_seq_item.ep_to_rc_flit_fec_crc_check_done = 1'b1;
    endtask : check_ep_to_rc_flit_fec_crc
    `endif
+
 
 
 endclass
