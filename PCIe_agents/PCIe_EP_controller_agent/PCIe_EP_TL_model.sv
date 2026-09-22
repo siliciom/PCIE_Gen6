@@ -153,11 +153,25 @@ class PCIe_EP_TL_model extends uvm_component;
   //==========================================================================
   //  write      : original path, EP controller driver -> EP DL model
   //==========================================================================
-  function void write(PCIe_sequence_item item);
+function void write(PCIe_sequence_item item);
+bit [`PCIe_BYTE_W-1:0] tlp_byte_q[$];
+int b;
+`uvm_info("EP_TL_MODEL",
+  $sformatf("TL -> DL (driver path): drive_flit=%0d", item.drive_flit), UVM_MEDIUM)
+// ---- build a queue of all 236 bytes and print it in a single uvm_info ----
+tlp_byte_q.delete();
+for (b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++)
+  tlp_byte_q.push_back(item.tlp_data[b]);
+`uvm_info("EP_TL_DRIVER_PATH_236B",
+  $sformatf("TL_MODEL_RECEIVED_236B_FROM_DRIVER = %p", tlp_byte_q), UVM_LOW)
+  item.print();
+tl_ap.write(item);
+endfunction
+ /* function void write(PCIe_sequence_item item);
     `uvm_info("EP_TL_MODEL",
       $sformatf("TL -> DL (driver path): drive_flit=%0d", item.drive_flit), UVM_MEDIUM)
     tl_ap.write(item);
-  endfunction
+  endfunction*/
 
   //==========================================================================
   //  write_mon  : EP controller monitor -> EP TL model
