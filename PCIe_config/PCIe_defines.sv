@@ -533,6 +533,8 @@
 `define PCIe_FLIT_IDLE_DLP0          8'h00
 `define PCIe_FLIT_IDLE_DLP1          8'h00
 `define PCIe_FLIT_NOP2_DLLP          32'h0000_0000  // NOP2 DLLP, Flit Mode
+`define PCIe_NUM_RC_TX_NOP_FLITS     3             // RC DL emits 3 NOP2 flits before TL payload
+`define PCIe_NUM_RC_TX_NOP2_DLLP     3             // NOP2 DLLP content select (unused placeholder)
 `define PCIe_FLIT_NOP_DLLP           32'h3100_0000  // NOP DLLP, Non-Flit Mode
 `define PCIe_FLIT_TLP_REGION_DW      59            // 236 B / 4
 
