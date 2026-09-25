@@ -31,7 +31,7 @@ class PCIe_RC_4DW_Flit_MemRd_MaxPayload_sequence extends PCIe_RC_controller_base
   task body();
     `uvm_info("4DW_FLIT_MEMRD_MAXPAYLOA","ENTERED_INTO_4DW_FLIT_MEMRD_MAXPAYLOA_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("mrd");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information

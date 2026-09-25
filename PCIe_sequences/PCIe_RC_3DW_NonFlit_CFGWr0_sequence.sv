@@ -31,7 +31,7 @@ class PCIe_RC_3DW_NonFlit_CFGWr0_sequence extends PCIe_RC_controller_base_sequen
   task body();
     `uvm_info("3DW_NONFLIT_CFGWR0","ENTERED_INTO_3DW_NONFLIT_CFGWR0_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("cfg");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information

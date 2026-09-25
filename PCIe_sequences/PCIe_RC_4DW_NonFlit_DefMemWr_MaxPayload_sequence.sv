@@ -31,7 +31,7 @@ class PCIe_RC_4DW_NonFlit_DefMemWr_MaxPayload_sequence extends PCIe_RC_controlle
   task body();
     `uvm_info("4DW_NONFLIT_DEFMEMWR_MAX","ENTERED_INTO_4DW_NONFLIT_DEFMEMWR_MAX_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("defmwr");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information

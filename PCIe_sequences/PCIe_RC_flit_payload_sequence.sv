@@ -47,7 +47,7 @@ class PCIe_RC_flit_payload_sequence extends PCIe_RC_controller_base_sequence;
     `uvm_info("RC_FLIT_PAYLOAD","ENTERED_INTO_RC_FLIT_PAYLOAD_SEQUENCE_BODY", UVM_LOW)
 
     // 3DW Memory Write (MWr_32) carried in a single Payload Flit
-    pcie_seq_item = PCIe_sequence_item::type_id::create("rc_payload_flit");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          electrical_idle_test == 1'b0;

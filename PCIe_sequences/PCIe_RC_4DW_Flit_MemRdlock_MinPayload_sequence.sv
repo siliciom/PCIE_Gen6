@@ -31,7 +31,7 @@ class PCIe_RC_4DW_Flit_MemRdlock_MinPayload_sequence extends PCIe_RC_controller_
   task body();
     `uvm_info("4DW_FLIT_MEMRDLOCK_MINPA","ENTERED_INTO_4DW_FLIT_MEMRDLOCK_MINPA_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("mrdlk");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information

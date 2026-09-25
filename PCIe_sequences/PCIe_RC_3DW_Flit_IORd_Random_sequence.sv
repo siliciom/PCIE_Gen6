@@ -9,11 +9,10 @@ class PCIe_RC_3DW_Flit_IORd_Random_sequence extends PCIe_RC_controller_base_sequ
   endfunction
 
   virtual task body();
-    PCIe_sequence_item req;
-    req = PCIe_sequence_item::type_id::create("req");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
 
-    start_item(req);
-    assert(req.randomize() with {
+    start_item(pcie_seq_item);
+    assert(pcie_seq_item.randomize() with {
       // LTSSM information
       electrical_idle_test == 1'b0;
       no_receiver_test     == 1'b0;
@@ -37,7 +36,7 @@ class PCIe_RC_3DW_Flit_IORd_Random_sequence extends PCIe_RC_controller_base_sequ
       msg_route            == PCIe_MSG_ROUTE_TO_RC;
       msg_has_data         == 1'b0;
     }) else `uvm_fatal("SEQ_RAND", "Failed to randomize I/O request")
-    finish_item(req);
+    finish_item(pcie_seq_item);
   endtask
 endclass
 

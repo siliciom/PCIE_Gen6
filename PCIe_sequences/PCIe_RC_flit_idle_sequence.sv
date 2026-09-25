@@ -38,7 +38,7 @@ class PCIe_RC_flit_idle_sequence extends PCIe_RC_controller_base_sequence;
   task body();
     `uvm_info("RC_FLIT_IDLE","ENTERED_INTO_RC_FLIT_IDLE_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("rc_idle_flit");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
 
     if (!pcie_seq_item.randomize() with {

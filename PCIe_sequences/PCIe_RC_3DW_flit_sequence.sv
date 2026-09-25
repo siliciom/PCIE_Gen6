@@ -34,7 +34,7 @@ class PCIe_RC_3DW_flit_sequence extends PCIe_RC_controller_base_sequence;
     `uvm_info("RC_3DW","ENTERED_INTO_RC_3DW_SEQUENCE_BODY", UVM_LOW)
 
     // 3DW Memory Write (MWr_32)
-    pcie_seq_item = PCIe_sequence_item::type_id::create("mwr_3dw");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
 
@@ -96,7 +96,7 @@ class PCIe_RC_3DW_flit_sequence extends PCIe_RC_controller_base_sequence;
 
 //    `uvm_info("TL_RC_3DW",$sformatf("Readback 3DW MRd"), UVM_LOW)
 //    // 3DW Memory Read (MRd_32) readback
-//    pcie_seq_item = PCIe_sequence_item::type_id::create("mrd_3dw");
+//    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
 //    start_item(pcie_seq_item);
 //    if (!pcie_seq_item.randomize() with {
 //          pkt_mode       == FLIT;

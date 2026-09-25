@@ -31,7 +31,7 @@ class PCIe_RC_4DW_Flit_MsgWr_withoutdata_sequence extends PCIe_RC_controller_bas
   task body();
     `uvm_info("4DW_FLIT_MSGWR_WITHOUTDA","ENTERED_INTO_4DW_FLIT_MSGWR_WITHOUTDA_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("msgwr");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information

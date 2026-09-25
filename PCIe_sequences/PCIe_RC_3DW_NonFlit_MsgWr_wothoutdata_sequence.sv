@@ -31,7 +31,7 @@ class PCIe_RC_3DW_NonFlit_MsgWr_wothoutdata_sequence extends PCIe_RC_controller_
   task body();
     `uvm_info("3DW_NONFLIT_MSGWR_WOTHOU","ENTERED_INTO_3DW_NONFLIT_MSGWR_WOTHOU_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("msgwr");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information

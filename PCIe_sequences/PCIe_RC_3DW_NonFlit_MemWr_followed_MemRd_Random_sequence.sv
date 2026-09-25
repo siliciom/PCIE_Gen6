@@ -31,7 +31,7 @@ class PCIe_RC_3DW_NonFlit_MemWr_followed_MemRd_Random_sequence extends PCIe_RC_c
   task body();
     `uvm_info("3DW_NONFLIT_MEMWR_FOLLOW","ENTERED_INTO_3DW_NONFLIT_MEMWR_FOLLOW_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("mwr");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information
@@ -73,7 +73,7 @@ class PCIe_RC_3DW_NonFlit_MemWr_followed_MemRd_Random_sequence extends PCIe_RC_c
 
     finish_item(pcie_seq_item);
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("mrd");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information

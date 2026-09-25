@@ -31,7 +31,7 @@ class PCIe_RC_3DW_NonFlit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC
   task body();
     `uvm_info("3DW_NONFLIT_CFGRD1_FOLLO","ENTERED_INTO_3DW_NONFLIT_CFGRD1_FOLLO_SEQUENCE_BODY", UVM_LOW)
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("cfgwr");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information
@@ -70,7 +70,7 @@ class PCIe_RC_3DW_NonFlit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC
 
     finish_item(pcie_seq_item);
 
-    pcie_seq_item = PCIe_sequence_item::type_id::create("cfgrd");
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
     if (!pcie_seq_item.randomize() with {
          // LTSSM information

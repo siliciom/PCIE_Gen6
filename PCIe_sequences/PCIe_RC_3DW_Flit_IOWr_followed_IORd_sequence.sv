@@ -9,12 +9,10 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_sequence extends PCIe_RC_controller_ba
   endfunction
 
   virtual task body();
-    PCIe_sequence_item wr_req;
-    PCIe_sequence_item rd_req;
 
-    wr_req = PCIe_sequence_item::type_id::create("wr_req");
-    start_item(wr_req);
-    assert(wr_req.randomize() with {
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
+    start_item(pcie_seq_item);
+    assert(pcie_seq_item.randomize() with {
       // LTSSM information
       electrical_idle_test == 1'b0;
       no_receiver_test     == 1'b0;
@@ -38,11 +36,11 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_sequence extends PCIe_RC_controller_ba
       msg_route            == PCIe_MSG_ROUTE_TO_RC;
       msg_has_data         == 1'b0;
     }) else `uvm_fatal("SEQ_RAND", "Failed to randomize I/O write request")
-    finish_item(wr_req);
+    finish_item(pcie_seq_item);
 
-    rd_req = PCIe_sequence_item::type_id::create("rd_req");
-    start_item(rd_req);
-    assert(rd_req.randomize() with {
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
+    start_item(pcie_seq_item);
+    assert(pcie_seq_item.randomize() with {
       // LTSSM information
       electrical_idle_test == 1'b0;
       no_receiver_test     == 1'b0;
@@ -66,7 +64,7 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_sequence extends PCIe_RC_controller_ba
       msg_route            == PCIe_MSG_ROUTE_TO_RC;
       msg_has_data         == 1'b0;
     }) else `uvm_fatal("SEQ_RAND", "Failed to randomize I/O read request")
-    finish_item(rd_req);
+    finish_item(pcie_seq_item);
   endtask
 endclass
 
