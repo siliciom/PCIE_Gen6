@@ -452,13 +452,101 @@
 `define PCIe_TL_MEM3DW_DEPTH      1024          // 1024 DW = 4 KB
 `define PCIe_TL_MEM4DW_DEPTH      1024          // 1024 DW = 4 KB
 `define PCIe_TL_IO3DW_DEPTH       1024          // 1024 DW = 4 KB
+// cfg_space  - target of Configuration Read/Write Requests, one flat 4 KB
+//              (Extended Config Space) region, DW-indexed by cfg_reg_num[11:2]
+//              exactly the way the RC/EP TL models pack/unpack it.
+`define PCIe_TL_CFGSPACE_DEPTH    1024          // 1024 DW = 4 KB
 
 `define PCIe_TL_MEM3DW_IDX_W        10          // $clog2(PCIe_TL_MEM3DW_DEPTH)
 `define PCIe_TL_MEM4DW_IDX_W        10          // $clog2(PCIe_TL_MEM4DW_DEPTH)
 `define PCIe_TL_IO3DW_IDX_W         10          // $clog2(PCIe_TL_IO3DW_DEPTH)
+`define PCIe_TL_CFGSPACE_IDX_W      10          // $clog2(PCIe_TL_CFGSPACE_DEPTH)
 
 `define PCIe_TL_MEM_INIT_VALUE      32'h0000_0000
 `define PCIe_TL_MEM_DUMP_DW_PER_LINE 4
+
+//==============================================================================
+// CONFIGURATION SPACE HEADER MODEL (EP TL model)                [ADDED]
+//   Two independent 4 KB (1024 DW) flat mirrors are kept by the EP TL model,
+//   one addressed exclusively by Configuration Type 0 Requests (CfgRd0/
+//   CfgWr0) and one addressed exclusively by Configuration Type 1 Requests
+//   (CfgRd1/CfgWr1) - see PCIe_EP_TL_model::cfg_access(). Only the 64 byte
+//   (16 DW) Predefined Header is populated in EITHER mirror; everything else
+//   up to the 4 KB boundary reads back as `PCIe_TL_CFG_INIT_VALUE and any
+//   access to it completes Unsupported Request - no Capability structures
+//   (PCI-SIG assigned or Extended) are modelled for either header type.
+//
+//   Sizing (shared by both Type 0 and Type 1):
+//==============================================================================
+`define PCIe_TL_CFG_SPACE_DW_DEPTH  `PCIe_TL_CFGSPACE_DEPTH   // 1024 DW = 4 KB
+`define PCIe_TL_CFG_HDR_DW_DEPTH    16                        // 16 DW  = 64 B header
+`define PCIe_TL_CFG_HDR_BYTES       64
+`define PCIe_TL_CFG_SPACE_BYTES     (`PCIe_TL_CFG_SPACE_DW_DEPTH * 4)
+`define PCIe_TL_CFG_INIT_VALUE      32'h0000_0000
+
+//------------------------------------------------------------------------------
+// DW indices - Section 7.5.1.1 : the first 4 DW (offsets 000h-00Ch) share the
+// IDENTICAL layout in the Type 0 and the Type 1 Predefined Header, so both
+// header initializers reuse the same four IDX macros below.
+//------------------------------------------------------------------------------
+`define PCIe_TL_CFG_IDX_VENDOR_DEVICE_ID    0   // 000h : Device ID | Vendor ID
+`define PCIe_TL_CFG_IDX_COMMAND_STATUS      1   // 004h : Status | Command
+`define PCIe_TL_CFG_IDX_REVID_CLASSCODE     2   // 008h : Class Code | Revision ID
+`define PCIe_TL_CFG_IDX_CACHE_LAT_HDR_BIST  3   // 00Ch : BIST | Header Type | Latency Timer | Cache Line Size
+
+//------------------------------------------------------------------------------
+// DW indices 004h..00Fh - Type 0 Predefined Header only (Section 7.5.1.2)
+//------------------------------------------------------------------------------
+`define PCIe_TL_CFG_IDX_BAR0            4   // 010h
+`define PCIe_TL_CFG_IDX_BAR1            5   // 014h
+`define PCIe_TL_CFG_IDX_BAR2            6   // 018h
+`define PCIe_TL_CFG_IDX_BAR3            7   // 01Ch
+`define PCIe_TL_CFG_IDX_BAR4            8   // 020h
+`define PCIe_TL_CFG_IDX_BAR5            9   // 024h
+`define PCIe_TL_CFG_IDX_CARDBUS_CIS    10   // 028h
+`define PCIe_TL_CFG_IDX_SUBSYS_IDS     11   // 02Ch : Subsystem ID | Subsystem Vendor ID
+`define PCIe_TL_CFG_IDX_EXPROM_BAR     12   // 030h
+`define PCIe_TL_CFG_IDX_CAP_PTR        13   // 034h : Reserved | Capabilities Pointer
+`define PCIe_TL_CFG_IDX_RESERVED_038   14   // 038h
+`define PCIe_TL_CFG_IDX_INTLINE_INTPIN 15   // 03Ch : Max_Lat | Min_Gnt | Int Pin | Int Line
+
+// Type 0 power-on defaults (behavioural model - documented placeholder values)
+`define PCIe_TL_CFG_DEFAULT_VENDOR_ID     16'h1AB8
+`define PCIe_TL_CFG_DEFAULT_DEVICE_ID     16'hE000
+`define PCIe_TL_CFG_DEFAULT_REVISION_ID    8'h01
+`define PCIe_TL_CFG_DEFAULT_CLASS_CODE    24'hFF_0000    // "does not fit any defined class"
+`define PCIe_TL_CFG_DEFAULT_HEADER_TYPE    8'h00         // Type 0, single function
+`define PCIe_TL_CFG_DEFAULT_SUBSYS_VID    16'h1AB8
+`define PCIe_TL_CFG_DEFAULT_SUBSYS_ID     16'h0001
+`define PCIe_TL_CFG_DEFAULT_INT_PIN        8'h01         // INTA#
+
+//------------------------------------------------------------------------------
+// DW indices 004h..00Fh - Type 1 (PCI-to-PCI Bridge) Predefined Header only
+// (Section 7.5.1.3 / PCI-to-PCI Bridge Architecture Spec 1.2, Figure 7-5).
+// DW indices 0-3 are the shared ones defined above.
+//------------------------------------------------------------------------------
+`define PCIe_TL_CFG_T1_IDX_BAR0                    4  // 010h
+`define PCIe_TL_CFG_T1_IDX_BAR1                    5  // 014h
+`define PCIe_TL_CFG_T1_IDX_BUSNUM_SECLAT           6  // 018h : Sec Latency Timer | Subordinate Bus | Secondary Bus | Primary Bus
+`define PCIe_TL_CFG_T1_IDX_SECSTATUS_IOLIMIT_BASE  7  // 01Ch : Secondary Status | I/O Limit | I/O Base
+`define PCIe_TL_CFG_T1_IDX_MEM_LIMIT_BASE          8  // 020h : Memory Limit | Memory Base
+`define PCIe_TL_CFG_T1_IDX_PREF_MEM_LIMIT_BASE     9  // 024h : Prefetchable Memory Limit | Prefetchable Memory Base
+`define PCIe_TL_CFG_T1_IDX_PREF_BASE_UPPER32      10  // 028h : Prefetchable Base Upper 32 Bits
+`define PCIe_TL_CFG_T1_IDX_PREF_LIMIT_UPPER32     11  // 02Ch : Prefetchable Limit Upper 32 Bits
+`define PCIe_TL_CFG_T1_IDX_IO_LIMIT_BASE_UPPER16  12  // 030h : I/O Limit Upper 16 | I/O Base Upper 16
+`define PCIe_TL_CFG_T1_IDX_CAP_PTR                13  // 034h : Reserved | Capability Pointer
+`define PCIe_TL_CFG_T1_IDX_EXPROM_BAR             14  // 038h : Expansion ROM Base Address
+`define PCIe_TL_CFG_T1_IDX_BRIDGE_CTRL_INTPIN     15  // 03Ch : Bridge Control | Interrupt Pin | Interrupt Line
+
+// Type 1 power-on defaults (behavioural model - documented placeholder values).
+// Class Code is the architected PCI-to-PCI Bridge class (06h/04h/00h) so any
+// class-code-aware checker sees a spec-legal value behind a Type 1 header.
+`define PCIe_TL_CFG_T1_DEFAULT_VENDOR_ID   16'h1AB8
+`define PCIe_TL_CFG_T1_DEFAULT_DEVICE_ID   16'hB000
+`define PCIe_TL_CFG_T1_DEFAULT_REVISION_ID  8'h01
+`define PCIe_TL_CFG_T1_DEFAULT_CLASS_CODE  24'h06_0400    // Bridge / PCI-to-PCI bridge / Normal decode
+`define PCIe_TL_CFG_T1_DEFAULT_HEADER_TYPE  8'h01         // Type 1, single function
+`define PCIe_TL_CFG_T1_DEFAULT_INT_PIN      8'h01         // INTA#
 
 //==============================================================================
 // TLP DECODE HELPERS (EP TL model)                             [ADDED]
@@ -533,10 +621,11 @@
 `define PCIe_FLIT_IDLE_DLP0          8'h00
 `define PCIe_FLIT_IDLE_DLP1          8'h00
 `define PCIe_FLIT_NOP2_DLLP          32'h0000_0000  // NOP2 DLLP, Flit Mode
-`define PCIe_NUM_RC_TX_NOP_FLITS     3             // RC DL emits 3 NOP2 flits before TL payload
-`define PCIe_NUM_RC_TX_NOP2_DLLP     3             // NOP2 DLLP content select (unused placeholder)
 `define PCIe_FLIT_NOP_DLLP           32'h3100_0000  // NOP DLLP, Non-Flit Mode
 `define PCIe_FLIT_TLP_REGION_DW      59            // 236 B / 4
 
 `endif 
 // PCIe_DEFINES_SVH
+
+
+
