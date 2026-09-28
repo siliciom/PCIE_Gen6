@@ -27,6 +27,7 @@ package PCIe_pkg;
 `include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_TL_model.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_PL_model.sv"
+	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_Cfg_Space_Model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_TL_model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_DL_model.sv"
 `include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_PL_model.sv"
@@ -175,13 +176,17 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MemWr_followed_MemRd_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MsgWr_withdata_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MsgWr_withoutdata_sequence.sv"
-	
+
+	`include "../PCIe_sequences/PCIe_RC_cfg_access_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_do_enumeration_sequence.sv"
+
 
         `include "../PCIe_environment/PCIe_scoreboard.sv"
         `include "../PCIe_environment/PCIe_subscriber.sv"
         `include "../PCIe_environment/PCIe_environment.sv"
 
 	`include "../PCIe_tests/PCIe_base_test.sv"
+	`include "../PCIe_tests/PCIe_enumeration_test.sv"
 
         `include "../PCIe_tests/PCIe_3DW_flit_test.sv"
       //`include "../PCIe_tests/PCIe_IO_3DW_FLIT_test.sv"
