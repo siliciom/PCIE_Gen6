@@ -59,6 +59,37 @@ class PCIe_EP_TL_model extends uvm_component;
   bit [`PCIe_TL_MEM_DATA_W-1:0] mem4dw [0:`PCIe_TL_MEM4DW_DEPTH-1];
   bit [`PCIe_TL_MEM_DATA_W-1:0] io3dw  [0:`PCIe_TL_IO3DW_DEPTH -1];
 
+  //==========================================================================
+  //                     CONFIGURATION SPACE MODEL
+  //   Two completely independent 4 KB (1024 DW) flat mirrors of the PCIe
+  //   Configuration Space, each indexed by the byte offset (cfg_reg_num) >> 2:
+  //     cfg_space_t0 / cfg_ro_mask_t0 : serves every CfgRd0/CfgWr0 (Type 0)
+  //     cfg_space_t1 / cfg_ro_mask_t1 : serves every CfgRd1/CfgWr1 (Type 1)
+  //   d_cfg_type1 (decoded from the Fmt/Type or FLIT Type field) selects
+  //   which pair cfg_access() operates on for a given request - see
+  //   service_request(). A Type 0 access can never see or modify Type 1
+  //   state and vice versa.
+  //
+  //   cfg_ro_mask_* : per-DW read-only bit mask for the 64 B (16 DW)
+  //                 Predefined Header that is actually implemented in each
+  //                 mirror - a 1 in any bit position means that bit must
+  //                 never be changed by a Configuration Write (Section
+  //                 7.5.1.1 / 7.5.1.2 for Type 0, Section 7.5.1.3 for
+  //                 Type 1).
+  //   Only the header (index 0..PCIe_TL_CFG_HDR_DW_DEPTH-1) is populated in
+  //   either mirror; the remaining locations exist purely so each array is
+  //   a true 4 KB mirror for later use (e.g. Capability structures) and are
+  //   completed with Unsupported Request today (see cfg_access()).
+  //==========================================================================
+  // Fixed-size array types - needed so the arrays can be passed to 'ref' formals
+  typedef bit [31:0] cfg_space_arr_t [0:`PCIe_TL_CFG_SPACE_DW_DEPTH-1];
+  typedef bit [31:0] cfg_mask_arr_t  [0:`PCIe_TL_CFG_HDR_DW_DEPTH-1];
+
+  bit [31:0] cfg_space_t0  [0:`PCIe_TL_CFG_SPACE_DW_DEPTH-1];
+  bit [31:0] cfg_ro_mask_t0[0:`PCIe_TL_CFG_HDR_DW_DEPTH-1];
+  bit [31:0] cfg_space_t1  [0:`PCIe_TL_CFG_SPACE_DW_DEPTH-1];
+  bit [31:0] cfg_ro_mask_t1[0:`PCIe_TL_CFG_HDR_DW_DEPTH-1];
+
   //--------------------------------------------------------------------------
   // Decoded view of the TLP currently being processed
   //--------------------------------------------------------------------------
@@ -84,6 +115,18 @@ class PCIe_EP_TL_model extends uvm_component;
   bit [`PCIe_TL_DW_BE_W-1:0]            d_last_dw_be;
   bit [1:0]                             d_at;
   bit                                   d_cfg_type1;
+  // Configuration Request addressing (Figure 2-33 / Figure 2-52) - only
+  // meaningful when d_txn_type == PCIe_TL_CFG.
+  bit [`PCIe_TL_CFG_BUS_W-1:0]          d_cfg_bus_num;
+  bit [`PCIe_TL_CFG_DEV_W-1:0]          d_cfg_dev_num;
+  bit [`PCIe_TL_CFG_FN_W-1:0]           d_cfg_fn_num;
+  bit [`PCIe_TL_CFG_EXT_REG_W-1:0]      d_cfg_ext_reg_num;
+  bit [`PCIe_TL_CFG_REG_W-1:0]          d_cfg_reg_num;      // byte offset, DW aligned
+  // Completion status override for the current request - defaults to SC and
+  // is only steered to UR by the Configuration path today (cfg_access()),
+  // but is intentionally generic so any other Request type can drive it the
+  // same way later instead of build_completion() always hardcoding SC.
+  bit [`PCIe_TL_CPL_STATUS_W-1:0]       cfg_status_override;
   int                                   d_hdr_base_dw;
   int                                   d_ohc_dw;
   int                                   d_hdr_dw;
@@ -99,6 +142,9 @@ class PCIe_EP_TL_model extends uvm_component;
   int unsigned n_cpl_sent;
   int unsigned n_ecrc_pass;
   int unsigned n_ecrc_fail;
+  int unsigned n_cfg_rd;
+  int unsigned n_cfg_wr;
+  int unsigned n_cfg_ur;
 
   //==========================================================================
   function new(string name="PCIe_EP_TL_model", uvm_component parent);
@@ -117,7 +163,8 @@ class PCIe_EP_TL_model extends uvm_component;
 
    task reset_phase(uvm_phase phase);
      phase.raise_objection(this);
-    clear_all_memories();
+     clear_all_memories();
+     init_cfg_space();
 
     `uvm_info("EP_TL_MODEL",
       $sformatf({"\n",
@@ -128,10 +175,16 @@ class PCIe_EP_TL_model extends uvm_component;
         "         mem3dw  : %0d x %0d-bit  (%0d bytes)\n",
         "         mem4dw  : %0d x %0d-bit  (%0d bytes)\n",
         "         io3dw   : %0d x %0d-bit  (%0d bytes)\n",
+        "         cfg_space_t0 (Type0) : %0d x %0d-bit (%0d bytes) - %0d byte header populated\n",
+        "         cfg_space_t1 (Type1) : %0d x %0d-bit (%0d bytes) - %0d byte header populated\n",
         "         ============================================================"},
         `PCIe_TL_MEM3DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_MEM3DW_DEPTH*4,
         `PCIe_TL_MEM4DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_MEM4DW_DEPTH*4,
-        `PCIe_TL_IO3DW_DEPTH,  `PCIe_TL_MEM_DATA_W, `PCIe_TL_IO3DW_DEPTH*4), UVM_LOW)
+        `PCIe_TL_IO3DW_DEPTH,  `PCIe_TL_MEM_DATA_W, `PCIe_TL_IO3DW_DEPTH*4,
+        `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_CFG_SPACE_BYTES,
+        `PCIe_TL_CFG_HDR_BYTES,
+        `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_CFG_SPACE_BYTES,
+        `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
 
     `uvm_info("EP_TL_MODEL","EXIT_FROM_EP_TL_MODEL_RESET_PHASE",UVM_LOW)
      phase.drop_objection(this);
@@ -143,35 +196,285 @@ class PCIe_EP_TL_model extends uvm_component;
     for (int i = 0; i < `PCIe_TL_IO3DW_DEPTH;  i++) io3dw [i] = `PCIe_TL_MEM_INIT_VALUE;
   endfunction
 
+  //==========================================================================
+  //  init_cfg_header_common - fills the 4 DW (offsets 000h-00Ch) that the
+  //  Type 0 and the Type 1 Predefined Header share BYTE FOR BYTE (Section
+  //  7.5.1.1) into whichever {space, ro_mask} pair the caller passes in.
+  //  This is the single reusable engine behind both init_cfg_space_type0()
+  //  and init_cfg_space_type1() - none of this logic is duplicated between
+  //  the two header types.
+  //
+  //    +000h : Device ID [31:16] | Vendor ID [15:0]     - both HwInit, RO.
+  //    +004h : Status [31:16] | Command [15:0]           - Table 7-4 / 7-5.
+  //      Command RW bits : 0 IOSE, 1 MSE, 2 Bus Master, 6 Parity Err Rsp,
+  //                        8 SERR# Enable, 10 Interrupt Disable. All other
+  //      Command bits are RO (hardwired 0). Status is modelled fully RO for
+  //      now: every architected bit is either RO or RW1C, and this model
+  //      never sets an error/interrupt condition on its own, so RO-forced-0
+  //      is equivalent until real RW1C emulation is added (see
+  //      cfg_access()). Capabilities List (Status bit 4) is hardwired 0b
+  //      since no Capability structures are implemented (deliberate
+  //      deviation from Table 7-5).
+  //    +008h : Class Code [31:8] | Revision ID [7:0]     - both RO/HwInit.
+  //    +00Ch : BIST[31:24] | HeaderType[23:16] | LatencyTimer[15:8] |
+  //            CacheLineSize[7:0]. Cache Line Size is the only RW field;
+  //      Latency Timer, Header Type and BIST (BIST Capable = 0 here) are
+  //      all RO/hardwired.
+  //==========================================================================
+  function void init_cfg_header_common(ref   cfg_space_arr_t space,
+                                        ref   cfg_mask_arr_t  ro_mask,
+                                        input bit [15:0] vendor_id,
+                                        input bit [15:0] device_id,
+                                        input bit [7:0]  revision_id,
+                                        input bit [23:0] class_code,
+                                        input bit [7:0]  header_type);
+
+    space[`PCIe_TL_CFG_IDX_VENDOR_DEVICE_ID]    = {device_id, vendor_id};
+    ro_mask[`PCIe_TL_CFG_IDX_VENDOR_DEVICE_ID]   = 32'hFFFF_FFFF;
+
+    space[`PCIe_TL_CFG_IDX_COMMAND_STATUS]       = 32'h0000_0000;
+    ro_mask[`PCIe_TL_CFG_IDX_COMMAND_STATUS]     =
+      {16'hFFFF,                                    // Status  - fully RO
+       16'hFAB8};                                   // Command - RO bits 15:11,9,7,5,4,3
+
+    space[`PCIe_TL_CFG_IDX_REVID_CLASSCODE]      = {class_code, revision_id};
+    ro_mask[`PCIe_TL_CFG_IDX_REVID_CLASSCODE]    = 32'hFFFF_FFFF;
+
+    space[`PCIe_TL_CFG_IDX_CACHE_LAT_HDR_BIST]   = {8'h00, header_type, 8'h00, 8'h00};
+    ro_mask[`PCIe_TL_CFG_IDX_CACHE_LAT_HDR_BIST] = 32'hFFFF_FF00;
+
+  endfunction
+
+  //==========================================================================
+  //  init_cfg_space_type0 - power-on defaults for the 64 B Type 0
+  //  Predefined Header (Section 7.5.1.1 / 7.5.1.2) into cfg_space_t0 /
+  //  cfg_ro_mask_t0. DW0-DW3 come from init_cfg_header_common(); everything
+  //  below is Type 0 specific (Section 7.5.1.2). Everything beyond the
+  //  header (up to the 4 KB boundary) is left at `PCIe_TL_CFG_INIT_VALUE
+  //  since no Capability structures are implemented here (see the note at
+  //  the `PCIe_TL_CFG_SPACE_BYTES macro in PCIe_defines.sv).
+  //==========================================================================
+  function void init_cfg_space_type0();
+
+    for (int i = 0; i < `PCIe_TL_CFG_SPACE_DW_DEPTH; i++)
+      cfg_space_t0[i] = `PCIe_TL_CFG_INIT_VALUE;
+    for (int i = 0; i < `PCIe_TL_CFG_HDR_DW_DEPTH; i++)
+      cfg_ro_mask_t0[i] = 32'h0000_0000;   // default : fully read/write
+
+    init_cfg_header_common(cfg_space_t0, cfg_ro_mask_t0,
+                            `PCIe_TL_CFG_DEFAULT_VENDOR_ID,
+                            `PCIe_TL_CFG_DEFAULT_DEVICE_ID,
+                            `PCIe_TL_CFG_DEFAULT_REVISION_ID,
+                            `PCIe_TL_CFG_DEFAULT_CLASS_CODE,
+                            `PCIe_TL_CFG_DEFAULT_HEADER_TYPE);
+
+    //------------------------------------------------------------------------
+    // +010h..024h : BAR0-5                              - Section 7.5.1.2.1
+    //   No Memory/IO ranges are decoded by this model, so every BAR is left
+    //   "Unimplemented Base Address register" and hardwired to zero, exactly
+    //   as the spec permits.
+    //------------------------------------------------------------------------
+    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR0] = 32'h0000_0000;
+    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR1] = 32'h0000_0000;
+    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR2] = 32'h0000_0000;
+    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR3] = 32'h0000_0000;
+    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR4] = 32'h0000_0000;
+    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR0] = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR1] = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR2] = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR3] = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR4] = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'h0000_0000;
+
+    //------------------------------------------------------------------------
+    // +028h : Cardbus CIS Pointer                        - Section 7.5.1.2.2
+    //   "does not apply to PCI Express and must be hardwired to Zero."
+    //------------------------------------------------------------------------
+    cfg_space_t0[`PCIe_TL_CFG_IDX_CARDBUS_CIS]  = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_CARDBUS_CIS] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +02Ch : Subsystem ID[31:16] | Subsystem Vendor ID[15:0]
+    //                                                    - Section 7.5.1.2.3
+    //------------------------------------------------------------------------
+    cfg_space_t0[`PCIe_TL_CFG_IDX_SUBSYS_IDS] =
+      {`PCIe_TL_CFG_DEFAULT_SUBSYS_ID, `PCIe_TL_CFG_DEFAULT_SUBSYS_VID};
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_SUBSYS_IDS] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +030h : Expansion ROM Base Address
+    //   No expansion ROM implemented -> hardwired to zero.
+    //------------------------------------------------------------------------
+    cfg_space_t0[`PCIe_TL_CFG_IDX_EXPROM_BAR]  = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_EXPROM_BAR] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +034h : Reserved[31:8] | Capabilities Pointer[7:0]
+    //   Capabilities are explicitly out of scope for this model, so the
+    //   pointer is forced to 00h instead of the spec-required non-zero value
+    //   (Section 7.5.1.1.11) - documented deviation.
+    //------------------------------------------------------------------------
+    cfg_space_t0[`PCIe_TL_CFG_IDX_CAP_PTR]  = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_CAP_PTR] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +038h : Reserved
+    //------------------------------------------------------------------------
+    cfg_space_t0[`PCIe_TL_CFG_IDX_RESERVED_038]  = 32'h0000_0000;
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_RESERVED_038] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +03Ch : Max_Lat[31:24] | Min_Gnt[23:16] | Int Pin[15:8] | Int Line[7:0]
+    //                                                  - Section 7.5.1.1.12/13
+    //   Interrupt Line is RW (software-programmed routing); Interrupt Pin is
+    //   RO (fixed at INTA# here); Min_Gnt/Max_Lat are obsolete and RO(0).
+    //------------------------------------------------------------------------
+    cfg_space_t0[`PCIe_TL_CFG_IDX_INTLINE_INTPIN] =
+      {8'h00, 8'h00, `PCIe_TL_CFG_DEFAULT_INT_PIN, 8'h00};
+    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_INTLINE_INTPIN] = 32'hFFFF_FF00;
+ 
+  endfunction
+
+  //==========================================================================
+  //  init_cfg_space_type1 - power-on defaults for the 64 B Type 1
+  //  (PCI-to-PCI Bridge) Predefined Header (Section 7.5.1.3 / PCI-to-PCI
+  //  Bridge Architecture Spec 1.2, Figure 7-5/Table 7-11) into cfg_space_t1
+  //  / cfg_ro_mask_t1. DW0-DW3 come from init_cfg_header_common(), exactly
+  //  the same reusable engine init_cfg_space_type0() uses; everything below
+  //  is Type 1 specific. Only the header is populated - no Capability
+  //  structures (same documented deviation as Type 0).
+  //==========================================================================
+  function void init_cfg_space_type1();
+
+    for (int i = 0; i < `PCIe_TL_CFG_SPACE_DW_DEPTH; i++)
+      cfg_space_t1[i] = `PCIe_TL_CFG_INIT_VALUE;
+    for (int i = 0; i < `PCIe_TL_CFG_HDR_DW_DEPTH; i++)
+      cfg_ro_mask_t1[i] = 32'h0000_0000;   // default : fully read/write
+
+    init_cfg_header_common(cfg_space_t1, cfg_ro_mask_t1,
+                            `PCIe_TL_CFG_T1_DEFAULT_VENDOR_ID,
+                            `PCIe_TL_CFG_T1_DEFAULT_DEVICE_ID,
+                            `PCIe_TL_CFG_T1_DEFAULT_REVISION_ID,
+                            `PCIe_TL_CFG_T1_DEFAULT_CLASS_CODE,
+                            `PCIe_TL_CFG_T1_DEFAULT_HEADER_TYPE);
+
+    //------------------------------------------------------------------------
+    // +010h..014h : BAR0-1                                     - Table 7-11
+    //   Same "no Memory/IO ranges decoded" deviation as the Type 0 BARs.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_BAR0] = 32'h0000_0000;
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_BAR1] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_BAR0] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_BAR1] = 32'h0000_0000;
+
+    //------------------------------------------------------------------------
+    // +018h : Secondary Latency Timer[31:24] | Subordinate Bus[23:16] |
+    //         Secondary Bus[15:8] | Primary Bus[7:0]
+    //   The three Bus Number fields are RW (software-programmed by the Bus
+    //   Enumerator, exactly like real bridge hardware); Secondary Latency
+    //   Timer is obsolete and RO(0), same treatment as Type 0's Latency
+    //   Timer.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_BUSNUM_SECLAT] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_BUSNUM_SECLAT] = 32'hFF00_0000;
+
+    //------------------------------------------------------------------------
+    // +01Ch : Secondary Status[31:16] | I/O Limit[15:8] | I/O Base[7:0]
+    //   No I/O range is decoded behind this model - I/O Base/Limit are left
+    //   "32-bit I/O addressing not supported" and hardwired to zero, same
+    //   deviation as the unimplemented Type 0 BARs. Secondary Status is
+    //   modelled fully RO, same treatment as primary Status.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_SECSTATUS_IOLIMIT_BASE] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_SECSTATUS_IOLIMIT_BASE] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +020h : Memory Limit[31:16] | Memory Base[15:0]
+    //   No memory range decoded behind this model -> hardwired to zero.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_MEM_LIMIT_BASE] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_MEM_LIMIT_BASE] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +024h : Prefetchable Memory Limit[31:16] | Prefetchable Memory Base[15:0]
+    //   "Bridge does not support prefetchable memory range" -> hardwired to
+    //   zero (both nibbles 0h per Section 3.2.5.6/8 encoding).
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_PREF_MEM_LIMIT_BASE] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_PREF_MEM_LIMIT_BASE] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +028h / +02Ch : Prefetchable Base/Limit Upper 32 Bits
+    //   No 64-bit prefetchable range implemented -> hardwired to zero.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_PREF_BASE_UPPER32]  = 32'h0000_0000;
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_PREF_LIMIT_UPPER32] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_PREF_BASE_UPPER32]  = 32'hFFFF_FFFF;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_PREF_LIMIT_UPPER32] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +030h : I/O Limit Upper 16[31:16] | I/O Base Upper 16[15:0]
+    //   No 32-bit I/O range implemented -> hardwired to zero.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_IO_LIMIT_BASE_UPPER16] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_IO_LIMIT_BASE_UPPER16] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +034h : Reserved[31:8] | Capability Pointer[7:0]
+    //   Capabilities are out of scope, same documented deviation as Type 0 -
+    //   the pointer is forced to 00h.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_CAP_PTR] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_CAP_PTR] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +038h : Expansion ROM Base Address
+    //   No expansion ROM implemented -> hardwired to zero.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_EXPROM_BAR] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_EXPROM_BAR] = 32'hFFFF_FFFF;
+
+    //------------------------------------------------------------------------
+    // +03Ch : Bridge Control[31:16] | Interrupt Pin[15:8] | Interrupt Line[7:0]
+    //   Interrupt Line is RW; Interrupt Pin is RO (fixed at INTA# here).
+    //   Bridge Control RW bits modelled : 16 Parity Err Resp Enable,
+    //   17 SERR# Enable, 22 Secondary Bus Reset - the remaining Bridge
+    //   Control bits are RO/hardwired 0 in this behavioural model.
+    //------------------------------------------------------------------------
+    cfg_space_t1[`PCIe_TL_CFG_T1_IDX_BRIDGE_CTRL_INTPIN] =
+      {16'h0000, `PCIe_TL_CFG_T1_DEFAULT_INT_PIN, 8'h00};
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_BRIDGE_CTRL_INTPIN] = 32'hFFBF_FF00;
+ 
+  endfunction
+
+  //==========================================================================
+  //  init_cfg_space - top level entry point called from reset_phase().
+  //  Rebuilds BOTH independent header mirrors (Type 0 and Type 1) so either
+  //  one always starts from a clean, spec-accurate power-on state.
+  //==========================================================================
+  function void init_cfg_space();
+    init_cfg_space_type0();
+    init_cfg_space_type1();
+  endfunction
+
   virtual function void report_phase(uvm_phase phase);
     super.report_phase(phase);
     `uvm_info("EP_TL_MODEL",
-      $sformatf("EP_TL_SUMMARY : tlp_received=%0d completions_sent=%0d ecrc_pass=%0d ecrc_fail=%0d",
-                 n_tlp_rcvd, n_cpl_sent, n_ecrc_pass, n_ecrc_fail), UVM_LOW)
+      $sformatf({"EP_TL_SUMMARY : tlp_received=%0d completions_sent=%0d ecrc_pass=%0d ecrc_fail=%0d ",
+                  "cfg_rd=%0d cfg_wr=%0d cfg_unsupported=%0d"},
+                 n_tlp_rcvd, n_cpl_sent, n_ecrc_pass, n_ecrc_fail,
+                 n_cfg_rd, n_cfg_wr, n_cfg_ur), UVM_LOW)
   endfunction
 
   //==========================================================================
   //  write      : original path, EP controller driver -> EP DL model
   //==========================================================================
-function void write(PCIe_sequence_item item);
-bit [`PCIe_BYTE_W-1:0] tlp_byte_q[$];
-int b;
-`uvm_info("EP_TL_MODEL",
-  $sformatf("TL -> DL (driver path): drive_flit=%0d", item.drive_flit), UVM_MEDIUM)
-// ---- build a queue of all 236 bytes and print it in a single uvm_info ----
-tlp_byte_q.delete();
-for (b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++)
-  tlp_byte_q.push_back(item.tlp_data[b]);
-`uvm_info("EP_TL_DRIVER_PATH_236B",
-  $sformatf("TL_MODEL_RECEIVED_236B_FROM_DRIVER = %p", tlp_byte_q), UVM_LOW)
-  item.print();
-tl_ap.write(item);
-endfunction
- /* function void write(PCIe_sequence_item item);
+  function void write(PCIe_sequence_item item);
     `uvm_info("EP_TL_MODEL",
       $sformatf("TL -> DL (driver path): drive_flit=%0d", item.drive_flit), UVM_MEDIUM)
     tl_ap.write(item);
-  endfunction*/
+  endfunction
 
   //==========================================================================
   //  write_mon  : EP controller monitor -> EP TL model
@@ -226,6 +529,11 @@ endfunction
     d_td             = 1'b0;
     d_ts             = 3'b000;
     d_ohc            = 5'b00000;
+    d_cfg_bus_num     = '0;
+    d_cfg_dev_num     = '0;
+    d_cfg_fn_num      = '0;
+    d_cfg_ext_reg_num = '0;
+    d_cfg_reg_num     = '0;
 
     dw0 = get_dw(item, 0);
     dw1 = get_dw(item, 1);
@@ -300,6 +608,11 @@ endfunction
     item.last_dw_be   = d_last_dw_be;
     item.at           = d_at;
     item.cfg_type1    = d_cfg_type1;
+    item.cfg_bus_num     = d_cfg_bus_num;
+    item.cfg_dev_num     = d_cfg_dev_num;
+    item.cfg_fn_num      = d_cfg_fn_num;
+    item.cfg_ext_reg_num = d_cfg_ext_reg_num;
+    item.cfg_reg_num     = d_cfg_reg_num;
     item.mem_locked   = d_mem_locked;
     item.mem_deferrable = d_mem_deferrable;
     item.hdr_dw_count = d_hdr_dw;
@@ -357,7 +670,14 @@ endfunction
 
     d_hdr_base_dw = d_is_4dw ? `PCIe_TL_HDR4DW : `PCIe_TL_HDR3DW;
 
-    if (d_is_4dw) begin
+    if (d_txn_type == PCIe_TL_CFG) begin
+      // Configuration Request - ID routed, DW2 carries Bus/Device/Function
+      // and the Register/Extended-Register Number, NOT a memory address
+      // (Figure 2-33 / Figure 2-52). Mirrors PCIe_RC_TL_model's dw2 packing.
+      decode_cfg_addr(dw2);
+      d_at = 2'b00;
+    end
+    else if (d_is_4dw) begin
       d_address = {dw2, dw3[31:2], 2'b00};
       d_at      = dw3[1:0];
     end
@@ -428,13 +748,37 @@ endfunction
 
     d_hdr_base_dw = d_is_4dw ? `PCIe_TL_HDR4DW : `PCIe_TL_HDR3DW;
 
-    if (d_is_4dw)
+    if (d_txn_type == PCIe_TL_CFG) begin
+      // Configuration Request - see decode_flit_header() above for the field
+      // layout reference (identical DW2 packing in both modes).
+      decode_cfg_addr(dw2);
+    end
+    else if (d_is_4dw)
       d_address = {dw2, dw3[31:2], 2'b00};
     else
       d_address = {dw2[31:2], 2'b00};
 
     d_valid = 1'b1;
 
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // decode_cfg_addr - split DW2 of a Configuration Request header into
+  // Bus/Device/Function + {Extended Register Number, Register Number}
+  // (Figure 2-33 Non-Flit / Figure 2-52 Flit - both use the same layout):
+  //   [31:24] Bus Number   [23:19] Device Number   [18:16] Function Number
+  //   [15:12] Reserved     [11:2]  {Ext Reg Num[3:0], Register Number[5:0]}
+  //   [1:0]   Reserved
+  // cfg_reg_num is kept as a byte offset (bits[1:0] forced 0) so it indexes
+  // cfg_space[]/cfg_ro_mask[] directly after a >>2.
+  //--------------------------------------------------------------------------
+  function void decode_cfg_addr(bit [31:0] dw2);
+    d_cfg_bus_num     = dw2[31:24];
+    d_cfg_dev_num     = dw2[23:19];
+    d_cfg_fn_num      = dw2[18:16];
+    d_cfg_ext_reg_num = dw2[11:8];
+    d_cfg_reg_num     = {dw2[11:2], 2'b00};
+    d_address         = '0;   // not a memory address for CFG - unused downstream
   endfunction
 
   //--------------------------------------------------------------------------
@@ -583,7 +927,7 @@ endfunction
   //   in BOTH FLIT and NON-FLIT mode. The is_4dw argument picks mem4dw over
   //   mem3dw, the op argument picks read over write.
   //==========================================================================
-  function void mem_access(input  pcie_tl_mem_op_e              op,
+ function void mem_access(input  pcie_tl_mem_op_e              op,
                            input  bit                           is_4dw,
                            input  pkt_mode_e                    mode,
                            input  bit [63:0]                    addr,
@@ -635,8 +979,8 @@ endfunction
                  mem_name, (op == PCIe_TL_MEM_OP_WRITE) ? "WRITE" : "READ", len_dw, data_str), UVM_LOW)
 
   endfunction
-
-  //==========================================================================
+ 
+    //==========================================================================
   //   MEMORY ACCESS FUNCTION 2 of 2
   //
   //   io_access() - the single entry point for EVERY I/O transaction:
@@ -671,6 +1015,95 @@ endfunction
   endfunction
 
   //==========================================================================
+  //  be_to_byte_mask - expand a 4-bit DW Byte Enable field into the 32-bit
+  //  byte mask used to merge a Configuration Write into cfg_space[] (one
+  //  8'hFF per enabled byte lane, byte 0 = bits[7:0]).
+  //==========================================================================
+  function automatic bit [31:0] be_to_byte_mask(bit [3:0] be);
+    bit [31:0] mask;
+    mask = '0;
+    for (int b = 0; b < 4; b++)
+      if (be[b]) mask[8*b +: 8] = 8'hFF;
+    return mask;
+  endfunction
+
+  //==========================================================================
+  //   CONFIGURATION SPACE ACCESS FUNCTION
+  //
+  //   cfg_access() - the single, generalized engine for EVERY Configuration
+  //   Read/Write serviced by this model, Type 0 or Type 1, FLIT or
+  //   NON-FLIT. The caller (service_request()) has already resolved the
+  //   request into a byte offset + byte enables AND picked which header
+  //   mirror to operate on via the space/ro_mask ref arguments - Type 0
+  //   requests pass {cfg_space_t0, cfg_ro_mask_t0}, Type 1 requests pass
+  //   {cfg_space_t1, cfg_ro_mask_t1} - so this function body itself is
+  //   completely mode-agnostic and header-type-agnostic, and is reused
+  //   unchanged for both (and for any further header/function this model
+  //   grows to support later, without adding another copy of the logic).
+  //
+  //   Behaviour :
+  //     - byte_offset >= PCIe_TL_CFG_HDR_BYTES (i.e. outside the 64 B
+  //       header that is actually implemented) -> Unsupported Request
+  //       (Table 2-40), no data returned, no write applied.
+  //     - Read  : rdata = space[idx] as-is.
+  //     - Write : each byte lane enabled in first_dw_be is merged into
+  //       space[idx], but only through the bits that ro_mask[idx] marks
+  //       writable - read-only bits (and RW1C bits, modelled as RO for now,
+  //       see init_cfg_header_common() / init_cfg_space_type0() /
+  //       init_cfg_space_type1()) always keep their previous value
+  //       regardless of what the Requester sent, exactly like real
+  //       read-only hardware register bits.
+  //==========================================================================
+  function void cfg_access(input  pcie_tl_mem_op_e            op,
+                           input  bit [`PCIe_TL_CFG_REG_W-1:0] byte_offset,
+                           input  bit [3:0]                    first_dw_be,
+                           input  bit [`PCIe_TL_DATA_DW_W-1:0] wdata,
+                           output bit [`PCIe_TL_DATA_DW_W-1:0] rdata,
+                           output bit                          unsupported,
+                           ref    cfg_space_arr_t              space,
+                           ref    cfg_mask_arr_t               ro_mask);
+
+    int unsigned idx;
+    bit [31:0]   byte_mask;
+    bit [31:0]   writable_mask;
+
+    idx         = byte_offset >> `PCIe_TL_MEM_ADDR_LSB;
+    unsupported = 1'b0;
+    rdata       = '0;
+
+    if (idx >= `PCIe_TL_CFG_HDR_DW_DEPTH) begin
+      // Nothing implemented past the 64 byte header - Unsupported Request.
+      unsupported = 1'b1;
+      `uvm_warning("EP_TL_CFG",
+        $sformatf("CFG_%s_OUT_OF_RANGE : byte_offset=0x%03h (DW idx=%0d) is beyond the %0d byte modelled header - completing UR",
+                   (op == PCIe_TL_MEM_OP_WRITE) ? "WRITE" : "READ",
+                   byte_offset, idx, `PCIe_TL_CFG_HDR_BYTES))
+      return;
+    end
+
+    if (op == PCIe_TL_MEM_OP_READ) begin
+      rdata = space[idx];
+      `uvm_info("EP_TL_CFG",
+        $sformatf("CFG_READ  : byte_offset=0x%03h (DW idx=%0d) => %08h", byte_offset, idx, rdata), UVM_LOW)
+    end
+    else begin
+      // ---- generalized read-modify-write : byte-enable AND read-only mask
+      byte_mask     = be_to_byte_mask(first_dw_be);
+      writable_mask = byte_mask & ~ro_mask[idx];
+
+      `uvm_info("EP_TL_CFG",
+        $sformatf("CFG_WRITE : byte_offset=0x%03h (DW idx=%0d) wdata=%08h first_dw_be=%04b ro_mask=%08h writable_mask=%08h old=%08h",
+                   byte_offset, idx, wdata, first_dw_be, ro_mask[idx], writable_mask, space[idx]), UVM_LOW)
+
+      space[idx] = (space[idx] & ~writable_mask) | (wdata & writable_mask);
+
+      `uvm_info("EP_TL_CFG",
+        $sformatf("CFG_WRITE_COMPLETE : cfg_space[%0d] <= %08h", idx, space[idx]), UVM_LOW)
+    end
+
+  endfunction
+
+  //==========================================================================
   //  service_request - run the decoded TLP against the memory models and
   //  build the Completion when the Request is Non-Posted.
   //
@@ -686,8 +1119,9 @@ endfunction
     bit                          cpl_with_data;
     int unsigned                 rd_len_dw;
 
-    need_cpl      = 1'b0;
-    cpl_with_data = 1'b0;
+    need_cpl             = 1'b0;
+    cpl_with_data        = 1'b0;
+    cfg_status_override  = `PCIe_CPL_STATUS_SC;
 
     case (d_txn_type)
 
@@ -732,18 +1166,93 @@ endfunction
       end
 
       //------------------------------------------------------------------
-      // CONFIGURATION : always Non-Posted; no dedicated memory model here,
-      // Cfg space is out of scope for this task.
+      // CONFIGURATION : always Non-Posted (Section 2.2.7). Serviced against
+      // whichever header mirror d_cfg_type1 selects - cfg_space_t0/
+      // cfg_ro_mask_t0 for CfgRd0/CfgWr0, cfg_space_t1/cfg_ro_mask_t1 for
+      // CfgRd1/CfgWr1 - built by init_cfg_space() and read/written through
+      // the single reusable cfg_access() engine.
       //------------------------------------------------------------------
       PCIe_TL_CFG: begin
+
+        bit [`PCIe_TL_DATA_DW_W-1:0] cfg_rdata;
+        bit                          cfg_ur;
+        bit [`PCIe_TL_DATA_DW_W-1:0] cfg_wdata;
+
         need_cpl      = 1'b1;
         cpl_with_data = (d_dir == PCIe_TL_READ);
+
+        if (d_dir == PCIe_TL_WRITE) begin
+          // ------------------------------------------------------------
+          // Configuration Write data comes straight from the decoded TLP
+          // payload (d_payload[0]) - the exact DW carried by the Cfg Write
+          // Request that decode_tlp() reconstructed from the 236 byte TLP
+          // region the EP controller monitor published on ep_mon_tl_ap
+          // (PCIe_EP_controller_monitor::send_tlp_to_ep_tl() ->
+          //  tl_mon_imp -> write_mon() -> decode_tlp() -> d_payload).
+          // No hardcoded/fixed pattern is ever driven into cfg_space: a
+          // Configuration Write always carries exactly 1 DW of payload
+          // (Section 2.2.7), so an empty d_payload here means the request
+          // was decoded with no data - that is flagged, not papered over.
+          // ------------------------------------------------------------
+          if (d_payload_dw > 0) begin
+            cfg_wdata = d_payload[0];
+            `uvm_info("EP_TL_CFG",
+              $sformatf("CFG_WRITE_DATA_SOURCE=DECODED_PAYLOAD (%08h)", cfg_wdata), UVM_LOW)
+          end
+          else begin
+            cfg_wdata = '0;
+            `uvm_error("EP_TL_CFG",
+              "CFG_WRITE_NO_PAYLOAD : Configuration Write TLP decoded with 0 payload DW - no write data available from the monitor path, write not applied with real data")
+          end
+
+          if (d_cfg_type1)
+            cfg_access(PCIe_TL_MEM_OP_WRITE, d_cfg_reg_num, d_first_dw_be,
+                       cfg_wdata, cfg_rdata, cfg_ur, cfg_space_t1, cfg_ro_mask_t1);
+          else
+            cfg_access(PCIe_TL_MEM_OP_WRITE, d_cfg_reg_num, d_first_dw_be,
+                       cfg_wdata, cfg_rdata, cfg_ur, cfg_space_t0, cfg_ro_mask_t0);
+
+          `uvm_info("EP_TL_CFG",
+           $sformatf("CFG_SPACE_TYPE0_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
+                 `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+
+          n_cfg_wr++;
+        end
+        else begin
+          if (d_cfg_type1)
+            cfg_access(PCIe_TL_MEM_OP_READ, d_cfg_reg_num, d_first_dw_be,
+                       '0, cfg_rdata, cfg_ur, cfg_space_t1, cfg_ro_mask_t1);
+          else
+            cfg_access(PCIe_TL_MEM_OP_READ, d_cfg_reg_num, d_first_dw_be,
+                       '0, cfg_rdata, cfg_ur, cfg_space_t0, cfg_ro_mask_t0);
+             `uvm_info("EP_TL_CFG",
+               $sformatf("CFG_SPACE_TYPE1_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
+                 `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+
+          n_cfg_rd++;
+        end
+
+        if (cfg_ur) begin
+          n_cfg_ur++;
+          cfg_status_override = `PCIe_CPL_STATUS_UR;
+          cpl_with_data        = 1'b0;   // UR completions never carry data
+        end
+        else begin
+          cfg_status_override = `PCIe_CPL_STATUS_SC;
+        end
+
         if (cpl_with_data) begin
           rdata    = new[1];
-          rdata[0] = '0;
+          rdata[0] = cfg_rdata;
         end
+
         `uvm_info("EP_TL_MODEL",
-          "CONFIGURATION_REQUEST : no cfg-space model, completing with zeros", UVM_LOW)
+          $sformatf("CONFIGURATION_REQUEST : bus=%0d dev=%0d fn=%0d byte_off=0x%03h %s -> %s",
+                     d_cfg_bus_num, d_cfg_dev_num, d_cfg_fn_num, d_cfg_reg_num,
+                     (d_dir == PCIe_TL_WRITE) ? "WRITE" : "READ",
+                     cfg_ur ? "UNSUPPORTED_REQUEST" : "SUCCESSFUL_COMPLETION"), UVM_LOW)
       end
 
       default: begin
@@ -807,7 +1316,10 @@ endfunction
     cpl.txn_type      = PCIe_TL_CPL;
     cpl.is_completion = 1'b1;
     cpl.cpl_has_data  = with_data;
-    cpl.cpl_status    = `PCIe_CPL_STATUS_SC;     // memory is zero initialised, so SC
+    // Memory/IO requests always complete SC in this model; Configuration
+    // Requests can also complete UR (cfg_status_override, driven by
+    // cfg_access() above) when the access misses the implemented header.
+    cpl.cpl_status    = cfg_status_override;
     cpl.requester_id  = d_requester_id;
     cpl.completer_id  = `PCIe_TL_CPL_COMPLETER_ID;
     cpl.dest_bdf      = d_requester_id;
@@ -1012,7 +1524,7 @@ endfunction
         "         TD / EP           : %0b / %0b        TS[2:0] : %03b   OHC[4:0] : %05b\n",
         "         First DW BE       : %04b       Last DW BE : %04b\n",
         "         Payload DWs       : %0d\n",
-        "         Targets memory    : %s\n",
+        "         Targets            : %s\n",
         "         ============================================================"},
         d_mode.name(), d_byte0, d_txn_type.name(), d_dir.name(),
         d_hdr_base_dw, d_ohc_dw, d_hdr_dw,
@@ -1023,6 +1535,9 @@ endfunction
         d_td, d_ep, d_ts, d_ohc,
         d_first_dw_be, d_last_dw_be,
         d_payload_dw,
+        (d_txn_type == PCIe_TL_CFG) ?
+          $sformatf("cfg_space  bus=0x%02h dev=0x%02h fn=0x%01h byte_off=0x%03h (Type%0d)",
+                     d_cfg_bus_num, d_cfg_dev_num, d_cfg_fn_num, d_cfg_reg_num, d_cfg_type1) :
         (d_txn_type == PCIe_TL_IO) ? "io3dw" : (d_is_4dw ? "mem4dw" : "mem3dw")), UVM_LOW)
 
     for (int i = 0; i < d_payload_dw; i++)
@@ -1096,4 +1611,9 @@ endfunction
   endfunction
 
 endclass
+
+
+
+
+
 
