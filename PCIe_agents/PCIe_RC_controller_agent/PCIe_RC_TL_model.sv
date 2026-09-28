@@ -654,6 +654,22 @@ class PCIe_RC_TL_model extends uvm_component;
 
     end
 
+    else if (tr.txn_type == PCIe_TL_CFG) begin
+
+      dw2 = '0;
+      dw2[31:24] = tr.cfg_bus_num;
+      dw2[23:19] = tr.cfg_dev_num;
+      dw2[18:16] = tr.cfg_fn_num;
+      dw2[11:2]  = tr.cfg_reg_num[11:2];
+
+      hdr = new[3];
+      hdr[0] = dw0;
+      hdr[1] = dw1;
+      hdr[2] = dw2;
+
+    end
+
+
     else begin
       hdr = new[1];
       hdr[0] = dw0;
