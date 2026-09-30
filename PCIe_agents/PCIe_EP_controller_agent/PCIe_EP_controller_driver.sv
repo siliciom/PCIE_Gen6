@@ -29,7 +29,12 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
  
    
    virtual PCIe_EP_interface     ep_pipe_intf_tx, ep_pipe_intf_rx;	
+    // Retained for compatibility. DL_ACTIVE is now detected via the level flag
+    // ep_dl_model.dl_link_active (see drive_dlcmsm_packets).
     uvm_event ep_dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
+    // Watchdog: consecutive 1ns polls with no DLLP flit to drive before the
+    // DLCMSM is declared stalled (only reached if DLCMSM stops producing flits).
+    localparam int unsigned DLCMSM_IDLE_TIMEOUT_POLLS = 100000;
    function new(string name="PCIe_EP_controller_driver", uvm_component parent);
      super.new(name,parent);
 	   tx_ap=new("tx_ap",this);
@@ -62,11 +67,29 @@ task run_phase(uvm_phase phase);
         ep_pl_model.ep_ltssm(pcie_seq_item);
         ep_dl_model.phy_linkup = ep_pl_model.link_up;
         if (ep_pl_model.link_up) begin
-	  `uvm_info("EP_LTSSM","tl_link_active=1",UVM_LOW)
-         ep_dl_active_event.wait_trigger();
-	 `uvm_info("EP_DLCMSM","Event_TL_Triggered",UVM_LOW)
-	 tx_ap.write(pcie_seq_item);
-          drive_flit(pcie_seq_item);
+          // ---------------------------------------------------------------
+          // LINK_UP = 1  (LTSSM reached L0)
+          //   STEP 1 : DLCMSM is now running in the EP DL model. Drive every
+          //            DLLP packet it generates (FEATURE, FC_INIT1, FC_INIT2)
+          //            on the PIPE until the DLCMSM reaches DL_ACTIVE.
+          //   STEP 2 : DL_ACTIVE reached -> only now send the TLP packet
+          //            (TL -> DL -> PL -> PIPE).
+          // ---------------------------------------------------------------
+          `uvm_info("EP_LTSSM","LINK_UP=1 :: STARTING_DLCMSM_PACKET_DRIVE",UVM_LOW)
+
+          // STEP 1 : DLCMSM packets
+          drive_dlcmsm_packets(pcie_seq_item);
+
+          // STEP 2 : TLP packets, only once DL is active
+          if (ep_dl_model.dl_link_active) begin
+            `uvm_info("EP_DLCMSM","DL_ACTIVE=1 :: SENDING_TLP_PACKET",UVM_LOW)
+            tx_ap.write(pcie_seq_item);
+            drive_flit(pcie_seq_item);
+          end
+          else begin
+            `uvm_error("EP_DLCMSM",$sformatf("DL_ACTIVE_NOT_REACHED :: TLP_PACKET_NOT_SENT :: DL_STATE=%s link_up=%0b",
+                       ep_dl_model.DL_STATE.name(), ep_pl_model.link_up))
+          end
         end
         seq_item_port.item_done();
       end
@@ -78,6 +101,50 @@ task run_phase(uvm_phase phase);
       #1ns;
     end
     end
+  endtask
+
+  // Drives the DLCMSM (Data Link Control and Management State Machine) packets.
+  //
+  // Called right after link_up=1. The EP DL model walks
+  //     DL_INACTIVE -> DL_FEATURE -> DL_INIT.FC_INIT1 -> DL_INIT.FC_INIT2 -> DL_ACTIVE
+  // and, for every DLLP flit it creates (FEATURE, InitFC1 x N, InitFC2 x N),
+  // hands it to the PL model and raises ep_dl_model.dllp_tx_pending, then waits.
+  // This task puts each of those flits on the PIPE (drive_flit) and clears
+  // dllp_tx_pending so the DLCMSM can move on. It returns as soon as the DLCMSM
+  // reaches DL_ACTIVE (ep_dl_model.dl_link_active == 1).
+  //
+  // DL_ACTIVE is detected through the level flag dl_link_active, not through a
+  // one-shot uvm_event, so a trigger that fires before the driver is waiting
+  // can never be missed.
+  task drive_dlcmsm_packets(PCIe_sequence_item pcie_seq_item);
+    int unsigned dllp_flits_driven = 0;
+    int unsigned idle_polls        = 0;
+    `uvm_info("EP_DLCMSM_DRV","DRIVING_DLCMSM_PACKETS_UNTIL_DL_ACTIVE",UVM_LOW)
+    while (!ep_dl_model.dl_link_active && ep_pl_model.link_up) begin
+      if (ep_dl_model.dllp_tx_pending && ep_pl_model.pl_sent) begin
+        idle_polls = 0;
+        dllp_flits_driven++;
+        `uvm_info("EP_DLCMSM_DRV",$sformatf("DL_STATE=%s :: DRIVING_DLLP_FLIT_NO=%0d",ep_dl_model.DL_STATE.name(),dllp_flits_driven),UVM_LOW)
+        drive_flit(pcie_seq_item);             // DLLP flit is now on the PIPE
+        ep_dl_model.dllp_tx_pending = 1'b0;    // release the DLCMSM (next state / next DLLP)
+      end
+      else begin
+        // DLCMSM has nothing for us right now - let it run.
+        #1ns;
+        idle_polls++;
+        if (idle_polls > DLCMSM_IDLE_TIMEOUT_POLLS) begin
+          // [FIX] print every handshake signal so the stall cause is obvious:
+          //   phy_linkup=0            -> DL model never saw link-up
+          //   DL_STATE=DL_INACTIVE    -> DLCMSM never started
+          //   dllp_tx_pending=1 pl_sent=0 -> PL model did not accept the DLLP flit
+          `uvm_error("EP_DLCMSM_DRV",$sformatf("DLCMSM_STALLED :: DL_STATE=%s phy_linkup=%0b dllp_tx_pending=%0b pl_sent=%0b dllp_flits_driven=%0d :: NO_DLLP_FLIT_FOR_%0d_POLLS",
+                     ep_dl_model.DL_STATE.name(), ep_dl_model.phy_linkup, ep_dl_model.dllp_tx_pending,
+                     ep_pl_model.pl_sent, dllp_flits_driven, idle_polls))
+          break;
+        end
+      end
+    end
+    `uvm_info("EP_DLCMSM_DRV",$sformatf("DLCMSM_PACKET_DRIVE_DONE :: DL_STATE=%s dl_link_active=%0d dllp_flits_driven=%0d",ep_dl_model.DL_STATE.name(),ep_dl_model.dl_link_active,dllp_flits_driven),UVM_LOW)
   endtask
  
   // Drive the flit task
@@ -127,6 +194,3 @@ task run_phase(uvm_phase phase);
  
  
 endclass
-
- 
-

@@ -23,7 +23,11 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
 
    // [ADDED] 236 byte TLP region only (the 6 DLP bytes are stripped off) on its
    // way from this monitor to the EP TL model. Works for FLIT and NON-FLIT.
-   uvm_analysis_port #(PCIe_sequence_item) ep_mon_tl_ap;
+  // uvm_analysis_port #(PCIe_sequence_item) ep_mon_tl_ap;
+   // [ADDED] EP monitor -> EP DL model : per RC->EP flit, 242B (256B minus 8B CRC
+   // and 6B FEC) in dlp_flit_out + is_valid (0 = FEC&CRC match, 1 = no match)
+   uvm_analysis_port #(PCIe_sequence_item) ep_mon_dl_242b_ap;
+   int rc_to_ep_flit_cnt = 0;   // [ADDED] RC->EP flit number for the DL write print
    PCIe_sequence_item            pcie_seq_item;
    PCIe_RC_PL_model              rc_pl_model;
    PCIe_EP_TL_model              ep_tl_model;
@@ -48,7 +52,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
     bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_ep_tx;
     bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp_ep_rx;
     bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_ep_rx;
-   bit is_valid=1;
+   bit is_valid;
 
 
     
@@ -82,7 +86,8 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
       super.new(name,parent);
     ep_ap_mon_dl=new("ep_ap_mon_dl",this);
     ep_rc_ap_mon_dl=new("ep_rc_ap_mon_dl",this);
-    ep_mon_tl_ap=new("ep_mon_tl_ap",this);   // [ADDED] 236 B TLP -> EP TL model
+    //ep_mon_tl_ap=new("ep_mon_tl_ap",this);   // [ADDED] 236 B TLP -> EP TL model
+    ep_mon_dl_242b_ap=new("ep_mon_dl_242b_ap",this);   // [ADDED] 242 B + is_valid -> EP DL model
    endfunction
 
    function void build_phase(uvm_phase phase);
@@ -207,7 +212,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
             // monitor after all reverse process. FEC and CRC are computed HERE
             // (FEC logic and CRC logic each kept at one place) and the
             // comparison (received vs calculated) + MATCH/ERROR report is done
-            // HERE, once per flit. The result gates rx_retry_buffer + is_valid.
+            // HERE, once per flit. The result drives is_valid.
             check_rc_to_ep_flit_fec_crc(pcie_seq_item.data_q_ep_mon_con_rx, rx_os_dword_count);
             `endif
             ep_con_rx_mon_ap.write(pcie_seq_item);
@@ -226,14 +231,14 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                   rx_os_dword_count, rx_lfsr), UVM_LOW)
             end
          end
-   // (Packet collected sent by RC here :: Expected Packet)
+ //   (Packet collected sent by RC here :: Expected Packet)
    if(ep_pl_model.link_up == 1 && pcie_seq_item.data_q_ep_mon_con_rx.size() > 292 ) begin  
     collect_dlp_EP_rx(dlp_ep_rx,pcie_seq_item);
-    ep_dl_model.handle_incoming_flit(dlp_ep_rx,is_valid);
-      pcie_seq_item.dlp=dlp_ep_rx;
+ //   ep_dl_model.handle_incoming_flit(dlp_ep_rx,is_valid);
+     pcie_seq_item.dlp=dlp_ep_rx;
 
-      ep_ap_mon_dl.write(pcie_seq_item);
-       end
+    ep_ap_mon_dl.write(pcie_seq_item);
+      end
        end
        `uvm_info("EP_CONTROLLER", "EXIT_FROM_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
     endtask
@@ -497,8 +502,7 @@ if (pcie_seq_item.tx_valid) begin
       word = item.data_q_ep_mon_con_tx[idx/4];
       dlp_ep_tx[i] = word[8*(idx%4) +: 8];
    end
-    
-    ep_dl_model.rx_retry_buffer.push_back(dlp_ep_tx);
+
 
     `uvm_info("EP_CON_MONITOR",$sformatf("collected tlp_ep_tx from ep monitor is tlp=%p",tlp_ep_tx),UVM_LOW)
     `uvm_info("EP_CON_MONITOR",$sformatf("collected dlp_ep_tx ep monitor is dlp=%p",dlp_ep_tx),UVM_LOW)
@@ -532,7 +536,7 @@ if (pcie_seq_item.tx_valid) begin
 
     // [ADDED] 242 B flit -> keep only the 236 TLP bytes and hand them to the
     // EP TL model through the analysis port.
-    send_tlp_to_ep_tl(tlp_ep_rx, "RC_TO_EP_RX");
+ //   send_tlp_to_ep_tl(tlp_ep_rx, "RC_TO_EP_RX");
   endtask
       
   //==========================================================================
@@ -584,7 +588,7 @@ if (pcie_seq_item.tx_valid) begin
     end
     `uvm_info("EP_MON_TO_TL_236B", dump, UVM_LOW)
 
-    ep_mon_tl_ap.write(tl_item);
+    //ep_mon_tl_ap.write(tl_item);
 
   endfunction
 
@@ -811,8 +815,7 @@ if (pcie_seq_item.tx_valid) begin
    // Received AND calculated values are carried in pcie_seq_item.
    // THE COMPARISON (received vs calculated) IS DONE HERE in the EP controller
    // monitor: all 6 FEC bytes + all 8 CRC bytes are printed with MATCH (info)
-   // or ERROR per flit. The result is used to gate the 242B flit into the DL
-   // model rx_retry_buffer and to drive is_valid for the DL model.
+   // or ERROR per flit. The result is used to drive is_valid for the DL model.
    // ============================================================================
    task check_rc_to_ep_flit_fec_crc(input bit [`PCIe_MON_DATA_W-1:0] rc_flit_dword_q[$],
                                     input int total_dword_count);
@@ -848,6 +851,7 @@ if (pcie_seq_item.tx_valid) begin
          ep_mon_256b_flit_received_from_rc.push_back(dword[23:16]);
          ep_mon_256b_flit_received_from_rc.push_back(dword[31:24]);
       end
+      `uvm_info("EP_CONTROLLER_MONITOR", $sformatf("RC_TO_EP_RECEIVED_256B_FLIT (flit_bytes=%0d) = %p", ep_mon_256b_flit_received_from_rc.size(), ep_mon_256b_flit_received_from_rc), UVM_LOW)
 
       // ---- [ADDED] send the 256B RC->EP flit received at EP (rx.data) to the
       //              scoreboard via write() for the 256-byte compare vs RC tx.data ----
@@ -915,7 +919,7 @@ if (pcie_seq_item.tx_valid) begin
       // Prints all 6 FEC bytes (received vs calculated on 250B body) and all 8 CRC
       // bytes (received vs calculated on 242B payload). Info "match" when they
       // match, error when they don't. Sets the match flags consumed below by the
-      // 242B flit -> rx_retry_buffer gating and the is_valid driving logic.
+      // is_valid driving logic.
       begin : rc_to_ep_flit_fec_crc_compare
          bit             fec_6b_match;                 // 1 = all 6 received FEC bytes == calculated FEC bytes
          bit             crc_8b_match;                 // 1 = all 8 received CRC bytes == calculated CRC bytes
@@ -984,58 +988,45 @@ if (pcie_seq_item.tx_valid) begin
                                  crc_received_bytes_log, crc_calculated_bytes_log))
       end : rc_to_ep_flit_fec_crc_compare
 
-      // ---- [ADDED] RC->EP flit gating : FEC/CRC match => is_valid=0 + push 242B ----
-      // CRC and FEC MATCH    -> is_valid=0, then the received 242B flit is pushed
-      //                         into ep_dl_model.rx_retry_buffer once per flit HERE,
-      //                         at the flit boundary, where the match flags are fresh
-      //                         and the exact 242B payload is available.
-      // CRC and FEC NO MATCH -> is_valid=1, 242B is NOT pushed to rx_retry_buffer,
-      //                         the DL model path then sends NAK to RC.
-      // [ADDED] DL_model semantics (handle_incoming_flit) : a flit with is_valid=1
-      // is NOT accepted by the EP DL model, and per the DL model the EP side must
-      // respond with a NAK DLLP toward the RC. The NAK is scheduled HERE, inside
-      // the monitor only (the DL model file is untouched) by setting the DL model
-      // NAK fields directly; the DL model's run_dl_data_processing loop picks up
-      // NAK_SCHEDULED and sends the NAK control flit via dl_ap -> EP PL model ->
-      // EP PIPE TX, which reaches the RC on the wire.
+      // ---- [ADDED] RC->EP flit gating : FEC/CRC result => is_valid ----
+      // CRC and FEC MATCH    -> is_valid=1
+      // CRC and FEC NO MATCH -> is_valid=0
       begin : rc_to_ep_flit_rx_retry_gate
          if ((pcie_seq_item.rc_to_ep_flit_fec_match == 1'b1) &&
              (pcie_seq_item.rc_to_ep_flit_crc_match == 1'b1)) begin
-            is_valid = 1'b0;
-            begin : rc_to_ep_rx_retry_242b_push
-               bit [`PCIe_DLP_FLIT_BYTE_W-1:0][`PCIe_BYTE_W-1:0] rc_to_ep_flit_242b;
-               for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
-                  rc_to_ep_flit_242b[i] = received_242b_payload_from_rc[i];
-               ep_dl_model.rx_retry_buffer.push_back(rc_to_ep_flit_242b);
-               `uvm_info("EP_CONTROLLER_MONITOR",
-                         $sformatf("RC_TO_EP_GATE : FEC_CRC_MATCH => is_valid=0 : 242B_FLIT_PUSHED_TO_RX_RETRY_BUFFER (flits_in_rx_retry_buffer=%0d rx_retry_buffer_size_bytes=%0d)",
-                                   ep_dl_model.rx_retry_buffer.size(),
-                                   ep_dl_model.rx_retry_buffer.size() * `PCIe_DLP_FLIT_BYTE_W), UVM_LOW)
-               `uvm_info("EP_CONTROLLER_MONITOR",
-                         $sformatf("RX_RETRY_BUFFER : FLITS_FROM_RC_TO_EP_IN_RX_RETRY_BUFFER=%0d => total_bytes_in_rx_retry_buffer=%0d",
-                                   ep_dl_model.rx_retry_buffer.size(),
-                                   ep_dl_model.rx_retry_buffer.size() * `PCIe_DLP_FLIT_BYTE_W), UVM_LOW)
-            end : rc_to_ep_rx_retry_242b_push
+            is_valid = 1'b1;
+            `uvm_info("EP_CONTROLLER_MONITOR",
+                      "RC_TO_EP_GATE : FEC_CRC_MATCH => is_valid=0", UVM_LOW)
          end
          else begin
-            // [ADDED] On CRC/FEC NO MATCH the flit is not accepted -> is_valid=1.
-            // Schedule the EP->RC NAK DLLP now (monitor-only, DL model untouched):
-            // standard NAK with the sequence number one less than next expected RX.
-            is_valid = 1'b1;
-            ep_dl_model.TX_ACKNAK_FLIT_SEQ_NUM = ep_dl_model.mod1023_sub(ep_dl_model.NEXT_EXPECTED_RX_FLIT_SEQ_NUM, 10'h1);
-            ep_dl_model.NAK_SCHEDULED_TYPE     = ep_dl_model.STANDARD_NAK;
-            ep_dl_model.NAK_SCHEDULED          = 1'b1;
+            is_valid = 1'b0;
             `uvm_info("EP_CONTROLLER_MONITOR",
-                      $sformatf("RC_TO_EP_GATE : FEC_CRC_NO_MATCH => is_valid=1 : 242B_FLIT_NOT_PUSHED : NAK_DLLP_SCHEDULED_EP_TO_RC (TX_ACKNAK_FLIT_SEQ_NUM=%0d NAK_SCHEDULED=%0b NAK_SCHEDULED_TYPE=%0b STANDARD_NAK=%0b)",
-                                ep_dl_model.TX_ACKNAK_FLIT_SEQ_NUM,
-                                ep_dl_model.NAK_SCHEDULED,
-                                ep_dl_model.NAK_SCHEDULED_TYPE,
-                                ep_dl_model.STANDARD_NAK), UVM_LOW)
+                      "RC_TO_EP_GATE : FEC_CRC_NO_MATCH => is_valid=1", UVM_LOW)
          end
       end : rc_to_ep_flit_rx_retry_gate
+
+      // ---- [ADDED] send 242B flit (from the received 256B) + is_valid to EP DL model ----
+      begin : rc_to_ep_242b_is_valid_to_dl
+         PCIe_sequence_item dl_flit_item;
+         string             flit_242b_str;
+         dl_flit_item = PCIe_sequence_item::type_id::create("ep_mon_to_dl_242b_item");
+         flit_242b_str = "";
+         for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++) begin
+            dl_flit_item.dlp_flit_out[i] = received_242b_payload_from_rc[i];
+            flit_242b_str = $sformatf("%s%0d ", flit_242b_str, received_242b_payload_from_rc[i]);
+         end
+         dl_flit_item.is_valid = is_valid;
+         rc_to_ep_flit_cnt++;
+         `uvm_info("EP_CONTROLLER_MONITOR",
+                   $sformatf("RC_TO_EP_242B_FLIT_TO_DL : FLIT_%0d is_valid=%0b (flit_bytes=%0d) = %s",
+                             rc_to_ep_flit_cnt, dl_flit_item.is_valid,
+                             `PCIe_DLP_FLIT_BYTE_W, flit_242b_str), UVM_LOW)
+         ep_mon_dl_242b_ap.write(dl_flit_item);
+      end : rc_to_ep_242b_is_valid_to_dl
 
       pcie_seq_item.rc_to_ep_flit_fec_crc_check_done         = 1'b1;
    endtask : check_rc_to_ep_flit_fec_crc
    `endif
 
 endclass
+

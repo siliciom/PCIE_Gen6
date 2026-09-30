@@ -97,6 +97,12 @@ class PCIe_RC_DL_model extends uvm_component;
     localparam int NUM_INITFC2_DLLP = 4;   // FC_INIT2 is "done" once this many INITFC2 DLLPs sent
     uvm_event dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
     bit   dl_link_active;                   // stays 1 while in DL_ACTIVE - TL/driver can gate on this
+    // Driver handshake for DLCMSM packets:
+    //   DL model sets it to 1 when it hands a DLLP flit to the PL model.
+    //   RC controller driver clears it to 0 once that flit is on the PIPE.
+    // DLCMSM waits for it to clear, so every DLLP flit is really transmitted
+    // (in order) before the next DLCMSM state runs.
+    bit   dllp_tx_pending;
     // --------------------------------------------------------------------
 
   function new(string name="PCIe_RC_DL_model",uvm_component parent);
@@ -171,6 +177,7 @@ endfunction
         dl_link_active = 1'b0;
         fc1_sent_count = 0;
         fc2_sent_count = 0;
+        dllp_tx_pending        = 1'b0;
         NAK_SCHEDULED          = 1'b0;
         ACK_SCHEDULED          = 1'b0;
         REPLAY_SCHEDULED       = 1'b0;
@@ -374,16 +381,27 @@ endfunction
    endtask
 
     // Builds a NOP/DLLP-only flit (is_payload=0) with given dllp_content and
-    // pushes it through the SAME path normal flits use (dlp_pl_ap -> PL model)
+    // pushes it through the SAME path normal flits use (dlp_pl_ap -> PL model).
+    // The task then BLOCKS until the RC controller driver has put that flit on
+    // the PIPE (driver clears dllp_tx_pending), so the DLCMSM packets are
+    // transmitted one by one, in order, and never overwrite each other in the
+    // PL model.
     task send_dllp_flit(bit [31:0] content);
        PCIe_sequence_item dcm_item;
        dcm_item = PCIe_sequence_item::type_id::create("dcm_item");
        dllp_content = content;
        form_dl_packet(dcm_item.tlp_data, 1'b0, dcm_item.dlp_flit_out); // is_payload=0
+       // dllp_content belongs to THIS flit only. Clear it so it does not leak
+       // into the TLP flit that write() forms after DL_ACTIVE (DLP2-DLP5 of a
+       // TLP flit must stay 0, exactly as before the DLCMSM packets were driven).
+       dllp_content = '0;
 
        //print_dlp_packet(tlp_data,dlp);
+       dllp_tx_pending = 1'b1;
        dlp_pl_ap.write(dcm_item);   // actually push this DLLP-only flit out to the PL model
-       `uvm_info("RC_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h",content),UVM_LOW)
+       `uvm_info("RC_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h :: WAITING_FOR_DRIVER_TO_DRIVE_IT_ON_PIPE",content),UVM_LOW)
+       wait (dllp_tx_pending == 1'b0);
+       `uvm_info("RC_DLCMSM",$sformatf("DLLP_FLIT_DRIVEN_ON_PIPE content=%08h",content),UVM_LOW)
     endtask
   // =========================================================================
   // END DLCMSM FSM BLOCK
@@ -1401,3 +1419,4 @@ endtask
     endtask*/ 
 
 endclass
+

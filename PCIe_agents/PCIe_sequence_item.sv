@@ -149,6 +149,7 @@ class PCIe_sequence_item extends uvm_sequence_item;
   bit                                                    is_payload;
   rand bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data;      // 236 bytes handed to the DL
   bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0]      dlp_flit_out;   // 242-byte output (TLPs + DLP)
+  bit                                                    is_valid;       // [ADDED] RC->EP flit status from EP monitor: 0 = FEC&CRC match, 1 = no match
   bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0]      replayed_flit;  // to store the replayed flit
   bit [`PCIe_SEQ_NUM_W-1:0]                              seq_num;        // replayed sequence number
 
@@ -731,3 +732,4 @@ class PCIe_sequence_item extends uvm_sequence_item;
   endfunction
 
 endclass
+

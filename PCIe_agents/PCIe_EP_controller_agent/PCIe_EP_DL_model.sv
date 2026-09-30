@@ -16,6 +16,9 @@
 
 import typedef_enums::*;
 
+// [ADDED] separate imp for EP controller monitor -> EP DL : 242B RC->EP flit + is_valid
+`uvm_analysis_imp_decl(_ep_mon_242b)
+
 class PCIe_EP_DL_model extends uvm_component;
 
   `uvm_component_utils(PCIe_EP_DL_model)
@@ -24,6 +27,14 @@ class PCIe_EP_DL_model extends uvm_component;
   uvm_analysis_imp #(PCIe_sequence_item,PCIe_EP_DL_model) dl_imp;
   uvm_analysis_port #(PCIe_sequence_item) dl_ap;
 
+  // [ADDED] EP controller monitor -> EP DL : per RC->EP flit, 242B + is_valid
+  uvm_analysis_imp_ep_mon_242b #(PCIe_sequence_item,PCIe_EP_DL_model) dl_mon_242b_imp;
+
+  uvm_analysis_port #(PCIe_sequence_item) ep_dl_tl_ap;//dl -> tl
+  bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] ep_rx_242b_flit_q[$];   // collected 242B flits (in arrival order)
+  bit                                                ep_rx_flit_is_valid_q[$]; // is_valid of each collected flit (same index)
+  int                                                ep_rx_242b_flit_cnt = 0;
+
   bit [31:0] dllp_content;
   bit [`PCIe_DLP_FLIT_BYTE_W-1:0][`PCIe_BYTE_W-1:0] dl_flit_out;
   bit success;
@@ -31,7 +42,7 @@ class PCIe_EP_DL_model extends uvm_component;
   bit received_explicit_seq;
   bit [`PCIe_REPLAY_CMD_W-1:0] replay_cmd;
   bit [`PCIe_SEQ_NUM_W-1:0] last_sent;
-
+  bit is_payload_flit;
 
   bit [`PCIe_DLP_FLIT_BYTE_W-1:0][`PCIe_BYTE_W-1:0] rx_retry_buffer[$];
   tx_buffer_t tx_retry_buffer[$];
@@ -88,6 +99,12 @@ class PCIe_EP_DL_model extends uvm_component;
     localparam int NUM_INITFC1_DLLP = 4;   // FC_INIT1 is "done" once this many INITFC1 DLLPs sent
     localparam int NUM_INITFC2_DLLP = 4;   // FC_INIT2 is "done" once this many INITFC2 DLLPs sent
     bit   dl_link_active;                   // stays 1 while in DL_ACTIVE - TL/driver can gate on this
+    // Driver handshake for DLCMSM packets:
+    //   DL model sets it to 1 when it hands a DLLP flit to the PL model.
+    //   EP controller driver clears it to 0 once that flit is on the PIPE.
+    // DLCMSM waits for it to clear, so every DLLP flit is really transmitted
+    // (in order) before the next DLCMSM state runs.
+    bit   dllp_tx_pending;
     uvm_event ep_dl_active_event;                  // fires once, the instant DL_ACTIVE is entered
     // --------------------------------------------------------------------
 
@@ -99,6 +116,8 @@ class PCIe_EP_DL_model extends uvm_component;
     super.build_phase(phase);
     dl_imp = new("dl_imp", this);
     dl_ap = new("dl_ap", this);
+    dl_mon_242b_imp = new("dl_mon_242b_imp", this);   // [ADDED]
+    ep_dl_tl_ap=new("ep_dl_tl_ap",this);
     ep_dl_active_event = uvm_event_pool::get_global("ep_dl_active_event");
     uvm_ep_l0_to_dl_ev = uvm_event_pool::get_global("ep_l0_to_dl_event");
 
@@ -142,6 +161,7 @@ class PCIe_EP_DL_model extends uvm_component;
         dl_link_active = 1'b0;
         fc1_sent_count = 0;
         fc2_sent_count = 0;
+        dllp_tx_pending        = 1'b0;
         NAK_SCHEDULED          = 1'b0;
         ACK_SCHEDULED          = 1'b0;
         REPLAY_SCHEDULED       = 1'b0;
@@ -353,14 +373,25 @@ class PCIe_EP_DL_model extends uvm_component;
     endtask
 
     // Builds a NOP/DLLP-only flit (is_payload=0) with given dllp_content and
-    // pushes it through the SAME path normal flits use (dl_ap -> PL model)
+    // pushes it through the SAME path normal flits use (dl_ap -> PL model).
+    // The task then BLOCKS until the EP controller driver has put that flit on
+    // the PIPE (driver clears dllp_tx_pending), so the DLCMSM packets are
+    // transmitted one by one, in order, and never overwrite each other in the
+    // PL model.
     task send_dllp_flit(bit [31:0] content);
        PCIe_sequence_item dcm_item;
        dcm_item = PCIe_sequence_item::type_id::create("dcm_item");
        dllp_content = content;
        form_dl_packet(dcm_item.tlp_data, 1'b0, dcm_item.dlp_flit_out); // is_payload=0
+       // dllp_content belongs to THIS flit only. Clear it so it does not leak
+       // into the TLP flit that write() forms after DL_ACTIVE (DLP2-DLP5 of a
+       // TLP flit must stay 0, exactly as before the DLCMSM packets were driven).
+       dllp_content = '0;
+       dllp_tx_pending = 1'b1;
        dl_ap.write(dcm_item);
-       `uvm_info("EP_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h",content),UVM_LOW)
+       `uvm_info("EP_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h :: WAITING_FOR_DRIVER_TO_DRIVE_IT_ON_PIPE",content),UVM_LOW)
+       wait (dllp_tx_pending == 1'b0);
+       `uvm_info("EP_DLCMSM",$sformatf("DLLP_FLIT_DRIVEN_ON_PIPE content=%08h",content),UVM_LOW)
     endtask
   // =========================================================================
   // END DLCMSM FSM BLOCK
@@ -890,6 +921,143 @@ class PCIe_EP_DL_model extends uvm_component;
 
 
   // =========================================================================
+  // [MERGED] write_ep_mon_242b : EP Controller Monitor -> EP DL Model
+  // Called by the EP controller monitor once per RC->EP flit. Receives the
+  // 242B flit (256B minus 8B CRC and 6B FEC) and its is_valid status.
+  //   Monitor convention : is_valid = 0 -> FEC/CRC match    (good flit)
+  //                        is_valid = 1 -> FEC/CRC mismatch (bad flit)
+  //   handle_incoming_flit() convention is the opposite (1 = good, 0 = NAK),
+  //   so the flag is inverted before the flit is handed to the RX path.
+  // The flit is (1) collected in ep_rx_242b_flit_q / ep_rx_flit_is_valid_q
+  // and (2) its DLP bytes are passed to handle_incoming_flit().
+  // =========================================================================
+ function void write_ep_mon_242b(PCIe_sequence_item item);
+
+    string flit_242b_str;
+
+    bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] received_dlp;
+    bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] received_tlp;
+    bit rx_flit_good;
+
+    PCIe_sequence_item tl_item;
+
+
+    // ============================================================
+    // 1. Collect the complete 242-byte Flit
+    // ============================================================
+
+    ep_rx_242b_flit_q.push_back(item.dlp_flit_out);
+    ep_rx_flit_is_valid_q.push_back(item.is_valid);
+    ep_rx_242b_flit_cnt++;
+
+    flit_242b_str = "";
+
+    for (int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
+        flit_242b_str =
+            $sformatf("%s%0d ",
+                      flit_242b_str,
+                      item.dlp_flit_out[i]);
+
+    `uvm_info("EP_DL_MODEL",
+              $sformatf(
+                "EP_DL_COLLECTED_242B_FLIT : FLIT_%0d is_valid=%0b total_collected=%0d = %s",
+                ep_rx_242b_flit_cnt,
+                item.is_valid,
+                ep_rx_242b_flit_q.size(),
+                flit_242b_str),
+              UVM_LOW);
+
+
+    // ============================================================
+    // 2. Extract DLP = last 6 bytes
+    // ============================================================
+
+    for (int i = 0; i < `PCIe_DLP_BYTE_W; i++)
+        received_dlp[i] =
+            item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W + i];
+
+
+    // ============================================================
+    // 3. Extract TLP = first 236 bytes
+    // ============================================================
+
+    for (int i = 0; i < `PCIe_TLP_DATA_BYTE_W; i++)
+        received_tlp[i] =
+            item.dlp_flit_out[i];
+
+
+    // ============================================================
+    // 4. Convert monitor is_valid convention
+    //
+    // Monitor:
+    //   is_valid = 0 --> GOOD Flit
+    //   is_valid = 1 --> BAD Flit
+    //
+    // DL:
+    //   1 --> GOOD
+    //   0 --> BAD
+    // ============================================================
+
+    rx_flit_good = item.is_valid;
+
+
+    `uvm_info("EP_DL_MODEL",
+              $sformatf(
+                "RX_FLIT_STATUS : monitor_is_valid=%0b -> rx_flit_good=%0b",
+                item.is_valid,
+                rx_flit_good),
+              UVM_LOW);
+
+
+    // ============================================================
+    // 5. Send DLP to DL processing
+    //
+    // This must happen even for a BAD Flit because DL needs
+    // to process sequence number / ACK / NAK information.
+    // ============================================================
+
+    is_payload_flit = (received_dlp[0][7:6] == 2'b01);
+
+// Always process DLP for ACK/NAK/replay handling
+fork
+    begin
+	            automatic bit [0:`PCIe_DLP_BYTE_W-1]
+                         [`PCIe_BYTE_W-1:0] dlp_copy = received_dlp;
+
+        automatic bit good_copy = rx_flit_good;
+        handle_incoming_flit(dlp_copy, good_copy);
+    end
+join_none
+
+// Send data to TL only when:
+// 1. Flit is good
+// 2. Flit is a Payload Flit
+if (rx_flit_good && is_payload_flit) begin
+
+    PCIe_sequence_item tl_item;
+
+    tl_item = PCIe_sequence_item::type_id::create("tl_item");
+
+    foreach (received_tlp[i])
+        tl_item.tlp_data[i] = received_tlp[i];
+   
+
+    ep_dl_tl_ap.write(tl_item);
+
+    `uvm_info("EP_DL_TL",
+              "GOOD PAYLOAD FLIT: 236B TLP sent to TL",
+              UVM_LOW)
+end
+else begin
+
+    `uvm_info("EP_DL_TL",
+              $sformatf("TLP NOT sent to TL: good=%0b payload=%0b",
+                        rx_flit_good, is_payload_flit),
+              UVM_LOW)
+end
+endfunction 
+
+  // =========================================================================
   // PCIe 6.0 Flow Control DLLP Payload Generator
   // Returns a 32-bit vector ready to map to DLP2 (MSB) through DLP5 (LSB)
   // =========================================================================
@@ -1264,4 +1432,7 @@ endtask
     endtask*/ 
 
 
+
 endclass
+
+
