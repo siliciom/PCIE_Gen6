@@ -1,9 +1,17 @@
 #set testname "PCIe_base_test"
-set testname "PCIe_3DW_flit_test"
+#set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_IO_3DW_FLIT_test"
 #set testname "PCIe_gen6_ltssm_electrical_idle_during_training_test"
 #set testname "PCIe_gen6_ltssm_detect_no_receiver_test"
 #set testname "PCIe_gen6_ltssm_basic_linkup_L0_test"
+#set testname "PCIe_gen6_3DW_Flit_MemWr_MinPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_MemWr_MaxPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_IOWr_test"
+#set testname "PCIe_gen6_3DW_Flit_IORd_test"
+#set testname "PCIe_gen6_3DW_Flit_CFGWr0_test"
+#set testname "PCIe_gen6_3DW_Flit_CFGWr1_test"
+#set testname "PCIe_gen6_3DW_Flit_CFGRd0_test"
+#set testname "PCIe_gen6_3DW_Flit_CFGRd1_test"
 
 vlib work
 vmap work work

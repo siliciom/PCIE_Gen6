@@ -51,7 +51,7 @@ class PCIe_RC_3DW_Flit_MemRd_MinPayload_sequence extends PCIe_RC_controller_base
          length   == `PCIe_TL_LEN_MIN;
 
          first_dw_be == 4'hF;
-         last_dw_be == 4'hF;
+         last_dw_be == 4'h0;
 
          ep == 1'b0;
 
