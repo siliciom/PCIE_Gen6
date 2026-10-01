@@ -565,10 +565,8 @@ if (pcie_seq_item.tx_valid) begin
 
     tl_item = PCIe_sequence_item::type_id::create("ep_mon_to_tl_item");
 
-    for (b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++) begin
-      tl_item.tlp_from_mon[b] = tlp_bytes[b];
-      tl_item.tlp_data[b]     = tlp_bytes[b];
-    end
+    for (b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++)
+      tl_item.tlp_data[b] = tlp_bytes[b];
 
     tl_item.pkt_mode   = mon_pkt_mode;
     tl_item.is_payload = 1'b1;
@@ -581,7 +579,7 @@ if (pcie_seq_item.tx_valid) begin
     for (b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++) begin
       if ((b % `PCIe_FLIT_DUMP_BPL) == 0)
         line = $sformatf("  [%3d] :", b);
-      line = {line, $sformatf(" %02h", tl_item.tlp_from_mon[b])};
+      line = {line, $sformatf(" %02h", tl_item.tlp_data[b])};
       if (((b % `PCIe_FLIT_DUMP_BPL) == `PCIe_FLIT_DUMP_BPL-1) ||
           (b == `PCIe_TLP_DATA_BYTE_W-1))
         dump = {dump, line, "\n"};

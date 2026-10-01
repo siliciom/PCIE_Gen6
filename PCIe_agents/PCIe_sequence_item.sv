@@ -184,18 +184,6 @@ class PCIe_sequence_item extends uvm_sequence_item;
   bit [`PCIe_MON_DATA_W-1:0]   data_q_ep_mon_con_tx[$];
   bit [`PCIe_MON_DATA_W-1:0]   data_q_ep_mon_con_rx[$];
 
-
-  //==========================================================================
-  //   TL-LAYER ADDITIONS : monitor hand-off, ECRC, completion    [ADDED]
-  //==========================================================================
-
-  //--------------------------------------------------------------------------
-  // 236 byte TLP region carved out of the 242 byte flit by the EP controller
-  // monitor and handed to the EP TL model. Byte 0 is the first byte on the
-  // wire, i.e. the MSB of DW0 - same convention as tlp_data.
-  //--------------------------------------------------------------------------
-  bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_from_mon;
-
   //--------------------------------------------------------------------------
   // Which of the three flit types this item represents (Table 4-16)
   //--------------------------------------------------------------------------

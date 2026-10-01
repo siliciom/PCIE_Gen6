@@ -489,15 +489,28 @@ class PCIe_EP_TL_model extends uvm_component;
     n_tlp_rcvd++;
 
     `uvm_info("EP_TL_MODEL",
-      $sformatf("RECEIVED_236B_TLP_FROM_EP_CONTROLLER_MONITOR #%0d mode=%s",
+      $sformatf("RECEIVED_236B_TLP_FROM_EP_DL_MODEL #%0d mode=%s",
                  n_tlp_rcvd, item.pkt_mode.name()), UVM_LOW)
 
+    // decode_tlp()/get_dw()/check_ecrc_rx() all read item.tlp_data
+    // (the 236 byte TLP region filled by the EP DL model).
+    if (item.tlp_data == '0)
+      `uvm_warning("EP_TL_MODEL",
+        "RECEIVED_ITEM_HAS_ALL_ZERO_tlp_data - EP DL model did not fill the 236B TLP region")
+
     d_mode = item.pkt_mode;
+
+    `uvm_info("EP_TL_MODEL",
+      $sformatf("DECODE_INPUT : mode=%s DW0=%08h DW1=%08h DW2=%08h DW3=%08h",
+                 d_mode.name(), get_dw(item,0), get_dw(item,1),
+                 get_dw(item,2), get_dw(item,3)), UVM_LOW)
+
     decode_tlp(item);
 
     if (!d_valid) begin
       `uvm_info("EP_TL_MODEL",
-        "DECODED_AS_NOP_OR_UNSUPPORTED_TLP : no memory access, no completion", UVM_LOW)
+        $sformatf({"DECODED_AS_NOP_OR_UNSUPPORTED_TLP (mode=%s byte0=0x%02h) : ",
+                   "no memory access, no completion"}, d_mode.name(), d_byte0), UVM_LOW)
       return;
     end
 
@@ -791,8 +804,8 @@ class PCIe_EP_TL_model extends uvm_component;
     b = dw_index * `PCIe_TL_DW_BYTES;
     if ((b + 3) >= `PCIe_TLP_DATA_BYTE_W)
       return '0;
-    dw = {item.tlp_from_mon[b], item.tlp_from_mon[b+1],
-          item.tlp_from_mon[b+2], item.tlp_from_mon[b+3]};
+    dw = {item.tlp_data[b], item.tlp_data[b+1],
+          item.tlp_data[b+2], item.tlp_data[b+3]};
     return dw;
   endfunction
 
@@ -897,7 +910,7 @@ class PCIe_EP_TL_model extends uvm_component;
     end
 
     rx_digest  = get_dw(item, d_total_dw);                       // the trailing digest DW
-    recomputed = generate_ecrc(item.tlp_from_mon, covered_bytes, d_mode);
+    recomputed = generate_ecrc(item.tlp_data, covered_bytes, d_mode);
 
     item.ecrc    = rx_digest;
     item.ecrc_rx = recomputed;
@@ -1496,9 +1509,6 @@ class PCIe_EP_TL_model extends uvm_component;
 
     for (b = 0; b < nbytes; b++)
       cpl.tlp_data[b] = cpl.flit_tlp_region[b/4][ 8*(3-(b%4)) +: 8 ];
-
-    for (b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++)
-      cpl.tlp_from_mon[b] = cpl.tlp_data[b];
 
   endfunction
 

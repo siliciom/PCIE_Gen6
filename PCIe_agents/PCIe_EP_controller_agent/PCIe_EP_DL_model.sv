@@ -31,6 +31,8 @@ class PCIe_EP_DL_model extends uvm_component;
   uvm_analysis_imp_ep_mon_242b #(PCIe_sequence_item,PCIe_EP_DL_model) dl_mon_242b_imp;
 
   uvm_analysis_port #(PCIe_sequence_item) ep_dl_tl_ap;//dl -> tl
+
+    pkt_mode_e dl_rx_pkt_mode = FLIT;
   bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] ep_rx_242b_flit_q[$];   // collected 242B flits (in arrival order)
   bit                                                ep_rx_flit_is_valid_q[$]; // is_valid of each collected flit (same index)
   int                                                ep_rx_242b_flit_cnt = 0;
@@ -987,15 +989,13 @@ class PCIe_EP_DL_model extends uvm_component;
 
 
     // ============================================================
-    // 4. Convert monitor is_valid convention
+    // 4. is_valid convention
     //
-    // Monitor:
-    //   is_valid = 0 --> GOOD Flit
-    //   is_valid = 1 --> BAD Flit
-    //
-    // DL:
-    //   1 --> GOOD
-    //   0 --> BAD
+    // The EP controller monitor drives (check_rc_to_ep_flit_fec_crc):
+    //   is_valid = 1 --> FEC & CRC MATCH    (GOOD Flit)
+    //   is_valid = 0 --> FEC / CRC MISMATCH (BAD Flit)
+    // which is already the handle_incoming_flit() convention
+    // (1 = GOOD, 0 = BAD), so NO inversion is needed.
     // ============================================================
 
     rx_flit_good = item.is_valid;
@@ -1034,19 +1034,38 @@ join_none
 // 2. Flit is a Payload Flit
 if (rx_flit_good && is_payload_flit) begin
 
-    PCIe_sequence_item tl_item;
+    string dump;
+    string line;
 
-    tl_item = PCIe_sequence_item::type_id::create("tl_item");
+    tl_item = PCIe_sequence_item::type_id::create("ep_dl_to_tl_item");
 
+    // 236B TLP region -> tlp_data (the only field the EP TL model reads)
     foreach (received_tlp[i])
         tl_item.tlp_data[i] = received_tlp[i];
-   
 
-    ep_dl_tl_ap.write(tl_item);
+    // [FIX] Same side-band fields the monitor used to set.
+    tl_item.pkt_mode   = dl_rx_pkt_mode;
+    tl_item.is_payload = 1'b1;
+    tl_item.drive_flit = (dl_rx_pkt_mode == FLIT);
+
+    // 236B dump of exactly what is handed to the EP TL model
+    dump = "\n";
+    line = "";
+    for (int b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++) begin
+      if ((b % `PCIe_FLIT_DUMP_BPL) == 0)
+        line = $sformatf("  [%3d] :", b);
+      line = {line, $sformatf(" %02h", tl_item.tlp_data[b])};
+      if (((b % `PCIe_FLIT_DUMP_BPL) == `PCIe_FLIT_DUMP_BPL-1) ||
+          (b == `PCIe_TLP_DATA_BYTE_W-1))
+        dump = {dump, line, "\n"};
+    end
 
     `uvm_info("EP_DL_TL",
-              "GOOD PAYLOAD FLIT: 236B TLP sent to TL",
+              $sformatf("GOOD PAYLOAD FLIT: 236B TLP sent to TL mode=%s DW0_BYTE0=0x%02h%s",
+                        tl_item.pkt_mode.name(), tl_item.tlp_data[0], dump),
               UVM_LOW)
+
+    ep_dl_tl_ap.write(tl_item);
 end
 else begin
 
