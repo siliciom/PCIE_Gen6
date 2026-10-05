@@ -839,6 +839,7 @@ if (pcie_seq_item.tx_valid) begin
       if (((total_dword_count + 1 - 232) % 64) != 0) return;     // fire only at each 64-dword flit boundary
       if (rc_flit_dword_q.size() < 64) return;                   // full 256B flit not captured yet
       flit_start = rc_flit_dword_q.size() - 64;                  // current flit = last 64 dwords
+      rc_to_ep_flit_cnt++;                                       // [ADDED] RC->EP received flit number (1, 2, 3 ...)
 
       // ---- step 0 : rebuild the received 256B flit (4 bytes per dword, little-endian) ----
       ep_mon_256b_flit_received_from_rc.delete();
@@ -849,7 +850,7 @@ if (pcie_seq_item.tx_valid) begin
          ep_mon_256b_flit_received_from_rc.push_back(dword[23:16]);
          ep_mon_256b_flit_received_from_rc.push_back(dword[31:24]);
       end
-      `uvm_info("EP_CONTROLLER_MONITOR", $sformatf("RC_TO_EP_RECEIVED_256B_FLIT (flit_bytes=%0d) = %p", ep_mon_256b_flit_received_from_rc.size(), ep_mon_256b_flit_received_from_rc), UVM_LOW)
+      `uvm_info("EP_CONTROLLER_MONITOR", $sformatf("RC_TO_EP_RECEIVED_256B_FLIT FLIT_%0d (flit_bytes=%0d) = %p", rc_to_ep_flit_cnt, ep_mon_256b_flit_received_from_rc.size(), ep_mon_256b_flit_received_from_rc), UVM_LOW)
 
       // ---- [ADDED] send the 256B RC->EP flit received at EP (rx.data) to the
       //              scoreboard via write() for the 256-byte compare vs RC tx.data ----
@@ -887,7 +888,8 @@ if (pcie_seq_item.tx_valid) begin
          for(int i = 0; i < `PCIe_FLIT_FEC_BYTES; i++)
             rc_to_ep_fec_6b = $sformatf("%s%0d ", rc_to_ep_fec_6b, received_6b_fec_from_rc_flit[i]);
           `uvm_info("EP_CONTROLLER_MONITOR",
-                    $sformatf("RC_TO_EP : RECEIVED_256B_FLIT (242B PAYLOAD + 8B CRC + 6B FEC) = %s%s%s",
+                    $sformatf("RC_TO_EP : RECEIVED_FLIT_NUMBER=%0d : RECEIVED_256B_FLIT (242B PAYLOAD + 8B CRC + 6B FEC) = %s%s%s",
+                              rc_to_ep_flit_cnt,
                               rc_to_ep_flit_242b, rc_to_ep_crc_8b, rc_to_ep_fec_6b), UVM_LOW)
        end : rc_to_ep_rx_flit_print
 
@@ -994,12 +996,12 @@ if (pcie_seq_item.tx_valid) begin
              (pcie_seq_item.rc_to_ep_flit_crc_match == 1'b1)) begin
             is_valid = 1'b1;
             `uvm_info("EP_CONTROLLER_MONITOR",
-                      "RC_TO_EP_GATE : FEC_CRC_MATCH => is_valid=0", UVM_LOW)
+                      "RC_TO_EP_GATE : FEC_CRC_MATCH => is_valid=1", UVM_LOW)
          end
          else begin
             is_valid = 1'b0;
             `uvm_info("EP_CONTROLLER_MONITOR",
-                      "RC_TO_EP_GATE : FEC_CRC_NO_MATCH => is_valid=1", UVM_LOW)
+                      "RC_TO_EP_GATE : FEC_CRC_NO_MATCH => is_valid=0", UVM_LOW)
          end
       end : rc_to_ep_flit_rx_retry_gate
 
@@ -1014,7 +1016,6 @@ if (pcie_seq_item.tx_valid) begin
             flit_242b_str = $sformatf("%s%0d ", flit_242b_str, received_242b_payload_from_rc[i]);
          end
          dl_flit_item.is_valid = is_valid;
-         rc_to_ep_flit_cnt++;
          `uvm_info("EP_CONTROLLER_MONITOR",
                    $sformatf("RC_TO_EP_242B_FLIT_TO_DL : FLIT_%0d is_valid=%0b (flit_bytes=%0d) = %s",
                              rc_to_ep_flit_cnt, dl_flit_item.is_valid,
