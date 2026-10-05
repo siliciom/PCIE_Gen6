@@ -50,11 +50,9 @@ class PCIe_RC_controller_agent extends uvm_agent;
 	 rc_controller_driver.tx_tl_ap.connect(rc_tl_model.tx_tl_imp);
          rc_tl_model.tlp_dl_ap.connect(rc_dl_model.tlp_dl_imp);
          rc_dl_model.dlp_pl_ap.connect(rc_pl_model.dlp_pl_imp);
+         // [ADDED] RC controller monitor -> RC DL : 242B EP->RC flit + is_valid, once per flit
+         rc_controller_monitor.rc_mon_dl_242b_ap.connect(rc_dl_model.dl_mon_242b_imp);
         `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
       endfunction
   
 endclass
-           
-
-
-

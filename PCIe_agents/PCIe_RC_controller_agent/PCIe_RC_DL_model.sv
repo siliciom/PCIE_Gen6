@@ -1,4 +1,3 @@
-//=========================================================================================
 // File         : PCIe_RC_DL_model.sv
 // Project      : PCIE_Gen6
 // Description  : PCIe_agents\PCIe_RC_controller_agent\PCIe_RC_DL_model.sv
@@ -15,6 +14,12 @@
 ***********************************************************************************************************************/
 
 import typedef_enums :: *;
+
+// [ADDED] second analysis imp for this class : RC controller monitor -> RC DL
+// (242B EP->RC flit + is_valid). Creates class uvm_analysis_imp_rc_mon_242b,
+// whose write() calls write_rc_mon_242b() in this model.
+`uvm_analysis_imp_decl(_rc_mon_242b)
+
 class PCIe_RC_DL_model extends uvm_component;
 
   `uvm_component_utils(PCIe_RC_DL_model)
@@ -22,6 +27,12 @@ class PCIe_RC_DL_model extends uvm_component;
   // TL -> DL and DL -> PL TLM connections.
   uvm_analysis_imp #(PCIe_sequence_item,PCIe_RC_DL_model) tlp_dl_imp;
   uvm_analysis_port #(PCIe_sequence_item) dlp_pl_ap;
+
+  // [ADDED] RC controller monitor -> RC DL : 242B EP->RC flit (256B minus 8B CRC
+  // and 6B FEC) in dlp_flit_out + is_valid (1 = FEC&CRC match, 0 = no match).
+  // Connected in PCIe_RC_controller_agent.sv to rc_controller_monitor.rc_mon_dl_242b_ap.
+  uvm_analysis_imp_rc_mon_242b #(PCIe_sequence_item,PCIe_RC_DL_model) dl_mon_242b_imp;
+  int unsigned rc_mon_242b_flit_cnt = 0;   // [ADDED] number of 242B EP->RC flits received from RC monitor
 
   bit [`PCIe_DLLP_CONTENT_W-1:0] dllp_content;
   bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
@@ -114,6 +125,7 @@ function void build_phase(uvm_phase phase);
     super.build_phase(phase);
     tlp_dl_imp = new("tlp_dl_imp",this);
     dlp_pl_ap = new("dlp_pl_ap",this);
+    dl_mon_242b_imp = new("dl_mon_242b_imp",this);   // [ADDED] RC monitor -> RC DL (242B + is_valid)
     dl_active_event = uvm_event_pool::get_global("dl_active_event");
     uvm_rc_l0_to_dl_ev = uvm_event_pool::get_global("rc_l0_to_dl_event");
 
@@ -128,6 +140,34 @@ function void write(PCIe_sequence_item item);
   print_dlp_packet(item.tlp_data,item.dlp_flit_out);
   `uvm_info("RC_DL_MODEL","SENT_DLP_TO_PL_236B", UVM_LOW)
    dlp_pl_ap.write(item);
+endfunction
+
+// ---------------------------------------------------------------------------
+// [ADDED] RC controller monitor -> RC DL : called once per EP->RC flit, every
+// time the RC monitor does rc_mon_dl_242b_ap.write().
+//   item.dlp_flit_out = 242B flit (236B TLP region + 6B DLP)
+//   item.is_valid     = 1 when received FEC and CRC matched the calculated ones
+// The last 6 bytes (DLP) and is_valid are passed to handle_incoming_flit(),
+// which runs the RX ACK/NAK/replay rules and sets ACK_SCHEDULED / NAK_SCHEDULED.
+// run_dl_data_processing() then sends the scheduled ACK / NAK flit.
+// ---------------------------------------------------------------------------
+function void write_rc_mon_242b(PCIe_sequence_item item);
+  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] rx_dlp;
+
+  rc_mon_242b_flit_cnt++;
+
+  // keep the full 242B flit : store_flit_in_rx_retry_buffer() uses current_flit_data
+  current_flit_data = item.dlp_flit_out;
+
+  // last 6 bytes of the 242B flit = DLP
+  for(int i=0;i<`PCIe_DLP_BYTE_W;i++)
+    rx_dlp[i] = item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W+i];
+
+  `uvm_info("RC_DL_MODEL",
+            $sformatf("RC_MON -> RC_DL : RECEIVED_242B_FLIT_FROM_RC_MONITOR FLIT_%0d is_valid=%0b dlp=%p",
+                      rc_mon_242b_flit_cnt, item.is_valid, rx_dlp), UVM_LOW)
+
+  handle_incoming_flit(rx_dlp, item.is_valid);
 endfunction
 
 
@@ -1419,4 +1459,3 @@ endtask
     endtask*/ 
 
 endclass
-
