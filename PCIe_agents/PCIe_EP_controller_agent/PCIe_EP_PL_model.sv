@@ -906,10 +906,12 @@ task ep_state_config_complete();
     endtask
 
    // PL model receives the 242-byte DL result.
-    function void write(PCIe_sequence_item item);
+function void write(PCIe_sequence_item item);
      bit [31:0] temp;
-     `uvm_info("EP_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",item.dlp_flit_out),UVM_MEDIUM)
-      dl_flit_out=item.dlp_flit_out;
+     bit is_payload_flit;
+      `uvm_info("EP_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",item.dlp_flit_out),UVM_MEDIUM)
+       dl_flit_out=item.dlp_flit_out;
+       is_payload_flit = (dl_flit_out[236][7:6] == 2'b01);
       pl_qu.delete();
       for (int i = 0; i < 242; i += 4) begin
         temp = '0;
@@ -917,7 +919,7 @@ task ep_state_config_complete();
           if ((i+j) < 242)
              temp[j*8 +: 8] = dl_flit_out[i+j];
           end
-          pl_qu.push_back(temp);
+        pl_qu.push_back(temp);
       end
      // `uvm_info("EP_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",pl_qu),UVM_MEDIUM)
 
@@ -1041,7 +1043,10 @@ task ep_state_config_complete();
           end
 
           ep_flit_ready_flag = 1'b1;
-	  ep_tx_flit_q.push_back(ep_flit_with_crc_fec_body);   // put the flit in the queue for completion
+	  if (is_payload_flit)
+	    ep_tx_flit_q.push_back(ep_flit_with_crc_fec_body);
+	  else
+	    ep_tx_flit_q.push_front(ep_flit_with_crc_fec_body);
        end
        // ===== END CRC/FEC Computation =====
 

@@ -940,8 +940,17 @@ class PCIe_EP_DL_model extends uvm_component;
     bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] received_dlp;
     bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] received_tlp;
     bit rx_flit_good;
+    bit is_payload_flit;
+    bit is_non_posted;
+    bit [7:0] fmt_type;
 
     PCIe_sequence_item tl_item;
+
+    bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp_copy;
+    bit good_copy;
+
+    string dump;
+    string line;
 
 
     // ============================================================
@@ -1018,18 +1027,66 @@ class PCIe_EP_DL_model extends uvm_component;
 
     is_payload_flit = (received_dlp[0][7:6] == 2'b01);
 
-// Always process DLP for ACK/NAK/replay handling
-fork
-    begin
-	            automatic bit [0:`PCIe_DLP_BYTE_W-1]
-                         [`PCIe_BYTE_W-1:0] dlp_copy = received_dlp;
+    dlp_copy = received_dlp;
+    good_copy = rx_flit_good;
+    handle_incoming_flit(dlp_copy, good_copy);
 
-        automatic bit good_copy = rx_flit_good;
-        handle_incoming_flit(dlp_copy, good_copy);
+    is_non_posted = 1'b0;
+    if (rx_flit_good && is_payload_flit) begin
+        fmt_type = received_tlp[0];
+        case (fmt_type)
+            8'h00, 8'h01, 8'h02, 8'h03, 8'h04, 8'h05, 8'h06, 8'h07, 8'h20, 8'h21: is_non_posted = 1'b1;
+            default: is_non_posted = 1'b0;
+        endcase
+        if (is_non_posted && ACK_SCHEDULED) begin
+            send_dl_control_flit();
+        end
     end
-join_none
 
-// Send data to TL only when:
+    // Send data to TL only when:
+    // 1. Flit is good
+    // 2. Flit is a Payload Flit
+    if (rx_flit_good && is_payload_flit) begin
+
+    tl_item = PCIe_sequence_item::type_id::create("ep_dl_to_tl_item");
+
+    // 236B TLP region -> tlp_data (the only field the EP TL model reads)
+    foreach (received_tlp[i])
+        tl_item.tlp_data[i] = received_tlp[i];
+
+    // [FIX] Same side-band fields the monitor used to set.
+    tl_item.pkt_mode   = dl_rx_pkt_mode;
+    tl_item.is_payload = 1'b1;
+    tl_item.drive_flit = (dl_rx_pkt_mode == FLIT);
+
+    // 236B dump of exactly what is handed to the EP TL model
+    dump = "\n";
+    line = "";
+    for (int b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++) begin
+      if ((b % `PCIe_FLIT_DUMP_BPL) == 0)
+        line = $sformatf("  [%3d] :", b);
+      line = {line, $sformatf(" %02h", tl_item.tlp_data[b])};
+      if (((b % `PCIe_FLIT_DUMP_BPL) == `PCIe_FLIT_DUMP_BPL-1) ||
+          (b == `PCIe_TLP_DATA_BYTE_W-1))
+        dump = {dump, line, "\n"};
+    end
+
+    `uvm_info("EP_DL_TL",
+              $sformatf("GOOD PAYLOAD FLIT: 236B TLP sent to TL mode=%s DW0_BYTE0=0x%02h%s",
+                        tl_item.pkt_mode.name(), tl_item.tlp_data[0], dump),
+              UVM_LOW)
+
+    ep_dl_tl_ap.write(tl_item);
+end
+else begin
+
+    `uvm_info("EP_DL_TL",
+              $sformatf("TLP NOT sent to TL: good=%0b payload=%0b",
+                        rx_flit_good, is_payload_flit),
+              UVM_LOW)
+end
+
+/*// Send data to TL only when:
 // 1. Flit is good
 // 2. Flit is a Payload Flit
 if (rx_flit_good && is_payload_flit) begin
@@ -1073,7 +1130,7 @@ else begin
               $sformatf("TLP NOT sent to TL: good=%0b payload=%0b",
                         rx_flit_good, is_payload_flit),
               UVM_LOW)
-end
+end*/
 endfunction 
 
   // =========================================================================
