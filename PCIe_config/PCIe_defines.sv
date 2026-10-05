@@ -624,8 +624,12 @@
 `define PCIe_FLIT_NOP_DLLP           32'h3100_0000  // NOP DLLP, Non-Flit Mode
 `define PCIe_FLIT_TLP_REGION_DW      59            // 236 B / 4
 
+`define PCIe_EP_BUS_NUMBER           8'h01
+`define PCIe_EP_DEVICE_NUMBER        5'h00
+`define PCIe_EP_FUNCTION_NUMBER      3'h0
+
+
 `endif 
 // PCIe_DEFINES_SVH
-
 
 
