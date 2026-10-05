@@ -39,6 +39,8 @@ class PCIe_EP_PL_model extends uvm_component;
    bit [63:0]             ep_flit_crc;
    bit [`PCIe_BYTE_W-1:0] ep_flit_crc_body[$];
    bit [`PCIe_BYTE_W-1:0] ep_flit_with_crc_fec_body[$];
+   typedef bit [`PCIe_BYTE_W-1:0] ep_flit_bytes_t[$]; // for completions
+   ep_flit_bytes_t        ep_tx_flit_q[$];      // for completions
    event                  ep_flit_ready;
    bit                    ep_flit_ready_flag = 1'b0;
    bit [`PCIe_PL_SCRAMBLER_LFSR_W-1:0]      lfsr;
@@ -1039,6 +1041,7 @@ task ep_state_config_complete();
           end
 
           ep_flit_ready_flag = 1'b1;
+	  ep_tx_flit_q.push_back(ep_flit_with_crc_fec_body);   // put the flit in the queue for completion
        end
        // ===== END CRC/FEC Computation =====
 
@@ -1391,6 +1394,7 @@ task ep_state_config_complete();
    endfunction : check_final_fec_256b
 
 endclass
+
 
 
 

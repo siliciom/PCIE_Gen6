@@ -49,7 +49,7 @@ class PCIe_RC_3DW_Flit_CFGRd0_sequence extends PCIe_RC_controller_base_sequence;
          cfg_dev_num     == `PCIe_EP_DEVICE_NUMBER;
          cfg_fn_num      == `PCIe_EP_FUNCTION_NUMBER;
 
-         cfg_reg_num     == 12'h010;
+         cfg_reg_num     == 12'h000;
          cfg_ext_reg_num == 4'h0;
 
          first_dw_be == 4'hF;
