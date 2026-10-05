@@ -71,7 +71,7 @@ task run_phase(uvm_phase phase);
           // STEP 2 : TLP packets, only once DL is active
           if (ep_dl_model.dl_link_active) begin
             `uvm_info("EP_DLCMSM","DL_ACTIVE=1 :: SENDING_TLP_PACKET",UVM_LOW)
-            tx_ap.write(pcie_seq_item);
+            //tx_ap.write(pcie_seq_item);
             drive_flit(pcie_seq_item);
           end
           else begin

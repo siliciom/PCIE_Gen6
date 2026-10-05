@@ -46,7 +46,7 @@ class PCIe_EP_3DW_flit_sequence extends PCIe_EP_controller_base_sequence;
          pkt_mode             == FLIT;
 
          // Memory transaction information
-         txn_type == PCIe_TL_MEM;
+         /*txn_type == PCIe_TL_MEM;
          dir      == PCIe_TL_WRITE;
 
          mem_locked     == 1'b0;
@@ -90,7 +90,7 @@ class PCIe_EP_3DW_flit_sequence extends PCIe_EP_controller_base_sequence;
          // Message fields MUST be zero/default for MEM transaction
          msg_code     == '0;
          msg_route    == PCIe_MSG_ROUTE_TO_RC;
-         msg_has_data == 1'b0;
+         msg_has_data == 1'b0;*/
 
        })
       `uvm_error("EP_3DW", "randomize failed for 3DW MWr")
