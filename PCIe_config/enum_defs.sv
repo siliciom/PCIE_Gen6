@@ -192,6 +192,12 @@ package typedef_enums;
     PCIe_TL_MEM_OP_READ  = 1'b1
   } pcie_tl_mem_op_e;
 
+
+  typedef enum bit {
+    PCIe_TL_CFG_WRITE = 1'b0,
+    PCIe_TL_CFG_READ  = 1'b1
+  } pcie_tl_cfg_op_e;
+
   //--------------------------------------------------------------------------
   // pcie_cpl_status_e - Completion Status[2:0]  (Table 2-37)
   //--------------------------------------------------------------------------

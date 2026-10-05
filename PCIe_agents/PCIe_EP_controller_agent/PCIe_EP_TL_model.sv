@@ -1067,7 +1067,7 @@ class PCIe_EP_TL_model extends uvm_component;
   //       regardless of what the Requester sent, exactly like real
   //       read-only hardware register bits.
   //==========================================================================
-  function void cfg_access(input  pcie_tl_mem_op_e            op,
+  function void cfg_access(input  pcie_tl_cfg_op_e            op,
                            input  bit [`PCIe_TL_CFG_REG_W-1:0] byte_offset,
                            input  bit [3:0]                    first_dw_be,
                            input  bit [`PCIe_TL_DATA_DW_W-1:0] wdata,
@@ -1218,31 +1218,56 @@ class PCIe_EP_TL_model extends uvm_component;
               "CFG_WRITE_NO_PAYLOAD : Configuration Write TLP decoded with 0 payload DW - no write data available from the monitor path, write not applied with real data")
           end
 
-          if (d_cfg_type1)
-            cfg_access(PCIe_TL_MEM_OP_WRITE, d_cfg_reg_num, d_first_dw_be,
+	  if (d_cfg_type1) begin 
+
+            cfg_access(PCIe_TL_CFG_WRITE, d_cfg_reg_num, d_first_dw_be,
                        cfg_wdata, cfg_rdata, cfg_ur, cfg_space_t1, cfg_ro_mask_t1);
-          else
-            cfg_access(PCIe_TL_MEM_OP_WRITE, d_cfg_reg_num, d_first_dw_be,
+
+	    `uvm_info("EP_TL_CFG",
+           $sformatf("CFG_SPACE_TYPE1_WRITE_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
+                 `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+
+          end
+
+	  else begin
+            cfg_access(PCIe_TL_CFG_WRITE, d_cfg_reg_num, d_first_dw_be,
                        cfg_wdata, cfg_rdata, cfg_ur, cfg_space_t0, cfg_ro_mask_t0);
 
           `uvm_info("EP_TL_CFG",
-           $sformatf("CFG_SPACE_TYPE0_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
+           $sformatf("CFG_SPACE_TYPE0_WRITE_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
                  `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
                  `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
 
+	  end
+
           n_cfg_wr++;
+
         end
         else begin
-          if (d_cfg_type1)
-            cfg_access(PCIe_TL_MEM_OP_READ, d_cfg_reg_num, d_first_dw_be,
+
+          if (d_cfg_type1) begin 
+
+            cfg_access(PCIe_TL_CFG_READ, d_cfg_reg_num, d_first_dw_be,
                        '0, cfg_rdata, cfg_ur, cfg_space_t1, cfg_ro_mask_t1);
-          else
-            cfg_access(PCIe_TL_MEM_OP_READ, d_cfg_reg_num, d_first_dw_be,
-                       '0, cfg_rdata, cfg_ur, cfg_space_t0, cfg_ro_mask_t0);
-             `uvm_info("EP_TL_CFG",
-               $sformatf("CFG_SPACE_TYPE1_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
+
+            `uvm_info("EP_TL_CFG",
+               $sformatf("CFG_SPACE_TYPE1_READ_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
                  `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
                  `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+
+	  end
+
+	  else begin
+            cfg_access(PCIe_TL_CFG_READ, d_cfg_reg_num, d_first_dw_be,
+                       '0, cfg_rdata, cfg_ur, cfg_space_t0, cfg_ro_mask_t0);
+
+             `uvm_info("EP_TL_CFG",
+               $sformatf("CFG_SPACE_TYPE0_READ_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
+                 `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+
+          end
 
           n_cfg_rd++;
         end
