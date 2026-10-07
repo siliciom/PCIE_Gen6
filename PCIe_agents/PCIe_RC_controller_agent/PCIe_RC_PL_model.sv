@@ -55,6 +55,9 @@ class PCIe_RC_PL_model extends uvm_component;
    bit [`PCIe_BYTE_W-1:0] flit_with_crc_fec_body[$];
    bit [63:0]             flit_crc;
    bit                    rc_flit_ready_flag = 1'b0;
+   // [ADDED] Running count of 256B flits built by this RC PL model.
+   // First flit = 1, second flit = 2, and so on. Used only in the debug prints.
+   int unsigned           rc_tx_flit_num = 0;
    bit [`PCIe_PL_SCRAMBLER_LFSR_W-1:0]      lfsr;
    bit [`PCIe_PL_SCRAMBLER_LFSR_W-1:0]      polynomial;
    bit [1:0]       previous_symbol;
@@ -1002,6 +1005,8 @@ task rc_state_config_complete();
      bit [31:0] temp;
      `uvm_info("RC_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",item.dlp_flit_out),UVM_MEDIUM)
       dl_flit_out=item.dlp_flit_out;
+      // [ADDED] One more flit received from DL -> give it the next flit number.
+      rc_tx_flit_num++;
       pl_qu.delete();
       for (int i = 0; i < 242; i += 4) begin
         temp = '0;
@@ -1087,12 +1092,16 @@ task rc_state_config_complete();
 
           flit_with_crc_fec_body = {flit_crc_body, fec_bytes};
 
+          // [ADDED] FLIT_NUM in both prints below.
           `uvm_info("RC_PL_MODEL",
-                    $sformatf("RC_TX_FINAL_CRC_FEC_256B_FLIT = %0d Bytes (242 DL + 8 CRC + 6 FEC)",
+                    $sformatf("RC_TX_FINAL_CRC_FEC_256B_FLIT : FLIT_NUM = %0d : %0d Bytes (242 DL + 8 CRC + 6 FEC)",
+                              rc_tx_flit_num,
                               flit_with_crc_fec_body.size()),
                     UVM_LOW)
           `uvm_info("RC_PL_MONITOR",
-                    $sformatf("RC_TX_256_BYTE_FLIT = %p",flit_with_crc_fec_body),
+                    $sformatf("RC_TX_256_BYTE_FLIT : FLIT_NUM = %0d : %p",
+                              rc_tx_flit_num,
+                              flit_with_crc_fec_body),
                     UVM_LOW)
 
           // ADDED: formatted dump of ALL 256 bytes of the final flit
@@ -1406,10 +1415,4 @@ task rc_state_config_complete();
   endfunction : append_final_fec_256b
 
 endclass
-
-
-
-
-
-
 

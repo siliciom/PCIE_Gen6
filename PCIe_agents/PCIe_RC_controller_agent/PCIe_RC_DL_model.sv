@@ -1,3 +1,4 @@
+//=========================================================================================
 // File         : PCIe_RC_DL_model.sv
 // Project      : PCIE_Gen6
 // Description  : PCIe_agents\PCIe_RC_controller_agent\PCIe_RC_DL_model.sv
@@ -15,9 +16,7 @@
 
 import typedef_enums :: *;
 
-// [ADDED] second analysis imp for this class : RC controller monitor -> RC DL
-// (242B EP->RC flit + is_valid). Creates class uvm_analysis_imp_rc_mon_242b,
-// whose write() calls write_rc_mon_242b() in this model.
+// [ADDED] RC controller monitor -> RC DL : 242B EP->RC flit + is_valid
 `uvm_analysis_imp_decl(_rc_mon_242b)
 
 class PCIe_RC_DL_model extends uvm_component;
@@ -28,11 +27,17 @@ class PCIe_RC_DL_model extends uvm_component;
   uvm_analysis_imp #(PCIe_sequence_item,PCIe_RC_DL_model) tlp_dl_imp;
   uvm_analysis_port #(PCIe_sequence_item) dlp_pl_ap;
 
-  // [ADDED] RC controller monitor -> RC DL : 242B EP->RC flit (256B minus 8B CRC
-  // and 6B FEC) in dlp_flit_out + is_valid (1 = FEC&CRC match, 0 = no match).
-  // Connected in PCIe_RC_controller_agent.sv to rc_controller_monitor.rc_mon_dl_242b_ap.
+  // [ADDED] RC controller monitor -> RC DL : per EP->RC flit, 242B + is_valid
   uvm_analysis_imp_rc_mon_242b #(PCIe_sequence_item,PCIe_RC_DL_model) dl_mon_242b_imp;
-  int unsigned rc_mon_242b_flit_cnt = 0;   // [ADDED] number of 242B EP->RC flits received from RC monitor
+
+  // [ADDED] RC DL -> RC TL : good 236B payload TLP
+  uvm_analysis_port #(PCIe_sequence_item) rc_dl_tl_ap;
+
+  // [ADDED] RX flit collection, same structure as EP DL model
+  pkt_mode_e dl_rx_pkt_mode = FLIT;
+  bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] rc_rx_242b_flit_q[$];
+  bit                                                rc_rx_flit_is_valid_q[$];
+  int                                                rc_rx_242b_flit_cnt = 0;
 
   bit [`PCIe_DLLP_CONTENT_W-1:0] dllp_content;
   bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
@@ -125,7 +130,8 @@ function void build_phase(uvm_phase phase);
     super.build_phase(phase);
     tlp_dl_imp = new("tlp_dl_imp",this);
     dlp_pl_ap = new("dlp_pl_ap",this);
-    dl_mon_242b_imp = new("dl_mon_242b_imp",this);   // [ADDED] RC monitor -> RC DL (242B + is_valid)
+    dl_mon_242b_imp = new("dl_mon_242b_imp",this);
+    rc_dl_tl_ap = new("rc_dl_tl_ap",this);
     dl_active_event = uvm_event_pool::get_global("dl_active_event");
     uvm_rc_l0_to_dl_ev = uvm_event_pool::get_global("rc_l0_to_dl_event");
 
@@ -140,34 +146,6 @@ function void write(PCIe_sequence_item item);
   print_dlp_packet(item.tlp_data,item.dlp_flit_out);
   `uvm_info("RC_DL_MODEL","SENT_DLP_TO_PL_236B", UVM_LOW)
    dlp_pl_ap.write(item);
-endfunction
-
-// ---------------------------------------------------------------------------
-// [ADDED] RC controller monitor -> RC DL : called once per EP->RC flit, every
-// time the RC monitor does rc_mon_dl_242b_ap.write().
-//   item.dlp_flit_out = 242B flit (236B TLP region + 6B DLP)
-//   item.is_valid     = 1 when received FEC and CRC matched the calculated ones
-// The last 6 bytes (DLP) and is_valid are passed to handle_incoming_flit(),
-// which runs the RX ACK/NAK/replay rules and sets ACK_SCHEDULED / NAK_SCHEDULED.
-// run_dl_data_processing() then sends the scheduled ACK / NAK flit.
-// ---------------------------------------------------------------------------
-function void write_rc_mon_242b(PCIe_sequence_item item);
-  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] rx_dlp;
-
-  rc_mon_242b_flit_cnt++;
-
-  // keep the full 242B flit : store_flit_in_rx_retry_buffer() uses current_flit_data
-  current_flit_data = item.dlp_flit_out;
-
-  // last 6 bytes of the 242B flit = DLP
-  for(int i=0;i<`PCIe_DLP_BYTE_W;i++)
-    rx_dlp[i] = item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W+i];
-
-  `uvm_info("RC_DL_MODEL",
-            $sformatf("RC_MON -> RC_DL : RECEIVED_242B_FLIT_FROM_RC_MONITOR FLIT_%0d is_valid=%0b dlp=%p",
-                      rc_mon_242b_flit_cnt, item.is_valid, rx_dlp), UVM_LOW)
-
-  handle_incoming_flit(rx_dlp, item.is_valid);
 endfunction
 
 
@@ -842,6 +820,180 @@ endfunction
   endtask
 
 
+  // =========================================================================
+  // [ADDED] write_rc_mon_242b : RC Controller Monitor -> RC DL Model
+  // Called once per EP->RC flit. Receives the 242B flit and its is_valid status.
+  //
+  // Flow:
+  //   RC Controller Monitor
+  //          |
+  //          | 242B + is_valid
+  //          v
+  //   write_rc_mon_242b()
+  //          |
+  //          +--> collect complete 242B flit
+  //          |
+  //          +--> extract DLP (last 6B)
+  //          |       |
+  //          |       +--> handle_incoming_flit()
+  //          |
+  //          +--> extract TLP (first 236B)
+  //                  |
+  //                  +--> RC TL through rc_dl_tl_ap
+  //
+  // Same convention used by the supplied EP DL RX path:
+  //   is_valid = 1 -> GOOD flit
+  //   is_valid = 0 -> BAD flit
+  // =========================================================================
+  function void write_rc_mon_242b(PCIe_sequence_item item);
+
+    string flit_242b_str;
+
+    bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] received_dlp;
+    bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] received_tlp;
+    bit rx_flit_good;
+    bit is_payload_flit;
+
+    PCIe_sequence_item tl_item;
+
+    // ============================================================
+    // 1. Collect complete 242-byte flit
+    // ============================================================
+
+    rc_rx_242b_flit_q.push_back(item.dlp_flit_out);
+    rc_rx_flit_is_valid_q.push_back(item.is_valid);
+    rc_rx_242b_flit_cnt++;
+
+    flit_242b_str = "";
+
+    for (int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
+      flit_242b_str =
+        $sformatf("%s%0d ", flit_242b_str, item.dlp_flit_out[i]);
+
+    `uvm_info("RC_DL_MODEL",
+              $sformatf(
+                "RC_DL_COLLECTED_242B_FLIT : FLIT_%0d is_valid=%0b total_collected=%0d = %s",
+                rc_rx_242b_flit_cnt,
+                item.is_valid,
+                rc_rx_242b_flit_q.size(),
+                flit_242b_str),
+              UVM_LOW);
+
+    // ============================================================
+    // 2. Extract DLP = last 6 bytes
+    // ============================================================
+
+    for (int i = 0; i < `PCIe_DLP_BYTE_W; i++)
+      received_dlp[i] =
+        item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W + i];
+
+    // ============================================================
+    // 3. Extract TLP = first 236 bytes
+    // ============================================================
+
+    for (int i = 0; i < `PCIe_TLP_DATA_BYTE_W; i++)
+      received_tlp[i] = item.dlp_flit_out[i];
+
+    // ============================================================
+    // 4. is_valid convention
+    //
+    // Same convention as the supplied EP DL model:
+    //   is_valid = 1 -> GOOD flit
+    //   is_valid = 0 -> BAD flit
+    //
+    // handle_incoming_flit() expects:
+    //   1 -> GOOD
+    //   0 -> BAD
+    // ============================================================
+
+    rx_flit_good = item.is_valid;
+
+    `uvm_info("RC_DL_MODEL",
+              $sformatf(
+                "RX_FLIT_STATUS : monitor_is_valid=%0b -> rx_flit_good=%0b",
+                item.is_valid,
+                rx_flit_good),
+              UVM_LOW);
+
+    // ============================================================
+    // 5. Send DLP to DL processing
+    //
+    // DLP must be processed even for a BAD flit because the DL
+    // state machine needs sequence / ACK / NAK information.
+    // Use a copy because handle_incoming_flit() is a task.
+    // ============================================================
+
+    is_payload_flit = (received_dlp[0][7:6] == 2'b01);
+
+    fork
+      begin
+        automatic bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp_copy =
+          received_dlp;
+        automatic bit good_copy = rx_flit_good;
+
+        handle_incoming_flit(dlp_copy, good_copy);
+      end
+    join_none
+
+    // ============================================================
+    // 6. Send only GOOD PAYLOAD flit TLP data to RC TL
+    //
+    // First 236 bytes = TLP
+    // Last   6 bytes = DLP
+    // ============================================================
+
+    if (rx_flit_good && is_payload_flit) begin
+
+      string dump;
+      string line;
+
+      tl_item = PCIe_sequence_item::type_id::create("rc_dl_to_tl_item");
+
+      foreach (received_tlp[i])
+        tl_item.tlp_data[i] = received_tlp[i];
+
+      tl_item.pkt_mode   = dl_rx_pkt_mode;
+      tl_item.is_payload = 1'b1;
+      tl_item.drive_flit = (dl_rx_pkt_mode == FLIT);
+
+      // 236B dump of exactly what is handed to RC TL
+      dump = "\n";
+      line = "";
+
+      for (int b = 0; b < `PCIe_TLP_DATA_BYTE_W; b++) begin
+        if ((b % `PCIe_FLIT_DUMP_BPL) == 0)
+          line = $sformatf("  [%3d] :", b);
+
+        line = {line, $sformatf(" %02h", tl_item.tlp_data[b])};
+
+        if (((b % `PCIe_FLIT_DUMP_BPL) == `PCIe_FLIT_DUMP_BPL-1) ||
+            (b == `PCIe_TLP_DATA_BYTE_W-1))
+          dump = {dump, line, "\n"};
+      end
+
+      `uvm_info("RC_DL_TL",
+                $sformatf(
+                  "GOOD PAYLOAD FLIT: 236B TLP sent to TL mode=%s DW0_BYTE0=0x%02h%s",
+                  tl_item.pkt_mode.name(),
+                  tl_item.tlp_data[0],
+                  dump),
+                UVM_LOW);
+
+      rc_dl_tl_ap.write(tl_item);
+    end
+    else begin
+
+      `uvm_info("RC_DL_TL",
+                $sformatf(
+                  "TLP NOT sent to TL: good=%0b payload=%0b",
+                  rx_flit_good,
+                  is_payload_flit),
+                UVM_LOW);
+    end
+
+  endfunction
+
+
   /*********************************************************************************/
   // RX_RC
   /*********************************************************************************/
@@ -865,7 +1017,7 @@ endfunction
     is_payload = (flit_usage == 2'b01);
     is_explicit = (replay_cmd == 2'b00);
     is_idle = (sequence_number == '0) && (replay_cmd == 2'b00) && (flit_usage == 2'b00);
-    received_explicit_seq_0 = (sequence_number == '0) && (replay_cmd == 2'b00);
+    received_explicit_seq_0 = (sequence_number == 10'h0) && (replay_cmd == 2'b00);
     received_explicit_seq = (replay_cmd == 2'b00);
 
     update_implicit_rx_sequence_number(sequence_number,is_valid,is_nop,is_payload,is_explicit,is_idle,prior_was_payload);

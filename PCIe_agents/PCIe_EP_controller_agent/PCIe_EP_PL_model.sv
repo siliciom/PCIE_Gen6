@@ -2,7 +2,7 @@
 // File         : PCIe_EP_PL_model.sv
 // Project      : PCIe_Gen6
 // Description  : PCIe_environment\PCIe_EP_PL_model.sv
-// Author       : 
+// Author       :
 // Date         : 2026-08-14
 //=========================================================================================
 
@@ -20,7 +20,7 @@ class PCIe_EP_PL_model extends uvm_component;
   `uvm_component_utils(PCIe_EP_PL_model)
    // Input from RC DL model.
    uvm_analysis_imp #(PCIe_sequence_item, PCIe_EP_PL_model) pl_imp;
-   
+
    PCIe_env_config   pcie_ecfg;
    PCIe_sequence_item     pcie_seq_item;
    virtual PCIe_EP_interface     ep_pipe_intf_tx,ep_pipe_intf_rx;
@@ -30,7 +30,7 @@ class PCIe_EP_PL_model extends uvm_component;
    detect_state_e  ep_detect_state;
    polling_state_e ep_poll_state;
    config_state_e  ep_cfg_state;
-   bit ep_present;   
+   bit ep_present;
    bit[0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out;
    bit[`PCIe_BYTE_W-1:0]        pl_qu[$];
    // ---- FEC/CRC addition : 256B flit = 242B payload + 8B CRC + 6B FEC ----
@@ -43,6 +43,9 @@ class PCIe_EP_PL_model extends uvm_component;
    ep_flit_bytes_t        ep_tx_flit_q[$];      // for completions
    event                  ep_flit_ready;
    bit                    ep_flit_ready_flag = 1'b0;
+   // [ADDED] Running count of 256B flits built by this EP PL model.
+   // First flit = 1, second flit = 2, and so on. Used only in the debug prints.
+   int unsigned           ep_tx_flit_num = 0;
    bit [`PCIe_PL_SCRAMBLER_LFSR_W-1:0]      lfsr;
    bit [`PCIe_PL_SCRAMBLER_LFSR_W-1:0]      polynomial;
    bit [1:0]       previous_symbol;
@@ -87,10 +90,10 @@ bit            tx_process_executed;
        //if(pcie_ecfg.mode == FLIT)
       `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
     endfunction
-   
+
    task reset_phase(uvm_phase phase);
      phase.raise_objection(this);
-   
+
      `uvm_info("PCIE_EP_PL_MODEL",
                "Entering RESET phase", UVM_LOW)
         polynomial = `PCIe_PL_SCRAMBLER_POLYNOMIAL;
@@ -102,7 +105,7 @@ bit            tx_process_executed;
 
         `uvm_info("PCIE_EP_PL_MODEL","Reset deasserted", UVM_LOW)
         phase.drop_objection(this);
-   
+
    endtask
 task ep_ltssm( PCIe_sequence_item pcie_seq_item);
        if(pcie_seq_item.pkt_mode == FLIT)
@@ -183,7 +186,7 @@ task ep_ltssm( PCIe_sequence_item pcie_seq_item);
               end
              L0: begin
                 `uvm_info("EP_LTSSM","EP_LTSSM_STATE_L0",UVM_LOW)
-		         
+
 		         ep_state_l0(pcie_seq_item);
 		         break;
                   end
@@ -607,7 +610,7 @@ task ep_state_config_complete();
           end
        end
     endtask
-    
+
     task ep_check_rc_ts2(input int count,output bit rx_done);
        bit [1:0] rx_symbol;
        int ts2_count;
@@ -664,7 +667,7 @@ task ep_state_config_complete();
        int dword;
        int byte_idx;
        int symbol_idx;
-   
+
        for (os_count = 0; os_count < count; os_count++) begin
            `uvm_info("EP_LTSSM",$sformatf("EP_TX %s OS_COUNT=%0d/%0d START",os_name, os_count+1, count),UVM_LOW)
            for (dword = 0;dword < (`PCIe_TS_OS_SIZE / 4);dword++) begin
@@ -700,7 +703,7 @@ task ep_state_config_complete();
        ep_pipe_intf_tx.tx_valid <= 1'b0;
        `uvm_info("EP_LTSSM",$sformatf("EP_TX %s TRANSMISSION_COMPLETED ORDERED_SETS=%0d",os_name,count),UVM_LOW)
     endtask
-   
+
     /*task print_ts1();
         `uvm_info("EP_TS1","========== EP TS1 ORDERED SET ==========",UVM_LOW)
         for (int i = 0; i < 16; i++) begin
@@ -726,7 +729,7 @@ task ep_state_config_complete();
         ep_ts1_os[13] = 8'h4A;
         ep_ts1_os[14] = 8'h4A;
         ep_ts1_os[15] = 8'h4A;
-        
+
         for (int i = 0; i < 16; i++) begin
             `uvm_info("EP_TS1",$sformatf("TS1[%0d] = 0x%02h",i, ep_ts1_os[i]),UVM_LOW)
         end
@@ -749,7 +752,7 @@ task ep_state_config_complete();
          ep_ts2_os[13] = 8'h00;
          ep_ts2_os[14] = 8'h00;
          ep_ts2_os[15] = 8'h00;
-        
+
          for (int i = 0; i < 16; i++) begin
             `uvm_info("EP_LTSSM",$sformatf("TS2[%0d] = %02h",i,ep_ts2_os[i]),UVM_LOW)
          end
@@ -847,7 +850,7 @@ task ep_state_config_complete();
      `uvm_info("PCIe_PL_MODEL",$sformatf("PARITY_INPUT = %08h PARITY = %0b", data_in, parity_bit),UVM_LOW)
      `uvm_info("PCIe_PL_MODEL",$sformatf("PARITY_GENERATE_OUTPUT =%b",parity_bit),UVM_LOW)
     endtask
-  
+
     task tx_precoder(input bit [31:0] gray_data, output bit [31:0] precoded_data);
       bit [1:0]  current_symbol;
       precoded_data = 32'b0;
@@ -912,6 +915,8 @@ function void write(PCIe_sequence_item item);
       `uvm_info("EP_PL_MODEL",$sformatf("PL -> INTERFACE received 242-byte packet, payload=%p",item.dlp_flit_out),UVM_MEDIUM)
        dl_flit_out=item.dlp_flit_out;
        is_payload_flit = (dl_flit_out[236][7:6] == 2'b01);
+       // [ADDED] One more flit received from DL -> give it the next flit number.
+       ep_tx_flit_num++;
       pl_qu.delete();
       for (int i = 0; i < 242; i += 4) begin
         temp = '0;
@@ -997,12 +1002,16 @@ function void write(PCIe_sequence_item item);
 
           ep_flit_with_crc_fec_body = {ep_flit_crc_body, ep_fec_bytes};
 
+          // [ADDED] FLIT_NUM in both prints below.
           `uvm_info("EP_PL_MODEL",
-                    $sformatf("EP_TX_FINAL_CRC_FEC_256B_FLIT = %0d Bytes (242 DL + 8 CRC + 6 FEC)",
+                    $sformatf("EP_TX_FINAL_CRC_FEC_256B_FLIT : FLIT_NUM = %0d : %0d Bytes (242 DL + 8 CRC + 6 FEC)",
+                              ep_tx_flit_num,
                               ep_flit_with_crc_fec_body.size()),
                     UVM_LOW)
           `uvm_info("EP_PL_MONITOR",
-                    $sformatf("EP_TX_256_BYTE_FLIT = %p",ep_flit_with_crc_fec_body),
+                    $sformatf("EP_TX_256_BYTE_FLIT : FLIT_NUM = %0d : %p",
+                              ep_tx_flit_num,
+                              ep_flit_with_crc_fec_body),
                     UVM_LOW)
 
           // ADDED: formatted dump of ALL 256 bytes of the final flit
@@ -1053,7 +1062,7 @@ function void write(PCIe_sequence_item item);
        pl_sent=1;
     endfunction
 
-   
+
 //----------------------------------------------------------------------------
    // Gen6 Flit-Mode CRC/FEC : declarations, tables, and functions
    // (mirrors PCIe_RC_PL_model's TX-side generator)
@@ -1399,7 +1408,4 @@ function void write(PCIe_sequence_item item);
    endfunction : check_final_fec_256b
 
 endclass
-
-
-
 
