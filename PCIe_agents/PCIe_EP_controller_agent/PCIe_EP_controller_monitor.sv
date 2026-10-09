@@ -82,6 +82,9 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
     int             tx_os_dword_count;
     bit             rx_in_os;
     int             rx_os_dword_count;
+    // Track total received DWORDs for logging (separate from queue size)
+    int             tx_total_rcvd_dwords;
+    int             rx_total_rcvd_dwords;
    function new(string name="PCIe_EP_controller_monitor", uvm_component parent);
       super.new(name,parent);
     ep_ap_mon_dl=new("ep_ap_mon_dl",this);
@@ -109,10 +112,12 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
          tx_previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
          tx_polynomial = `PCIe_PL_SCRAMBLER_POLYNOMIAL;
          tx_lfsr = `PCIe_PL_SCRAMBLER_SEED;
-         tx_in_os         = 1'b1;
-         tx_os_dword_count = 0;
-         rx_in_os         = 1'b1;
-         rx_os_dword_count = 0;
+          tx_in_os         = 1'b1;
+          tx_os_dword_count = 0;
+          rx_in_os         = 1'b1;
+          rx_os_dword_count = 0;
+          tx_total_rcvd_dwords = 0;
+          rx_total_rcvd_dwords = 0;
        `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_BUILD_PHASE",UVM_LOW)
     endfunction
 
@@ -202,10 +207,11 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                "[RX_DBG] FINAL DWORD=%0d DATA=%08h LFSR=%06h IN_OS=%0b",
                rx_os_dword_count, descrambled_data, rx_lfsr, rx_in_os), UVM_LOW)
 
-            pcie_seq_item.data_q_ep_mon_con_rx.push_back(descrambled_data);
-            `uvm_info("EP_CON_MONITOR", $sformatf(
-               "RECEIVED_RX_DATA_IN_EP_CONTROLLER_MONITOR=%08h EP_CONTROLLER_MON_Queue_Size=%0d",
-               descrambled_data, pcie_seq_item.data_q_ep_mon_con_rx.size()), UVM_LOW)
+             pcie_seq_item.data_q_ep_mon_con_rx.push_back(descrambled_data);
+             rx_total_rcvd_dwords++;
+             `uvm_info("EP_CON_MONITOR", $sformatf(
+                "RECEIVED_RX_DATA_IN_EP_CONTROLLER_MONITOR=%08h EP_CONTROLLER_MON_Queue_Size=%0d",
+                descrambled_data, rx_total_rcvd_dwords), UVM_LOW)
             `ifdef PCIE_GEN6_FEC_CRC
             // ===== SINGLE FEC/CRC CHECK (RC->EP flit only) =====
             // FEC/CRC addition : 256B flit received from RC PHY -> EP controller
@@ -322,10 +328,11 @@ if (pcie_seq_item.tx_valid) begin
                "[TX_DBG] FINAL DWORD=%0d DATA=%08h LFSR=%06h IN_OS=%0b",
                tx_os_dword_count, descrambled_data, tx_lfsr, tx_in_os), UVM_LOW)
 
-            pcie_seq_item.data_q_ep_mon_con_tx.push_back(descrambled_data);
-            `uvm_info("EP_CONTROLLER", $sformatf(
-               "RECEIVED_TX_DATA_IN_EP_CONTROLLER_MONITOR=%08h EP_CONTROLLER_MON_Queue_Size=%0d",
-               descrambled_data, pcie_seq_item.data_q_ep_mon_con_tx.size()), UVM_LOW)
+             pcie_seq_item.data_q_ep_mon_con_tx.push_back(descrambled_data);
+             tx_total_rcvd_dwords++;
+             `uvm_info("EP_CONTROLLER", $sformatf(
+                "RECEIVED_TX_DATA_IN_EP_CONTROLLER_MONITOR=%08h EP_CONTROLLER_MON_Queue_Size=%0d",
+                descrambled_data, tx_total_rcvd_dwords), UVM_LOW)
             ep_con_tx_mon_ap.write(pcie_seq_item);
 
             tx_os_dword_count++;
