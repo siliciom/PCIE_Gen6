@@ -87,6 +87,9 @@ task run_phase(uvm_phase phase);
             tl_link_active = rc_dl_model.dl_link_active;
             if (rc_dl_model.dl_link_active) begin
               `uvm_info("RC_DLCMSM",$sformatf("DL_ACTIVE=1 :: SENDING_TLP_PACKET tl_link_active=%0d",tl_link_active),UVM_LOW)
+              // FLOW CONTROL : transmitter gate (Eq 2-11). Blocks until the peer's
+              // CREDIT_LIMIT covers this TLP (InitFC1 / UpdateFC received by the DL).
+              rc_tl_model.wait_for_fc_credits(pcie_seq_item);
               tx_tl_ap.write(pcie_seq_item);
               drive_flit(pcie_seq_item);
             end
@@ -94,6 +97,8 @@ task run_phase(uvm_phase phase);
               `uvm_error("RC_DLCMSM","DL_ACTIVE_NOT_REACHED :: TLP_PACKET_NOT_SENT")
             end
           end
+          // FLOW CONTROL : from here on DL-initiated DLLP flits (UpdateFC) may use the PL model
+          if (rc_dl_model.dl_link_active) rc_dl_model.fc_tx_allowed = 1'b1;
           seq_item_port.item_done();
       end
         else begin
@@ -103,7 +108,16 @@ task run_phase(uvm_phase phase);
 end
      end
       else begin
-        #1ns;
+        // FLOW CONTROL : link is up. DLLP-only flits created by the DL model after
+        // DL_ACTIVE (UpdateFC) are put on the PIPE here and released afterwards.
+        if (rc_dl_model.dl_link_active && rc_dl_model.dllp_tx_pending && rc_pl_model.pl_sent) begin
+          `uvm_info("RC_FC_DRV","DRIVING_DL_INITIATED_DLLP_FLIT (UpdateFC)",UVM_LOW)
+          drive_flit(pcie_seq_item);
+          rc_dl_model.dllp_tx_pending = 1'b0;
+        end
+        else begin
+          #1ns;
+        end
       end
      end
    endtask

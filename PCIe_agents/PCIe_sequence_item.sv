@@ -719,5 +719,174 @@ class PCIe_sequence_item extends uvm_sequence_item;
       get_fmttype().name(), address, length, tag, requester_id, data.size());
   endfunction
 
+
+  //==========================================================================
+  // FLOW CONTROL (PCIe Base 6.0 Sec 2.6 / 3.4)  -  VC0, dedicated credits
+  //   The same sequence item is used for the TL <-> DL credit exchange.
+  //   hdr / dat index : 0 = P (PH, PD), 1 = NP (NPH, NPD), 2 = CPL (CPLH, CPLD)
+  //   Credit units    : header = 1 per TLP, data = 4 DW (16 B), n = ceil(DW/4)
+  //   All the static helpers below are shared by the TL and DL models.
+  //==========================================================================
+  pcie_fc_kind_e fc_kind;
+  string         fc_origin;              // "RC_TL", "EP_DL", ...
+  string         fc_reason;              // MANDATORY / WATERMARK / PERIODIC ...
+  bit [2:0]      fc_cls_mask = 3'b000;   // classes this transaction applies to
+  int unsigned   fc_hdr [3];             // PH   NPH   CPLH
+  int unsigned   fc_dat [3];             // PD   NPD   CPLD
+  bit            fc_hdr_inf [3];
+  bit            fc_dat_inf [3];
+
+  function void set_fc_cls(int unsigned c, int unsigned h, int unsigned d);
+    fc_hdr[c] = h;
+    fc_dat[c] = d;
+    fc_cls_mask[c] = 1'b1;
+  endfunction
+
+  // Same print format on the TL and the DL side so the values can be compared by eye
+  function string fc_values_str();
+    return $sformatf("PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d",
+                     fc_hdr[0], fc_dat[0], fc_hdr[1], fc_dat[1], fc_hdr[2], fc_dat[2]);
+  endfunction
+
+  function string fc_convert2string();
+    return $sformatf("%s from %s mask=%03b reason=%s :: %s",
+                     fc_kind.name(), fc_origin, fc_cls_mask, fc_reason, fc_values_str());
+  endfunction
+
+  // (a - b) mod 2^bits
+  static function int unsigned fc_mod_sub(int unsigned a, int unsigned b, int unsigned bits);
+    int unsigned d;
+    d = a - b;
+    return d & ((32'd1 << bits) - 32'd1);
+  endfunction
+
+  // (a + b) mod 2^bits
+  static function int unsigned fc_mod_add(int unsigned a, int unsigned b, int unsigned bits);
+    int unsigned s;
+    s = a + b;
+    return s & ((32'd1 << bits) - 32'd1);
+  endfunction
+
+  // Data credits needed for a payload of 'dw' double words : ceil(dw / 4)
+  static function int unsigned fc_data_units(int unsigned dw);
+    return (dw + 3) / 4;
+  endfunction
+
+  static function string fc_cls_name(int unsigned c);
+    case (c)
+      PCIE_FC_P   : return "P";
+      PCIE_FC_NP  : return "NP";
+      PCIE_FC_CPL : return "CPL";
+      default     : return "?";
+    endcase
+  endfunction
+
+  static function string fc_hdr_name(int unsigned c);
+    case (c)
+      PCIE_FC_P   : return "PH";
+      PCIE_FC_NP  : return "NPH";
+      PCIE_FC_CPL : return "CPLH";
+      default     : return "?H";
+    endcase
+  endfunction
+
+  static function string fc_dat_name(int unsigned c);
+    case (c)
+      PCIE_FC_P   : return "PD";
+      PCIE_FC_NP  : return "NPD";
+      PCIE_FC_CPL : return "CPLD";
+      default     : return "?D";
+    endcase
+  endfunction
+
+  // Value that goes on the wire for a buffer of 'max' credits.
+  // Spec 2.6.1: maximum outstanding credits is 2^(FS-1)-1 (127 hdr / 2047 data).
+  static function int unsigned fc_wire_credits(int unsigned max, bit clamp);
+    if (clamp && max > 0) return max - 1;
+    return max;
+  endfunction
+
+  // TLP -> (credit class, header credits, data credits)
+  //   P  : memory write, message        NP : memory read, DMWr, IO, CFG     CPL : completion
+  static function void fc_classify(pcie_tl_txn_type_e t, pcie_tl_dir_e d, bit deferrable,
+                                   int payload_dw,
+                                   output int unsigned c, output int unsigned h,
+                                   output int unsigned dd);
+    h  = 1;
+    dd = fc_data_units((payload_dw < 0) ? 0 : payload_dw);
+    case (t)
+      PCIe_TL_MEM : c = (d == PCIe_TL_WRITE && !deferrable) ? PCIE_FC_P : PCIE_FC_NP;
+      PCIe_TL_IO  : c = PCIE_FC_NP;
+      PCIe_TL_CFG : c = PCIE_FC_NP;
+      PCIe_TL_MSG : c = PCIE_FC_P;
+      PCIe_TL_CPL : c = PCIE_FC_CPL;
+      default     : c = PCIE_FC_P;
+    endcase
+  endfunction
+
+  // 32-bit FC DLLP (carried in DLP2..DLP5 of a Flit)
+  //   [31:30] type  01 InitFC1 / 11 InitFC2 / 10 UpdateFC
+  //   [29:28] class 00 P / 01 NP / 10 Cpl     [27] 1 = dedicated, 0 = shared (spec Fig 3-9)   [26:24] VC
+  //   [23:22] HdrScale  [21:16]+[15:14] HdrFC (8 bit)
+  //   [13:12] DataScale [11:0] DataFC (12 bit)
+  //   Scale 00b + credit 0 => infinite ; scale 01b => finite (x1)
+  static function bit [31:0] fc_encode(bit [1:0] typ, bit [1:0] cls, bit shared, bit [2:0] vc,
+                                       bit [1:0] hscale, bit [7:0] hfc,
+                                       bit [1:0] dscale, bit [11:0] dfc);
+    bit [31:0] v;
+    v[31:30] = typ;
+    v[29:28] = cls;
+    v[27]    = ~shared;   // spec Fig 3-9 : bit3 = 1 dedicated, 0 shared
+    v[26:24] = vc;
+    v[23:22] = hscale;
+    v[21:16] = hfc[7:2];
+    v[15:14] = hfc[1:0];
+    v[13:12] = dscale;
+    v[11:0]  = dfc;
+    return v;
+  endfunction
+
+  // 1 when the 32-bit DLLP payload is an InitFC1 / InitFC2 / UpdateFC DLLP
+  // (type 00 = NOP2 / Feature DLLP is not an FC DLLP)
+  static function bit fc_is_dllp(bit [31:0] v);
+    return (v[31:30] != 2'b00) && (v[29:28] != 2'b11);
+  endfunction
+
+  static function void fc_decode(bit [31:0] v,
+                                 output bit [1:0] typ, output bit [1:0] cls, output bit shared,
+                                 output bit [2:0] vc, output bit [1:0] hscale, output bit [7:0] hfc,
+                                 output bit [1:0] dscale, output bit [11:0] dfc);
+    typ    = v[31:30];
+    cls    = v[29:28];
+    shared = ~v[27];     // spec Fig 3-9 : bit3 = 1 dedicated, 0 shared
+    vc     = v[26:24];
+    hscale = v[23:22];
+    hfc    = {v[21:16], v[15:14]};
+    dscale = v[13:12];
+    dfc    = v[11:0];
+  endfunction
+
+  static function string fc_type_name(bit [1:0] typ);
+    case (typ)
+      `PCIe_FC_TYPE_INITFC1 : return "InitFC1";
+      `PCIe_FC_TYPE_INITFC2 : return "InitFC2";
+      `PCIe_FC_TYPE_UPDATEFC: return "UpdateFC";
+      default               : return "NOT_FC";
+    endcase
+  endfunction
+
+  static function string fc_dllp_str(bit [31:0] v);
+    bit [1:0] typ, cls, hs, ds;
+    bit shared;
+    bit [2:0] vc;
+    bit [7:0] hfc;
+    bit [11:0] dfc;
+    fc_decode(v, typ, cls, shared, vc, hs, hfc, ds, dfc);
+    return $sformatf("DLLP=%08h  %s-%s %s VC%0d HdrScale=%0b HdrFC=%0d%s DataScale=%0b DataFC=%0d%s",
+                     v, fc_type_name(typ), fc_cls_name(cls), shared ? "SHARED" : "DEDICATED", vc,
+                     hs, hfc, (hs == 2'b00 && hfc == 0) ? "(INF)" : "",
+                     ds, dfc, (ds == 2'b00 && dfc == 0) ? "(INF)" : "");
+  endfunction
+
 endclass
 

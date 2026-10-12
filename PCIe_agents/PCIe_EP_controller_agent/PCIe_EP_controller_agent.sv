@@ -54,6 +54,9 @@ class PCIe_EP_controller_agent extends uvm_agent;
        // model generates for Non-Posted Requests.
        ep_tl_model.tl_ap.connect(ep_dl_model.dl_imp);
        ep_dl_model.dl_ap.connect(ep_pl_model.pl_imp);
+       // FLOW CONTROL : TL <-> DL credit exchange
+       ep_tl_model.fc_dl_ap.connect(ep_dl_model.fc_tl_imp);
+       ep_dl_model.fc_tl_ap.connect(ep_tl_model.fc_dl_imp);
        // [ADDED] EP controller monitor -> EP DL : 242B RC->EP flit + is_valid, once per flit
        ep_controller_monitor.ep_mon_dl_242b_ap.connect(ep_dl_model.dl_mon_242b_imp);
       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)

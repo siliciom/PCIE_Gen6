@@ -59,6 +59,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
     // Track total received DWORDs for logging (separate from queue size)
     int             tx_total_rcvd_dwords;
     int             rx_total_rcvd_dwords;
+    bit [`PCIe_MON_DATA_W-1:0] rc_flit_win[$]; // private sliding window (last 64 dwords) for DL flit extraction
 
     virtual PCIe_RC_interface     rc_pipe_intf_tx, rc_pipe_intf_rx;
     uvm_analysis_port #(PCIe_sequence_item) rc_con_tx_mon_ap;
@@ -281,7 +282,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
          pcie_seq_item.rx_status    = rc_pipe_intf_rx.rx_status;
          pcie_seq_item.phy_status   = rc_pipe_intf_rx.phy_status;
 
-         if (rx_os_dword_count > 1500) break;
+         if (rx_os_dword_count > 30000) break;
          if (!pcie_seq_item.rx_valid) continue;
 
          if (pcie_seq_item.rx_valid) begin
@@ -337,6 +338,12 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
              `uvm_info("RC_CON_MONITOR", $sformatf(
                 "RECEIVED_RX_DATA_IN_RC_CONTROLLER_MONITOR=%08h RC_CONTROLLER_MON_Queue_Size=%0d",
                 descrambled_data, rx_total_rcvd_dwords), UVM_LOW)
+            //pcie_seq_item.data_q_rc_mon_con_rx.push_back(descrambled_data);
+            //rc_flit_win.push_back(descrambled_data);
+           // if (rc_flit_win.size() > 64) void'(rc_flit_win.pop_front());
+            //`uvm_info("RC_CON_MONITOR", $sformatf(
+            //   "RECEIVED_RX_DATA_IN_RC_CONTROLLER_MONITOR=%08h RC_CONTROLLER_MON_Queue_Size=%0d",
+            //   descrambled_data, pcie_seq_item.data_q_rc_mon_con_rx.size()), UVM_LOW)
              `ifdef PCIE_GEN6_FEC_CRC
              // ===== SINGLE FEC/CRC CHECK (EP->RC flit only) =====
              // FEC/CRC addition : 256B flit received from EP PHY -> RC controller
@@ -364,14 +371,22 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             end
          end
 	    // Packet collected sent by EP here (Expected packet)
-    if(rc_pl_model.link_up==1 && pcie_seq_item.data_q_rc_mon_con_rx.size() > 292) begin
+    // Every complete 64-dword (256B) flit after the 232 training dwords
+    if(rx_os_dword_count >= 296 && (((rx_os_dword_count - 232) % 64) == 0)) begin
     collect_dlp_RC_rx(dlp_rc_rx,pcie_seq_item);
-    rc_dl_model.handle_incoming_flit(dlp_rc_rx,is_valid);
+    if(rc_pl_model.link_up==1) begin
+    // rc_dl_model.handle_incoming_flit(dlp_rc_rx,is_valid);
       pcie_seq_item.dlp=dlp_rc_rx;
       `uvm_info("RC_CONTROLLER",$sformatf("dlp_rc_rx=%p",pcie_seq_item.dlp),UVM_LOW)
 
       rc_ep_mon_ap_dl.write(pcie_seq_item);
       end
+      end
+    // Original scoreboard-queue behaviour (must stay identical to the EP monitor)
+    if(rc_pl_model.link_up==1 && pcie_seq_item.data_q_rc_mon_con_rx.size() > 292) begin
+       do void'(pcie_seq_item.data_q_rc_mon_con_rx.pop_front());
+       while(pcie_seq_item.data_q_rc_mon_con_rx.size() > 61);
+    end
       end
       
       `uvm_info("RC_CONTROLLER", "EXIT_FROM_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
@@ -511,22 +526,19 @@ endtask
    // collect the flit 242 bytes from the pipe interface
    task collect_dlp_RC_rx(output bit[0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp_rc_rx,ref PCIe_sequence_item item);
    bit [31:0] word;
-      // remove first 232 elements in queue.
-   do begin
-	   item.data_q_rc_mon_con_rx.pop_front();
-   end
-   while(item.data_q_rc_mon_con_rx.size() > 61 );
-   
+   int base;
+      // current flit = last 64 dwords of the queue
+      base = 0;
      // Form tlp to send to scoreboard
       for(int i=0;i<`PCIe_TLP_DATA_BYTE_W;i++) begin
-         word = item.data_q_rc_mon_con_rx[i/4];
+         word = rc_flit_win[base + i/4];
          tlp_rc_rx[i]=word[8*(i%4) +: 8];
       end
 
       // Last 6 bytes = DLP
       for(int i=0;i<`PCIe_DLP_BYTE_W;i++) begin
       int idx = `PCIe_TLP_DATA_BYTE_W + i;
-      word = item.data_q_rc_mon_con_rx[idx/4];
+      word = rc_flit_win[base + idx/4];
       dlp_rc_rx[i] = word[8*(idx%4) +: 8];
    end
 

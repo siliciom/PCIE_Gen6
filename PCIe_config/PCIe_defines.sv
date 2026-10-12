@@ -633,3 +633,42 @@
 // PCIe_DEFINES_SVH
 
 
+
+//==============================================================================
+// FLOW CONTROL  (PCIe Base 6.0, Sec 2.6 / 3.4)                    [FC ADDED]
+// Dedicated credits only, VC0 only (default TC0 -> VC0 mapping).
+//   Header credit unit = 1 per TLP header, Data credit unit = 4 DW (16 B)
+//==============================================================================
+`define PCIe_FC_MAX_DATA_CREDITS     2048   // advertised data credits per type
+`define PCIe_FC_MAX_HDR_CREDITS      128    // advertised header credits per type
+// Spec 2.6.1: max outstanding is 2^(FS-1)-1 (127 hdr / 2047 data). 128/2048
+// would break the (LIMIT-REQUIRED) mod 2^FS <= 2^FS/2 gate, so the value put
+// on the wire is clamped by 1 while the buffers keep 128/2048.
+// Set to 0 to put 128/2048 on the wire un-clamped.
+`define PCIe_FC_CLAMP_TO_SPEC_MAX    1
+`define PCIe_FC_HDR_FIELD_BITS       8      // FS for header credits (scale 01b)
+`define PCIe_FC_DATA_FIELD_BITS      12     // FS for data credits   (scale 01b)
+`define PCIe_FC_VC0                  0
+// DLLP type encodings (bits [31:30] of the 32-bit DLLP payload)
+`define PCIe_FC_TYPE_INITFC1         2'b01
+`define PCIe_FC_TYPE_INITFC2         2'b11
+`define PCIe_FC_TYPE_UPDATEFC        2'b10
+// Credit class encodings (bits [29:28])
+`define PCIe_FC_CLASS_P              2'b00
+`define PCIe_FC_CLASS_NP             2'b01
+`define PCIe_FC_CLASS_CPL            2'b10
+// HdrScale/DataScale encodings
+`define PCIe_FC_SCALE_INF            2'b00  // with credit value 0 => infinite
+`define PCIe_FC_SCALE_1X             2'b01
+// Number of InitFC rounds sent before the DLCMSM gives up (watchdog)
+`define PCIe_FC_INIT_MAX_ROUNDS 20
+`define PCIe_FC_INIT_ROUND_GAP_NS    200    // pause between InitFC rounds while waiting for the peer
+// UpdateFC policy
+`define PCIe_FC_UPDATE_PERIOD_NS     10000  // periodic refresh (debug 10us, Flit Mode)
+`define PCIe_FC_HDR_WATERMARK        32     // send UpdateFC when >= this many hdr credits freed
+`define PCIe_FC_DATA_WATERMARK       256    // send UpdateFC when >= this many data credits freed
+// Rx_MPS_Limit expressed in data credits (256 B MPS => 16 credits)
+`define PCIe_FC_MPS_CREDITS          16
+// EP completion gating on RC's CplH/CplD credits (0 = off by default)
+`define PCIe_FC_GATE_EP_COMPLETIONS  0
+

@@ -16,6 +16,12 @@
 
 import typedef_enums :: *;
 
+// FLOW CONTROL : DL -> TL credit limits (suffix may be declared only once per package)
+`uvm_analysis_imp_decl(_fc_from_dl)
+
+// [ADDED] RC DL -> RC TL : received TLP (completion) path
+`uvm_analysis_imp_decl(_dl_rx)
+
 class PCIe_RC_TL_model extends uvm_component;
 
   `uvm_component_utils(PCIe_RC_TL_model)
@@ -29,6 +35,12 @@ class PCIe_RC_TL_model extends uvm_component;
   uvm_analysis_port #(PCIe_sequence_item) tlp_dl_ap;
 
   uvm_analysis_port #(PCIe_sequence_item) tl_ap;
+
+  // [ADDED] Input from RC DL model : 236B TLP region of every good payload flit
+  // (connected in PCIe_RC_controller_agent : rc_dl_model.rc_dl_tl_ap -> rc_tl_model.dl_tl_imp)
+  uvm_analysis_imp_dl_rx #(PCIe_sequence_item, PCIe_RC_TL_model) dl_tl_imp;
+  int unsigned n_tlp_rcvd;   // TLPs received from the DL model
+  int unsigned n_cpl_rcvd;   // of which Cpl / CplD
 
 
   PCIe_sequence_item item;
@@ -45,6 +57,337 @@ class PCIe_RC_TL_model extends uvm_component;
   protected PCIe_sequence_item outstanding [bit [`PCIe_TL_TAG_W-1:0]];
 
   //--------------------------------------------------------------------------
+
+  //==========================================================================
+  // FLOW CONTROL (PCIe Base 6.0 Sec 2.6)  -  VC0 only (TC0 -> VC0), dedicated credits
+  //   RECEIVER side : the six TL buffers PH PD NPH NPD CPLH CPLD
+  //       CREDITS_ALLOCATED / CREDITS_RECEIVED, overflow check (Eq 2-14)
+  //   TRANSMITTER side : CREDIT_LIMIT / CREDITS_CONSUMED / CREDITS_REQUIRED,
+  //       gate (Eq 2-11)  (CREDIT_LIMIT - CREDITS_REQUIRED) mod 2^FS <= 2^FS/2
+  //   fc_dl_ap  : TL -> DL  initial credits / UpdateFC requests / status
+  //   fc_dl_imp : DL -> TL  credit limits learnt from the peer InitFC1 / UpdateFC
+  //   index 0 = P, 1 = NP, 2 = CPL
+  //==========================================================================
+  uvm_analysis_port #(PCIe_sequence_item) fc_dl_ap;
+  uvm_analysis_imp_fc_from_dl #(PCIe_sequence_item, PCIe_RC_TL_model) fc_dl_imp;
+
+  localparam int unsigned FC_FSH = `PCIe_FC_HDR_FIELD_BITS;    // field size, header credits
+  localparam int unsigned FC_FSD = `PCIe_FC_DATA_FIELD_BITS;   // field size, data credits
+
+  // ---- receiver buffers
+  int unsigned fc_rx_max_h   [3];   // buffer size in credits (`PCIe_FC_MAX_HDR_CREDITS)
+  int unsigned fc_rx_max_d   [3];   // buffer size in credits (`PCIe_FC_MAX_DATA_CREDITS)
+  int unsigned fc_rx_occ_h   [3];   // credits held by TLPs sitting in the buffer
+  int unsigned fc_rx_occ_d   [3];
+  int unsigned fc_rx_alloc_h [3];   // CREDITS_ALLOCATED (cumulative, mod 2^FS)
+  int unsigned fc_rx_alloc_d [3];
+  int unsigned fc_rx_recv_h  [3];   // CREDITS_RECEIVED  (cumulative, mod 2^FS)
+  int unsigned fc_rx_recv_d  [3];
+  int unsigned fc_rx_adv_h   [3];   // CREDITS_ALLOCATED carried by the last InitFC/UpdateFC
+  int unsigned fc_rx_adv_d   [3];
+  int unsigned fc_rx_overflow_cnt;
+  string       fc_rx_reason;
+
+  // ---- transmitter terms
+  int unsigned fc_tx_limit_h [3];   // CREDIT_LIMIT
+  int unsigned fc_tx_limit_d [3];
+  int unsigned fc_tx_cons_h  [3];   // CREDITS_CONSUMED
+  int unsigned fc_tx_cons_d  [3];
+  bit          fc_tx_inf_h   [3];
+  bit          fc_tx_inf_d   [3];
+  bit          fc_tx_limit_valid [3];   // InitFC1 received for the class
+
+  // ---- statistics
+  int unsigned fc_n_rx_tlp [3];
+  int unsigned fc_n_tx_tlp [3];
+  int unsigned fc_n_upd_published;
+  int unsigned fc_n_peer_upd;
+  int unsigned fc_n_periodic;
+  int unsigned fc_n_blocked;
+
+  function void fc_init();
+    for (int c = 0; c < 3; c++) begin
+      fc_rx_max_h[c]   = `PCIe_FC_MAX_HDR_CREDITS;
+      fc_rx_max_d[c]   = `PCIe_FC_MAX_DATA_CREDITS;
+      fc_rx_occ_h[c]   = 0;  fc_rx_occ_d[c] = 0;
+      // 128 / 2048 are clamped to 127 / 2047 on the wire (see PCIe_FC_CLAMP_TO_SPEC_MAX)
+      fc_rx_alloc_h[c] = PCIe_sequence_item::fc_wire_credits(fc_rx_max_h[c], `PCIe_FC_CLAMP_TO_SPEC_MAX);
+      fc_rx_alloc_d[c] = PCIe_sequence_item::fc_wire_credits(fc_rx_max_d[c], `PCIe_FC_CLAMP_TO_SPEC_MAX);
+      fc_rx_recv_h[c]  = 0;  fc_rx_recv_d[c] = 0;
+      fc_rx_adv_h[c]   = fc_rx_alloc_h[c];
+      fc_rx_adv_d[c]   = fc_rx_alloc_d[c];
+      fc_tx_limit_h[c] = 0;  fc_tx_limit_d[c] = 0;
+      fc_tx_cons_h[c]  = 0;  fc_tx_cons_d[c]  = 0;
+      fc_tx_inf_h[c]   = 0;  fc_tx_inf_d[c]   = 0;
+      fc_tx_limit_valid[c] = 0;
+      fc_n_rx_tlp[c]   = 0;  fc_n_tx_tlp[c]   = 0;
+    end
+    fc_rx_overflow_cnt = 0;
+    fc_n_upd_published = 0; fc_n_peer_upd = 0; fc_n_periodic = 0; fc_n_blocked = 0;
+  endfunction
+
+  function void fc_log(string msg);
+    `uvm_info("RC_TL_FC", msg, UVM_LOW)
+  endfunction
+
+  function string fc_rx_status(int unsigned c);
+    return $sformatf("%s: %s(MAX=%0d FREE=%0d ALLOCATED=%0d RECEIVED=%0d ADV=%0d) %s(MAX=%0d FREE=%0d ALLOCATED=%0d RECEIVED=%0d ADV=%0d)",
+        PCIe_sequence_item::fc_cls_name(c),
+        PCIe_sequence_item::fc_hdr_name(c), fc_rx_max_h[c], fc_rx_max_h[c] - fc_rx_occ_h[c], fc_rx_alloc_h[c], fc_rx_recv_h[c], fc_rx_adv_h[c],
+        PCIe_sequence_item::fc_dat_name(c), fc_rx_max_d[c], fc_rx_max_d[c] - fc_rx_occ_d[c], fc_rx_alloc_d[c], fc_rx_recv_d[c], fc_rx_adv_d[c]);
+  endfunction
+
+  function int unsigned fc_tx_avail_h(int unsigned c);
+    return PCIe_sequence_item::fc_mod_sub(fc_tx_limit_h[c], fc_tx_cons_h[c], FC_FSH);
+  endfunction
+  function int unsigned fc_tx_avail_d(int unsigned c);
+    return PCIe_sequence_item::fc_mod_sub(fc_tx_limit_d[c], fc_tx_cons_d[c], FC_FSD);
+  endfunction
+
+  function string fc_tx_status(int unsigned c);
+    return $sformatf("%s: %s(LIMIT=%0d CONSUMED=%0d AVAIL=%0d%s) %s(LIMIT=%0d CONSUMED=%0d AVAIL=%0d%s)",
+        PCIe_sequence_item::fc_cls_name(c),
+        PCIe_sequence_item::fc_hdr_name(c), fc_tx_limit_h[c], fc_tx_cons_h[c], fc_tx_avail_h(c), fc_tx_inf_h[c] ? " INF" : "",
+        PCIe_sequence_item::fc_dat_name(c), fc_tx_limit_d[c], fc_tx_cons_d[c], fc_tx_avail_d(c), fc_tx_inf_d[c] ? " INF" : "");
+  endfunction
+
+  function void fc_print_buffers(string when_s);
+    string s;
+    s = $sformatf("\n  ================= RC_TL FC BUFFERS (VC0, dedicated) : %s =================\n", when_s);
+    for (int c = 0; c < 3; c++) s = {s, "  ", fc_rx_status(c), "\n"};
+    s = {s, "  ---- transmitter view of peer credits ----\n"};
+    for (int c = 0; c < 3; c++) s = {s, "  ", fc_tx_status(c), "\n"};
+    s = {s, "  ======================================================================"};
+    fc_log(s);
+  endfunction
+
+  // ---- Eq 2-11 : (CREDIT_LIMIT - CREDITS_REQUIRED) mod 2^FS <= 2^FS / 2
+  function bit fc_gate_ok(int unsigned limit, int unsigned required, int unsigned fs, bit inf);
+    if (inf) return 1'b1;
+    return (PCIe_sequence_item::fc_mod_sub(limit, required, fs) <= (32'd1 << (fs - 1)));
+  endfunction
+
+  function bit fc_tx_can_send(int unsigned c, int unsigned h, int unsigned d);
+    if (!fc_tx_limit_valid[c]) return 1'b0;
+    if (!fc_gate_ok(fc_tx_limit_h[c], PCIe_sequence_item::fc_mod_add(fc_tx_cons_h[c], h, FC_FSH), FC_FSH, fc_tx_inf_h[c])) return 1'b0;
+    if (d != 0 && !fc_gate_ok(fc_tx_limit_d[c], PCIe_sequence_item::fc_mod_add(fc_tx_cons_d[c], d, FC_FSD), FC_FSD, fc_tx_inf_d[c])) return 1'b0;
+    return 1'b1;
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // TL -> DL transactions (PCIe_sequence_item with the fc_* fields)
+  //--------------------------------------------------------------------------
+  function PCIe_sequence_item fc_make_item(pcie_fc_kind_e k, string reason, bit [2:0] mask);
+    PCIe_sequence_item it = PCIe_sequence_item::type_id::create("fc_item");
+    it.fc_kind   = k;
+    it.fc_origin = "RC_TL";
+    it.fc_reason = reason;
+    for (int c = 0; c < 3; c++) it.set_fc_cls(c, fc_rx_alloc_h[c], fc_rx_alloc_d[c]);
+    it.fc_cls_mask = mask;
+    return it;
+  endfunction
+
+  // Initial credits : 128 hdr / 2048 data buffers (clamped on the wire)
+  function void fc_publish_init();
+    PCIe_sequence_item it = fc_make_item(FC_ADV_INIT, "INITIAL_ADVERTISEMENT", 3'b111);
+    fc_print_buffers("INITIAL");
+    fc_log($sformatf("[FC_TL->DL] INIT CREDITS  %s", it.fc_values_str()));
+    fc_dl_ap.write(it);
+  endfunction
+
+  function void fc_publish_status(string why);
+    PCIe_sequence_item it = fc_make_item(FC_STATUS, why, 3'b000);
+    fc_dl_ap.write(it);
+  endfunction
+
+  // DL must put an UpdateFC DLLP on the wire for every class in 'mask'
+  function void fc_publish_update(bit [2:0] mask, string reason);
+    PCIe_sequence_item it;
+    for (int c = 0; c < 3; c++) if (mask[c]) begin
+      fc_rx_adv_h[c] = fc_rx_alloc_h[c];
+      fc_rx_adv_d[c] = fc_rx_alloc_d[c];
+    end
+    it = fc_make_item(FC_ADV_UPDATE, reason, mask);
+    fc_n_upd_published++;
+    fc_log($sformatf("[FC_UPDATE_SCHEDULED] reason=%s classes=%03b (P,NP,CPL=bit0,1,2) -> %s",
+                     reason, mask, it.fc_values_str()));
+    fc_dl_ap.write(it);
+  endfunction
+
+  // periodic refresh (spec: at most every 30 us; Flit Mode debug value 10 us)
+  task fc_run_periodic();
+    forever begin
+      #(`PCIe_FC_UPDATE_PERIOD_NS * 1ns);
+      fc_n_periodic++;
+      fc_publish_update(3'b111, "PERIODIC_REFRESH");
+    end
+  endtask
+
+  //--------------------------------------------------------------------------
+  // RECEIVER : a TLP reached the TL buffer.
+  //   CREDIT_LIMIT (as seen by the peer = last advertised), CREDITS_CONSUMED
+  //   (received before this TLP), CREDITS_REQUIRED (consumed + this TLP) and the
+  //   Eq 2-11 / 2-14 check are computed and printed.
+  //--------------------------------------------------------------------------
+  function void fc_rx_account(int unsigned c, int unsigned h, int unsigned d, string desc);
+    int unsigned lim_h, lim_d, cons_h, cons_d, req_h, req_d, gap_h, gap_d;
+    bit ovf;
+    lim_h  = fc_rx_adv_h[c];  lim_d  = fc_rx_adv_d[c];
+    cons_h = fc_rx_recv_h[c]; cons_d = fc_rx_recv_d[c];
+    req_h  = PCIe_sequence_item::fc_mod_add(cons_h, h, FC_FSH);
+    req_d  = PCIe_sequence_item::fc_mod_add(cons_d, d, FC_FSD);
+    gap_h  = PCIe_sequence_item::fc_mod_sub(lim_h, req_h, FC_FSH);
+    gap_d  = PCIe_sequence_item::fc_mod_sub(lim_d, req_d, FC_FSD);
+    // CREDITS_RECEIVED += this TLP, buffer occupancy += this TLP, then Eq 2-14
+    fc_rx_recv_h[c] = req_h;
+    fc_rx_recv_d[c] = req_d;
+    fc_rx_occ_h[c] += h;
+    fc_rx_occ_d[c] += d;
+    ovf = (PCIe_sequence_item::fc_mod_sub(fc_rx_alloc_h[c], fc_rx_recv_h[c], FC_FSH) > (32'd1 << (FC_FSH - 1))) ||
+          (PCIe_sequence_item::fc_mod_sub(fc_rx_alloc_d[c], fc_rx_recv_d[c], FC_FSD) > (32'd1 << (FC_FSD - 1))) ||
+          (fc_rx_occ_h[c] > fc_rx_max_h[c]) || (fc_rx_occ_d[c] > fc_rx_max_d[c]);
+    if (ovf) fc_rx_overflow_cnt++;
+    fc_n_rx_tlp[c]++;
+    fc_log($sformatf({"\n  ---- [FC_RX] %s -> class %s : needs %s=%0d %s=%0d ----\n",
+        "    %s : CREDIT_LIMIT=%0d CREDITS_CONSUMED=%0d CREDITS_REQUIRED=%0d (LIMIT-REQUIRED) mod 2^%0d = %0d (<= %0d : %s)\n",
+        "    %s : CREDIT_LIMIT=%0d CREDITS_CONSUMED=%0d CREDITS_REQUIRED=%0d (LIMIT-REQUIRED) mod 2^%0d = %0d (<= %0d : %s)\n",
+        "    receiver: %s ALLOCATED=%0d RECEIVED=%0d FREE=%0d | %s ALLOCATED=%0d RECEIVED=%0d FREE=%0d"},
+        desc, PCIe_sequence_item::fc_cls_name(c),
+        PCIe_sequence_item::fc_hdr_name(c), h, PCIe_sequence_item::fc_dat_name(c), d,
+        PCIe_sequence_item::fc_hdr_name(c), lim_h, cons_h, req_h, FC_FSH, gap_h, 1 << (FC_FSH-1),
+        (gap_h <= (1 << (FC_FSH-1))) ? "OK" : "VIOLATION",
+        PCIe_sequence_item::fc_dat_name(c), lim_d, cons_d, req_d, FC_FSD, gap_d, 1 << (FC_FSD-1),
+        (gap_d <= (1 << (FC_FSD-1))) ? "OK" : "VIOLATION",
+        PCIe_sequence_item::fc_hdr_name(c), fc_rx_alloc_h[c], fc_rx_recv_h[c], fc_rx_max_h[c] - fc_rx_occ_h[c],
+        PCIe_sequence_item::fc_dat_name(c), fc_rx_alloc_d[c], fc_rx_recv_d[c], fc_rx_max_d[c] - fc_rx_occ_d[c]));
+    if (ovf)
+      `uvm_error("RC_TL_FC", $sformatf("RECEIVER_OVERFLOW class=%s : TLP exceeds advertised credits (Eq 2-14)",
+                 PCIe_sequence_item::fc_cls_name(c)))
+    fc_publish_status($sformatf("RX_%s", PCIe_sequence_item::fc_cls_name(c)));
+  endfunction
+
+  // UpdateFC scheduling (Sec 2.6.1.2 / 3.4.2). Returns 1 when an UpdateFC for class c is due now.
+  //  1. MANDATORY header : the peer's available header credits are 0 and >= 1 was freed since the last UpdateFC
+  //  2. MANDATORY data   : the peer's available data credits < one max-size TLP (Rx_MPS_Limit) and data was freed
+  //  3. WATERMARK        : enough credits freed (spec permits more frequent UpdateFC; avoids one per packet)
+  //  The 10 us periodic refresh comes from fc_run_periodic().
+  function bit fc_should_update(int unsigned c);
+    int unsigned unadv_h, unadv_d, peer_avail_h, peer_avail_d;
+    unadv_h      = PCIe_sequence_item::fc_mod_sub(fc_rx_alloc_h[c], fc_rx_adv_h[c], FC_FSH);
+    unadv_d      = PCIe_sequence_item::fc_mod_sub(fc_rx_alloc_d[c], fc_rx_adv_d[c], FC_FSD);
+    peer_avail_h = PCIe_sequence_item::fc_mod_sub(fc_rx_adv_h[c], fc_rx_recv_h[c], FC_FSH);
+    peer_avail_d = PCIe_sequence_item::fc_mod_sub(fc_rx_adv_d[c], fc_rx_recv_d[c], FC_FSD);
+    if (unadv_h == 0 && unadv_d == 0)                              begin fc_rx_reason = "NOTHING_RELEASED";             return 1'b0; end
+    if (unadv_h != 0 && peer_avail_h == 0)                         begin fc_rx_reason = "MANDATORY_HDR(avail=0)";       return 1'b1; end
+    if (unadv_d != 0 && peer_avail_d < `PCIe_FC_MPS_CREDITS)       begin fc_rx_reason = "MANDATORY_DATA(avail<MPS)";    return 1'b1; end
+    if (unadv_h >= `PCIe_FC_HDR_WATERMARK)                         begin fc_rx_reason = "WATERMARK_HDR";                return 1'b1; end
+    if (unadv_d >= `PCIe_FC_DATA_WATERMARK)                        begin fc_rx_reason = "WATERMARK_DATA";               return 1'b1; end
+    fc_rx_reason = "BELOW_THRESHOLD";
+    return 1'b0;
+  endfunction
+
+  // The TL has consumed the TLP : free the buffer space (CREDITS_ALLOCATED grows),
+  // maybe schedule an UpdateFC.
+  function void fc_rx_release(int unsigned c, int unsigned h, int unsigned d, string desc);
+    fc_rx_occ_h[c]   = (fc_rx_occ_h[c] > h) ? fc_rx_occ_h[c] - h : 0;
+    fc_rx_occ_d[c]   = (fc_rx_occ_d[c] > d) ? fc_rx_occ_d[c] - d : 0;
+    fc_rx_alloc_h[c] = PCIe_sequence_item::fc_mod_add(fc_rx_alloc_h[c], h, FC_FSH);
+    fc_rx_alloc_d[c] = PCIe_sequence_item::fc_mod_add(fc_rx_alloc_d[c], d, FC_FSD);
+    fc_log($sformatf("[FC_RX_RELEASE] %s class %s freed %s=%0d %s=%0d -> %s",
+        desc, PCIe_sequence_item::fc_cls_name(c),
+        PCIe_sequence_item::fc_hdr_name(c), h, PCIe_sequence_item::fc_dat_name(c), d, fc_rx_status(c)));
+    if (fc_should_update(c)) begin
+      fc_publish_update(3'b001 << c, fc_rx_reason);
+    end
+    else begin
+      fc_log($sformatf("[FC_UPDATE_NOT_SENT] class %s : %s - not sent per packet",
+          PCIe_sequence_item::fc_cls_name(c), fc_rx_reason));
+    end
+    fc_publish_status($sformatf("FREE_%s", PCIe_sequence_item::fc_cls_name(c)));
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // TRANSMITTER
+  //--------------------------------------------------------------------------
+  // Blocks until the Eq 2-11 gate passes for this TLP.
+  task fc_tx_wait(int unsigned c, int unsigned h, int unsigned d, string desc);
+    int unsigned waited_ns = 0;
+    bit          announced = 0;
+    while (!fc_tx_can_send(c, h, d)) begin
+      if (!announced) begin
+        announced = 1; fc_n_blocked++;
+        fc_log($sformatf("[FC_TX_BLOCKED] %s class %s needs %s=%0d %s=%0d : %s",
+            desc, PCIe_sequence_item::fc_cls_name(c), PCIe_sequence_item::fc_hdr_name(c), h,
+            PCIe_sequence_item::fc_dat_name(c), d, fc_tx_status(c)));
+      end
+      #10ns;
+      waited_ns += 10;
+      if (waited_ns > 5 * `PCIe_FC_UPDATE_PERIOD_NS) begin
+        `uvm_error("RC_TL_FC", $sformatf("FC_CREDIT_STARVATION : no UpdateFC for %0d ns, sending anyway: %s", waited_ns, fc_tx_status(c)))
+        break;
+      end
+    end
+    if (announced) fc_log($sformatf("[FC_TX_UNBLOCKED] %s after %0d ns : %s", desc, waited_ns, fc_tx_status(c)));
+  endtask
+
+  // Account the TLP that is being sent : CREDITS_CONSUMED += this TLP
+  function void fc_tx_consume(int unsigned c, int unsigned h, int unsigned d, string desc);
+    int unsigned req_h, req_d, gap_h, gap_d;
+    req_h = PCIe_sequence_item::fc_mod_add(fc_tx_cons_h[c], h, FC_FSH);
+    req_d = PCIe_sequence_item::fc_mod_add(fc_tx_cons_d[c], d, FC_FSD);
+    gap_h = PCIe_sequence_item::fc_mod_sub(fc_tx_limit_h[c], req_h, FC_FSH);
+    gap_d = PCIe_sequence_item::fc_mod_sub(fc_tx_limit_d[c], req_d, FC_FSD);
+    fc_log($sformatf({"\n  ---- [FC_TX] %s -> class %s : needs %s=%0d %s=%0d ----\n",
+        "    %s : CREDIT_LIMIT=%0d CREDITS_CONSUMED=%0d CREDITS_REQUIRED=%0d (LIMIT-REQUIRED) mod 2^%0d = %0d (<= %0d : %s)\n",
+        "    %s : CREDIT_LIMIT=%0d CREDITS_CONSUMED=%0d CREDITS_REQUIRED=%0d (LIMIT-REQUIRED) mod 2^%0d = %0d (<= %0d : %s)"},
+        desc, PCIe_sequence_item::fc_cls_name(c),
+        PCIe_sequence_item::fc_hdr_name(c), h, PCIe_sequence_item::fc_dat_name(c), d,
+        PCIe_sequence_item::fc_hdr_name(c), fc_tx_limit_h[c], fc_tx_cons_h[c], req_h, FC_FSH, gap_h, 1 << (FC_FSH-1),
+        (fc_tx_inf_h[c] || gap_h <= (1 << (FC_FSH-1))) ? "OK" : "VIOLATION",
+        PCIe_sequence_item::fc_dat_name(c), fc_tx_limit_d[c], fc_tx_cons_d[c], req_d, FC_FSD, gap_d, 1 << (FC_FSD-1),
+        (fc_tx_inf_d[c] || d == 0 || gap_d <= (1 << (FC_FSD-1))) ? "OK" : "VIOLATION"));
+    fc_tx_cons_h[c] = req_h;
+    fc_tx_cons_d[c] = req_d;
+    fc_n_tx_tlp[c]++;
+    fc_publish_status($sformatf("TX_%s", PCIe_sequence_item::fc_cls_name(c)));
+  endfunction
+
+  // DL -> TL : InitFC1 / UpdateFC arrived from the peer. The received (cumulative)
+  // CREDITS_ALLOCATED value becomes the new CREDIT_LIMIT.
+  function void write_fc_from_dl(PCIe_sequence_item it);
+    for (int c = 0; c < 3; c++) begin
+      if (it.fc_cls_mask[c]) begin
+        int unsigned old_h = fc_tx_limit_h[c];
+        int unsigned old_d = fc_tx_limit_d[c];
+        fc_tx_limit_h[c] = it.fc_hdr[c] & ((32'd1 << FC_FSH) - 1);
+        fc_tx_limit_d[c] = it.fc_dat[c] & ((32'd1 << FC_FSD) - 1);
+        fc_tx_inf_h[c]   = it.fc_hdr_inf[c];
+        fc_tx_inf_d[c]   = it.fc_dat_inf[c];
+        fc_tx_limit_valid[c] = 1'b1;
+        if (it.fc_kind == FC_PEER_UPDATE) fc_n_peer_upd++;
+        fc_log($sformatf("[FC_%s] class %s : CREDIT_LIMIT %s %0d -> %0d (+%0d)  %s %0d -> %0d (+%0d) | CONSUMED %s=%0d %s=%0d | AVAILABLE %s=%0d %s=%0d",
+            (it.fc_kind == FC_PEER_INIT) ? "INITFC1_RX" : "UPDATEFC_RX",
+            PCIe_sequence_item::fc_cls_name(c),
+            PCIe_sequence_item::fc_hdr_name(c), old_h, fc_tx_limit_h[c], PCIe_sequence_item::fc_mod_sub(fc_tx_limit_h[c], old_h, FC_FSH),
+            PCIe_sequence_item::fc_dat_name(c), old_d, fc_tx_limit_d[c], PCIe_sequence_item::fc_mod_sub(fc_tx_limit_d[c], old_d, FC_FSD),
+            PCIe_sequence_item::fc_hdr_name(c), fc_tx_cons_h[c], PCIe_sequence_item::fc_dat_name(c), fc_tx_cons_d[c],
+            PCIe_sequence_item::fc_hdr_name(c), fc_tx_avail_h(c), PCIe_sequence_item::fc_dat_name(c), fc_tx_avail_d(c)));
+      end
+    end
+    fc_publish_status("PEER_CREDITS");
+  endfunction
+
+  function void fc_report();
+    fc_log($sformatf({"\n  ========== RC_TL FLOW CONTROL SUMMARY ==========\n",
+        "  TLPs received  : P=%0d NP=%0d CPL=%0d\n",
+        "  TLPs sent      : P=%0d NP=%0d CPL=%0d\n",
+        "  UpdateFC scheduled by this TL : %0d (periodic=%0d)  UpdateFC received from peer : %0d\n",
+        "  TX blocked by credits : %0d   receiver overflows : %0d"},
+        fc_n_rx_tlp[0], fc_n_rx_tlp[1], fc_n_rx_tlp[2], fc_n_tx_tlp[0], fc_n_tx_tlp[1], fc_n_tx_tlp[2],
+        fc_n_upd_published, fc_n_periodic, fc_n_peer_upd, fc_n_blocked, fc_rx_overflow_cnt));
+    fc_print_buffers("FINAL");
+  endfunction
+
   function new(string name="PCIe_RC_TL_model", uvm_component parent);
     super.new(name, parent);
   endfunction
@@ -55,7 +398,173 @@ class PCIe_RC_TL_model extends uvm_component;
      tx_tl_imp = new("tx_tl_imp", this);
      tlp_dl_ap  = new("tlp_dl_ap",  this);
      tl_ap  = new("tl_ap",  this);
+     fc_dl_ap  = new("fc_dl_ap",  this);
+     fc_dl_imp = new("fc_dl_imp", this);
+     dl_tl_imp = new("dl_tl_imp", this);   // [ADDED] DL -> TL received TLP path
+     n_tlp_rcvd = 0;
+     n_cpl_rcvd = 0;
+     fc_init();
     `uvm_info("RC_TL_MODEL","EXIT_FROM_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
+  endfunction
+
+  // FLOW CONTROL : all connections are made by now - advertise the six TL buffers to the DL
+  function void start_of_simulation_phase(uvm_phase phase);
+    super.start_of_simulation_phase(phase);
+    fc_publish_init();
+  endfunction
+
+  // FLOW CONTROL : periodic UpdateFC refresh timer
+  task run_phase(uvm_phase phase);
+    fc_run_periodic();
+  endtask
+
+  function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    fc_report();
+    `uvm_info("RC_TL_MODEL", $sformatf("RX_FROM_DL_SUMMARY : TLPs received from RC DL=%0d  completions=%0d  outstanding requests still open=%0d",
+              n_tlp_rcvd, n_cpl_rcvd, outstanding.size()), UVM_LOW)
+  endfunction
+
+  //==========================================================================
+  // [ADDED] write_dl_rx : RC DL model -> RC TL model
+  //
+  //   The RC DL model has already stripped the 6 DLP bytes off the 242 byte flit
+  //   (and only forwards GOOD payload flits), so item.tlp_data is the 236 byte TLP
+  //   region. Flit Mode completion header layout (same as EP build_completion):
+  //     DW0 [31:24] type  [23:21] TC  [20:16] OHC  [15:13] TS  [12:10] Attr  [9:0] Length
+  //     DW1 [31:16] Completer ID  [15] EP  [14] LowerAddr[6]  [13:0] Tag
+  //     DW2 [31:16] Requester(Dest) ID  [15:12] LowerAddr[5:2]  [11:0] Byte Count
+  //     DW3 OHC-A5 (only when OHC[0]=1), then payload
+  //==========================================================================
+  function bit [31:0] rc_rx_get_dw(PCIe_sequence_item it, int dw_index);
+    int b;
+    b = dw_index * `PCIe_TL_DW_BYTES;
+    if ((b + 3) >= `PCIe_TLP_DATA_BYTE_W)
+      return 32'd0;
+    return {it.tlp_data[b], it.tlp_data[b+1], it.tlp_data[b+2], it.tlp_data[b+3]};
+  endfunction
+
+  function void write_dl_rx(PCIe_sequence_item item);
+    bit [31:0]         dw0, dw1, dw2, dw3, d0;
+    bit [7:0]          ftype;
+    bit [2:0]          tc, ts, attr;
+    bit [4:0]          ohc;
+    bit [9:0]          len;
+    bit [15:0]         cplr_id, req_id;
+    bit                ep_bit;
+    bit [13:0]         tag;
+    bit [11:0]         bc;
+    bit [3:0]          la_hi;
+    bit                is_cpl;
+    bit                has_data;
+    int unsigned       hdr_dw, payload_dw;
+    string             kind;
+    PCIe_sequence_item cpl_it;
+
+    n_tlp_rcvd++;
+
+    `uvm_info("RC_TL_MODEL",
+      $sformatf("RECEIVED_236B_TLP_FROM_RC_DL_MODEL #%0d mode=%s",
+                 n_tlp_rcvd, item.pkt_mode.name()), UVM_LOW)
+
+    dw0 = rc_rx_get_dw(item, 0);
+    dw1 = rc_rx_get_dw(item, 1);
+    dw2 = rc_rx_get_dw(item, 2);
+    dw3 = rc_rx_get_dw(item, 3);
+
+    `uvm_info("RC_TL_MODEL",
+      $sformatf("RX_TLP_DW : DW0=%08h DW1=%08h DW2=%08h DW3=%08h", dw0, dw1, dw2, dw3), UVM_LOW)
+
+    ftype  = dw0[31:24];
+    is_cpl = (ftype == `PCIe_FLITTYPE_CPL) || (ftype == `PCIe_FLITTYPE_CPLD);
+
+    if (!is_cpl) begin
+      `uvm_info("RC_TL_MODEL",
+        $sformatf("RX_TLP_IS_NOT_A_COMPLETION : type byte0=0x%02h (no completion decode)", ftype), UVM_LOW)
+      return;
+    end
+
+    n_cpl_rcvd++;
+    has_data   = (ftype == `PCIe_FLITTYPE_CPLD);
+    tc         = dw0[23:21];
+    ohc        = dw0[20:16];
+    ts         = dw0[15:13];
+    attr       = dw0[12:10];
+    len        = dw0[9:0];
+    cplr_id    = dw1[31:16];
+    ep_bit     = dw1[15];
+    tag        = dw1[13:0];
+    req_id     = dw2[31:16];
+    la_hi      = dw2[15:12];
+    bc         = dw2[11:0];
+    hdr_dw     = 3 + (ohc[0] ? 1 : 0);
+    payload_dw = has_data ? ((len == 10'd0) ? `PCIe_TL_MAX_PAYLOAD_DW : int'(len)) : 0;
+    d0         = rc_rx_get_dw(item, hdr_dw);
+    kind       = has_data ? "CplD (with data)" : "Cpl (no data)";
+
+    `uvm_info("RC_TL_COMPLETION",
+      $sformatf({"\n",
+        "         ============================================================\n",
+        "                  RC TL MODEL : RECEIVED COMPLETION  (from RC DL model)\n",
+        "         ============================================================\n",
+        "         Packet Mode       : %s\n",
+        "         Completion Type   : %s (type byte 0x%02h)\n",
+        "         Completer ID      : 0x%04h\n",
+        "         Requester ID      : 0x%04h\n",
+        "         Tag               : 0x%04h\n",
+        "         TC / Attr / TS    : %0d / %03b / %03b\n",
+        "         EP                : %0b\n",
+        "         Byte Count        : %0d (0x%03h)\n",
+        "         Lower Address[6:2]: 0x%02h (bits 5:2 = 0x%01h)\n",
+        "         Length            : %0d DW\n",
+        "         OHC               : %05b (OHC-A5 present : %s)\n",
+        "         Header DWs        : %0d   Payload DWs : %0d\n",
+        "         First payload DW  : %08h\n",
+        "         ============================================================"},
+        item.pkt_mode.name(), kind, ftype, cplr_id, req_id, tag,
+        tc, attr, ts, ep_bit, bc, bc, {dw1[14], la_hi}, la_hi, len,
+        ohc, ohc[0] ? "YES" : "NO", hdr_dw, payload_dw, d0), UVM_LOW)
+
+    // Build the completion item and hand it to the existing cpl_write() so the
+    // matching outstanding request (by tag) is closed.
+    cpl_it = PCIe_sequence_item::type_id::create("rc_rx_cpl");
+    cpl_it.pkt_mode      = item.pkt_mode;
+    cpl_it.txn_type      = PCIe_TL_CPL;
+    cpl_it.is_completion = 1'b1;
+    cpl_it.cpl_has_data  = has_data;
+    cpl_it.cpl_status    = ohc[0] ? dw3[`PCIe_TL_OHCA5_STATUS_HI : `PCIe_TL_OHCA5_STATUS_LO]
+                                  : `PCIe_CPL_STATUS_SC;
+    cpl_it.tag           = tag[`PCIe_TL_TAG_W-1:0];
+    cpl_it.requester_id  = req_id;
+    cpl_it.completer_id  = cplr_id;
+    cpl_it.length        = len;
+    cpl_it.byte_count    = bc;
+    cpl_it.cpl_data      = new[payload_dw];
+    for (int i = 0; i < payload_dw; i++)
+      cpl_it.cpl_data[i] = rc_rx_get_dw(item, hdr_dw + i);
+
+    cpl_write(cpl_it);
+  endfunction
+
+  function bit fc_applies(PCIe_sequence_item tr);
+    return !((tr.pkt_mode == FLIT) && (tr.flit_type != PCIe_PAYLOAD_flit));
+  endfunction
+
+  // Called by the RC controller driver BEFORE the TLP is handed to the TL:
+  // blocks until the transmitter gate (Eq 2-11) passes for this TLP.
+  task wait_for_fc_credits(PCIe_sequence_item tr);
+    int unsigned c, h, d;
+    if (!fc_applies(tr)) return;
+    PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.mem_deferrable, tr.data.size(), c, h, d);
+    fc_tx_wait(c, h, d, tr.convert2string());
+  endtask
+
+  // Account the TLP being sent (CREDITS_CONSUMED / CREDITS_REQUIRED)
+  function void fc_account_tlp(PCIe_sequence_item tr);
+    int unsigned c, h, d;
+    if (!fc_applies(tr)) return;
+    PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.mem_deferrable, tr.data.size(), c, h, d);
+    fc_tx_consume(c, h, d, tr.convert2string());
   endfunction
 
   //--------------------------------------------------------------------------
@@ -114,6 +623,9 @@ class PCIe_RC_TL_model extends uvm_component;
     //----------------------------------------------------------------------
     // Hand the 236 byte TLP region to the DL in the field it consumes
     //----------------------------------------------------------------------
+    // FLOW CONTROL : CREDITS_CONSUMED += this TLP (gate already passed in the driver)
+    fc_account_tlp(tr);
+
     pack_to_tlp_data(tr);
 
     `uvm_info(get_type_name(), "[TL->DL] TLP_SENT_TO_DL", UVM_MEDIUM);

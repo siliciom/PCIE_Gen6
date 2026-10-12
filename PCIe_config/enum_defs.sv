@@ -283,4 +283,16 @@ typedef struct {
   } tx_buffer_t;
      
 
+  //--------------------------------------------------------------------------
+  // Flow Control (PCIe Base 6.0 Sec 2.6 / 3.4) - carried inside PCIe_sequence_item
+  //   pcie_fc_cls_e  : credit class  (P / NP / CPL)
+  //   pcie_fc_kind_e : meaning of an FC transaction exchanged between TL and DL
+  //     TL -> DL : FC_ADV_INIT (initial credits), FC_ADV_UPDATE (send UpdateFC),
+  //                FC_STATUS (snapshot for display)
+  //     DL -> TL : FC_PEER_INIT / FC_PEER_UPDATE (credit limit from peer DLLP)
+  //--------------------------------------------------------------------------
+  typedef enum int unsigned { PCIE_FC_P = 0, PCIE_FC_NP = 1, PCIE_FC_CPL = 2 } pcie_fc_cls_e;
+  typedef enum int unsigned { FC_ADV_INIT, FC_ADV_UPDATE, FC_STATUS, FC_PEER_INIT, FC_PEER_UPDATE } pcie_fc_kind_e;
+
+
 endpackage

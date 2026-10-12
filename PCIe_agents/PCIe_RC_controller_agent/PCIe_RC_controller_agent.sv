@@ -52,6 +52,11 @@ class PCIe_RC_controller_agent extends uvm_agent;
          rc_dl_model.dlp_pl_ap.connect(rc_pl_model.dlp_pl_imp);
          // [ADDED] RC controller monitor -> RC DL : 242B EP->RC flit + is_valid, once per flit
          rc_controller_monitor.rc_mon_dl_242b_ap.connect(rc_dl_model.dl_mon_242b_imp);
+         // FLOW CONTROL : TL <-> DL credit exchange
+         rc_tl_model.fc_dl_ap.connect(rc_dl_model.fc_tl_imp);
+         rc_dl_model.fc_tl_ap.connect(rc_tl_model.fc_dl_imp);
+         // [ADDED] RC DL -> RC TL : received 236B TLP (e.g. the CplD) from the DL model
+         rc_dl_model.rc_dl_tl_ap.connect(rc_tl_model.dl_tl_imp);
         `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
       endfunction
   
