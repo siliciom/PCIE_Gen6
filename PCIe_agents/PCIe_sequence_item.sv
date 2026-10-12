@@ -456,6 +456,11 @@ class PCIe_sequence_item extends uvm_sequence_item;
     }
   }
 
+ constraint c_mem_tc { if(txn_type == PCIe_TL_MEM) {
+	 tc == 3'b000;
+	 }
+	 }
+
   //--------------------------------------------------------------------------
   // Byte Enable rules - PCIe Base 6.0 Sec 2.2.5.1 / 2.2.5.2
   //--------------------------------------------------------------------------
