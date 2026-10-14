@@ -10,7 +10,8 @@
 #set testname "PCIe_gen6_3DW_Flit_IORd_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGWr0_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGWr1_test"
-set testname "PCIe_gen6_3DW_Flit_CFGRd0_test"
+#set testname "PCIe_gen6_3DW_Flit_CFGRd0_test"
+set testname "PCIe_gen6_enumeration_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGRd1_test"
 
 vlib work

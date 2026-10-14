@@ -76,6 +76,7 @@ package PCIe_pkg;
 
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd0_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd0_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_enumeration_sequence.sv"   // [ENUM]
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd1_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd1_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGWr0_Random_sequence.sv"
@@ -192,6 +193,7 @@ package PCIe_pkg;
         `include "../PCIe_tests/PCIe_gen6_ltssm_electrical_idle_during_training_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_detect_no_receiver_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_basic_linkup_L0_test.sv"
+        `include "../PCIe_tests/PCIe_gen6_enumeration_test.sv"   // [ENUM]
       //`include "../PCIe_tests/PCIe_MEM_3DW_FLIT_test.sv"
       //`include "../PCIe_tests/PCIe_MEM_4DW_FLIT_test.sv"
 

@@ -18,6 +18,7 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
    uvm_analysis_port #(PCIe_sequence_item) tx_tl_ap;
    uvm_analysis_port #(PCIe_sequence_item) ltssm_ap;
    PCIe_sequence_item            pcie_seq_item;
+   PCIe_sequence_item            dllp_item;   // [FIX] fallback item for DL-initiated flits
    PCIe_sequence_item            replayed_item;
    PCIe_sequence_item            nak_item;
    PCIe_sequence_item            ack_item;
@@ -116,11 +117,54 @@ end
           rc_dl_model.dllp_tx_pending = 1'b0;
         end
         else begin
-          #1ns;
+          // [ENUM] LINK IS UP : send every further item from the sequence
+          // (the 2nd, 3rd ... configuration request of the enumeration).
+          seq_item_port.try_next_item(pcie_seq_item);
+          if (pcie_seq_item != null) begin
+            if (rc_dl_model.dl_link_active) begin
+              // The RC PL model holds ONE flit. Pause new DL UpdateFC flits and
+              // drive the ones already queued, so they cannot overwrite this TLP.
+              rc_dl_model.fc_tx_allowed = 1'b0;
+              drain_dl_dllp_flits();
+              rc_tl_model.wait_for_fc_credits(pcie_seq_item);   // FLOW CONTROL gate
+              `uvm_info("RC_CONTROLLER","LINK_UP=1 :: DL_ACTIVE=1 :: SENDING_NEXT_TLP_PACKET",UVM_LOW)
+              tx_tl_ap.write(pcie_seq_item);
+              drive_flit(pcie_seq_item);
+              rc_dl_model.fc_tx_allowed = 1'b1;                  // UpdateFC allowed again
+            end
+            else begin
+              `uvm_error("RC_CONTROLLER","LINK_UP=1 BUT DL_ACTIVE=0 :: TLP_PACKET_NOT_SENT")
+            end
+            seq_item_port.item_done();
+          end
+          else begin
+            #1ns;
+          end
         end
       end
      end
    endtask
+
+  // [ENUM] Drive every DLLP flit (UpdateFC) the DL model has already queued,
+  // until nothing is pending. Called with fc_tx_allowed = 0, so the DL model
+  // only finishes the UpdateFC batch it had started and does not start a new one.
+  task drain_dl_dllp_flits();
+    int unsigned polls = 0;
+    do begin
+      #1ns;
+      polls++;
+      if (rc_dl_model.dllp_tx_pending && rc_pl_model.pl_sent) begin
+        `uvm_info("RC_FC_DRV","DRIVING_DL_INITIATED_DLLP_FLIT (UpdateFC) BEFORE NEXT TLP",UVM_LOW)
+        drive_flit(pcie_seq_item);
+        rc_dl_model.dllp_tx_pending = 1'b0;
+        polls = 0;
+      end
+      if (polls > 1000) begin
+        `uvm_error("RC_FC_DRV","DLLP_FLIT_PENDING_BUT_PL_NOT_READY :: giving up the drain")
+        break;
+      end
+    end while (rc_dl_model.dllp_tx_pending);
+  endtask
 
   // Drives the DLCMSM (Data Link Control and Management State Machine) packets.
   //
@@ -164,6 +208,17 @@ end
   task drive_flit(PCIe_sequence_item pcie_seq_item);
    bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] flit_local;
    bit [`PCIe_BYTE_W-1:0] flit_full_q[$];
+   // [FIX] try_next_item() leaves pcie_seq_item == null when no sequence item is
+   // pending (DL-initiated DLLP / UpdateFC / Completion flits). drive_flit() then
+   // called pcie_seq_item.print() / tx_process(..,item) on a null handle ->
+   // SIGSEGV in uvm_object::sprint. Use a valid FLIT-mode item instead.
+   if (pcie_seq_item == null) begin
+      if (dllp_item == null) begin
+         dllp_item = PCIe_sequence_item::type_id::create("dllp_item");
+         dllp_item.pkt_mode = FLIT;
+      end
+      pcie_seq_item = dllp_item;
+   end
    `uvm_info("RC_CONTROLLER","ENTERED_INTO_DRIVE_FLIT",UVM_LOW)
    wait(rc_pl_model.pl_sent);
    `uvm_info("RC_CONTROLLER","WAIT_INTO_DRIVE_FLIT",UVM_LOW)
@@ -178,7 +233,7 @@ end
             flit_dword = {flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+3], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+2], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+1], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+0]};
   `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_LOW)
 rc_pl_model.tx_process_executed = 1'b0;
-            pcie_seq_item.print();
+            if (pcie_seq_item != null) pcie_seq_item.print();
 	    rc_pl_model.tx_process(flit_dword, scr_data, pcie_seq_item);
   `uvm_info("SCR_DATA",$sformatf("scr_data is %h :: %d",scr_data,scr_data),UVM_LOW)
                   if (rc_pl_model.tx_process_executed) begin

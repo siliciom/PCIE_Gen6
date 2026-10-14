@@ -57,6 +57,8 @@ class PCIe_RC_controller_agent extends uvm_agent;
          rc_dl_model.fc_tl_ap.connect(rc_tl_model.fc_dl_imp);
          // [ADDED] RC DL -> RC TL : received 236B TLP (e.g. the CplD) from the DL model
          rc_dl_model.rc_dl_tl_ap.connect(rc_tl_model.dl_tl_imp);
+         // [ENUM] share the RC TL handle so a sequence can wait for completions
+         uvm_config_db#(PCIe_RC_TL_model)::set(null, "*", "rc_tl_model", rc_tl_model);
         `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
       endfunction
   

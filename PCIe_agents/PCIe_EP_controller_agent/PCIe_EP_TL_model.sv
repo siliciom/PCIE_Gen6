@@ -534,6 +534,7 @@ class PCIe_EP_TL_model extends uvm_component;
         "         cfg_space_t0 (Type0) : %0d x %0d-bit (%0d bytes) - %0d byte header populated\n",
         "         cfg_space_t1 (Type1) : %0d x %0d-bit (%0d bytes) - %0d byte header populated\n",
         "         ============================================================"},
+        d_mode.name(),   // [FIX] %s for 'Default packet mode' had no argument ($sformatf: Too few arguments)
         `PCIe_TL_MEM3DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_MEM3DW_DEPTH*4,
         `PCIe_TL_MEM4DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_MEM4DW_DEPTH*4,
         `PCIe_TL_IO3DW_DEPTH,  `PCIe_TL_MEM_DATA_W, `PCIe_TL_IO3DW_DEPTH*4,
@@ -630,19 +631,25 @@ class PCIe_EP_TL_model extends uvm_component;
     //   "Unimplemented Base Address register" and hardwired to zero, exactly
     //   as the spec permits.
     //------------------------------------------------------------------------
-    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR0] = 32'h0000_0000;
-    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR1] = 32'h0000_0000;
-    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR2] = 32'h0000_0000;
-    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR3] = 32'h0000_0000;
-    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR4] = 32'h0000_0000;
-    cfg_space_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'h0000_0000;
-    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR0] = 32'h0000_0000;
-    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR1] = 32'h0000_0000;
-    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR2] = 32'h0000_0000;
-    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR3] = 32'h0000_0000;
-    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR4] = 32'h0000_0000;
-    cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'h0000_0000;
+  // BAR0 : 32-bit memory, 4 KB
+cfg_space_t0  [`PCIe_TL_CFG_IDX_BAR0] = 32'h0000_0000;
+cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR0] = 32'h0000_0FFF;   // low 12 bits fixed 0 → 4 KB
 
+// BAR1 : IO, 256 bytes
+cfg_space_t0  [`PCIe_TL_CFG_IDX_BAR1] = 32'h0000_0001;   // bit0 = 1 → IO BAR
+cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR1] = 32'h0000_00FF;   // low 8 bits fixed → 256 B
+
+// BAR2 + BAR3 : 64-bit prefetchable memory, 1 MB (uses 2 boxes)
+cfg_space_t0  [`PCIe_TL_CFG_IDX_BAR2] = 32'h0000_000C;   // bits[3:0]=1100 → 64-bit, prefetchable
+cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR2] = 32'h000F_FFFF;   // low 20 bits fixed → 1 MB
+cfg_space_t0  [`PCIe_TL_CFG_IDX_BAR3] = 32'h0000_0000;   // upper 32 bits of the address
+cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR3] = 32'h0000_0000;   // fully writable
+
+// BAR4, BAR5 : not used
+cfg_space_t0  [`PCIe_TL_CFG_IDX_BAR4] = 32'h0000_0000;
+cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR4] = 32'hFFFF_FFFF;
+cfg_space_t0  [`PCIe_TL_CFG_IDX_BAR5] = 32'h0000_0000;
+cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF; 
     //------------------------------------------------------------------------
     // +028h : Cardbus CIS Pointer                        - Section 7.5.1.2.2
     //   "does not apply to PCI Express and must be hardwired to Zero."
@@ -721,8 +728,8 @@ class PCIe_EP_TL_model extends uvm_component;
     //------------------------------------------------------------------------
     cfg_space_t1[`PCIe_TL_CFG_T1_IDX_BAR0] = 32'h0000_0000;
     cfg_space_t1[`PCIe_TL_CFG_T1_IDX_BAR1] = 32'h0000_0000;
-    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_BAR0] = 32'h0000_0000;
-    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_BAR1] = 32'h0000_0000;
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_BAR0] = 32'hFFFF_FFFF;  // [FIX] BAR hardwired to 0 (unimplemented) as documented above
+    cfg_ro_mask_t1[`PCIe_TL_CFG_T1_IDX_BAR1] = 32'hFFFF_FFFF;  // [FIX] BAR hardwired to 0 (unimplemented) as documented above
 
     //------------------------------------------------------------------------
     // +018h : Secondary Latency Timer[31:24] | Subordinate Bus[23:16] |

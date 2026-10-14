@@ -17,6 +17,7 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
   `uvm_component_utils(PCIe_EP_controller_driver)
    uvm_analysis_port #(PCIe_sequence_item) tx_ap;
    PCIe_sequence_item            pcie_seq_item;
+   PCIe_sequence_item            dllp_item;   // [FIX] fallback item for DL-initiated flits
    PCIe_sequence_item            replayed_item;
    PCIe_sequence_item            nak_item;
    PCIe_sequence_item ack_item;
@@ -143,6 +144,17 @@ task run_phase(uvm_phase phase);
   // Drive the flit task
   task drive_flit(PCIe_sequence_item pcie_seq_item);
    bit [`PCIe_BYTE_W-1:0] flit_full_q[$];
+   // [FIX] try_next_item() leaves pcie_seq_item == null when no sequence item is
+   // pending (DL-initiated DLLP / UpdateFC / Completion flits). drive_flit() then
+   // called pcie_seq_item.print() / tx_process(..,item) on a null handle ->
+   // SIGSEGV in uvm_object::sprint. Use a valid FLIT-mode item instead.
+   if (pcie_seq_item == null) begin
+      if (dllp_item == null) begin
+         dllp_item = PCIe_sequence_item::type_id::create("dllp_item");
+         dllp_item.pkt_mode = FLIT;
+      end
+      pcie_seq_item = dllp_item;
+   end
    wait(ep_pl_model.pl_sent);
   `uvm_info("EP_CONTROLLER",$sformatf("dl_flit_out is %p",ep_pl_model.dl_flit_out),UVM_LOW)
    // FEC/CRC : snapshot the full 256B flit (242B DL + 8B CRC + 6B FEC) so a

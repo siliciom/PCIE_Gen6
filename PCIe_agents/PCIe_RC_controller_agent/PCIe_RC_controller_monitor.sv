@@ -54,6 +54,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
     // training DWORDs, then OFF permanently (full descramble).
     bit             tx_in_os;
     int             tx_os_dword_count;
+    bit             tx_os_started;   // [FIX] first non-zero TX dword seen
+    bit             rx_os_started;   // [FIX] first non-zero RX dword seen
     bit             rx_in_os;
     int             rx_os_dword_count;
     // Track total received DWORDs for logging (separate from queue size)
@@ -101,6 +103,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
        tx_lfsr = `PCIe_PL_SCRAMBLER_SEED;
         tx_in_os         = 1'b1;
         tx_os_dword_count = 0;
+        tx_os_started    = 1'b0;
+        rx_os_started    = 1'b0;
         rx_in_os         = 1'b1;
         rx_os_dword_count = 0;
         tx_total_rcvd_dwords = 0;
@@ -149,6 +153,15 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
 
          if (pcie_seq_item.tx_valid) begin
             tx_data = rc_pipe_intf_tx.tx_data;
+            // [FIX] Skip the leading all-zero valid dwords that appear on the PIPE
+            // (DETECT/POLLING) before the first TS1. They are not part of the 232-dword
+            // training stream; counting them shifted the OS phase, the exit-from-OS
+            // point, the LFSR and the flit boundary by 5 dwords, so every flit was
+            // descrambled with the wrong LFSR -> FEC/CRC mismatch on every flit.
+            if (!tx_os_started) begin
+               if (tx_data == '0) continue;
+               tx_os_started = 1'b1;
+            end
             `uvm_info("TX_DATA",$sformatf("tx_data_inside_monitor_rc = %h :: %d ",tx_data,tx_data),UVM_LOW)
 
             `uvm_info("RC_CONTROLLER", $sformatf(
@@ -287,6 +300,15 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
 
          if (pcie_seq_item.rx_valid) begin
             rx_data = rc_pipe_intf_rx.rx_data;
+            // [FIX] Skip the leading all-zero valid dwords that appear on the PIPE
+            // (DETECT/POLLING) before the first TS1. They are not part of the 232-dword
+            // training stream; counting them shifted the OS phase, the exit-from-OS
+            // point, the LFSR and the flit boundary by 5 dwords, so every flit was
+            // descrambled with the wrong LFSR -> FEC/CRC mismatch on every flit.
+            if (!rx_os_started) begin
+               if (rx_data == '0) continue;
+               rx_os_started = 1'b1;
+            end
 
             `uvm_info("RC_CONTROLLER", $sformatf(
                "[RX_DBG] LTSSM=%s IN_OS=%0b DWORD_CNT=%0d DWORD_IN_OS=%0d LFSR=%06h PIPE=%08h",

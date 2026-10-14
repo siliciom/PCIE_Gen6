@@ -42,6 +42,12 @@ class PCIe_RC_TL_model extends uvm_component;
   int unsigned n_tlp_rcvd;   // TLPs received from the DL model
   int unsigned n_cpl_rcvd;   // of which Cpl / CplD
 
+  // [ENUM] completions kept for a waiting sequence (e.g. enumeration)
+  //   write_dl_rx() stores every decoded completion here (key = tag) and fires
+  //   cpl_event. A sequence calls wait_completion(tag, ...) to pick it up.
+  PCIe_sequence_item cpl_rcvd [bit [`PCIe_TL_TAG_W-1:0]];
+  event              cpl_event;
+
 
   PCIe_sequence_item item;
 
@@ -544,6 +550,54 @@ class PCIe_RC_TL_model extends uvm_component;
       cpl_it.cpl_data[i] = rc_rx_get_dw(item, hdr_dw + i);
 
     cpl_write(cpl_it);
+
+    // [ENUM] keep it for the sequence that is waiting on this tag
+    if (cpl_rcvd.exists(cpl_it.tag))
+      `uvm_warning("RC_TL_MODEL", $sformatf("DUPLICATE_COMPLETION tag=0x%0h - older one replaced", cpl_it.tag))
+    cpl_rcvd[cpl_it.tag] = cpl_it;
+    -> cpl_event;
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // [ENUM] wait_completion : block until the completion for 'tag' arrives
+  //   (stored by write_dl_rx) or timeout_ns passes. It is removed from cpl_rcvd.
+  //--------------------------------------------------------------------------
+  task wait_completion(input  bit [`PCIe_TL_TAG_W-1:0] tag,
+                       input  int unsigned               timeout_ns,
+                       output PCIe_sequence_item         cpl,
+                       output bit                        timed_out);
+    cpl       = null;
+    timed_out = 1'b0;
+    // outer fork..join keeps "disable fork" from touching any other process
+    fork begin
+      fork
+        begin : wait_for_tag
+          while (!cpl_rcvd.exists(tag)) @(cpl_event);
+        end
+        begin : wait_timer
+          #(timeout_ns * 1ns);
+        end
+      join_any
+      disable fork;
+    end join
+    if (cpl_rcvd.exists(tag)) begin
+      cpl = cpl_rcvd[tag];
+      cpl_rcvd.delete(tag);
+    end
+    else begin
+      timed_out = 1'b1;
+    end
+  endtask
+
+  // [ENUM] completion status name for the log
+  function string cpl_status_str(bit [2:0] st);
+    case (st)
+      `PCIe_CPL_STATUS_SC  : return "SC";
+      `PCIe_CPL_STATUS_UR  : return "UR";
+      `PCIe_CPL_STATUS_CRS : return "CRS";
+      `PCIe_CPL_STATUS_CA  : return "CA";
+      default              : return $sformatf("RSVD(%0b)", st);
+    endcase
   endfunction
 
   function bit fc_applies(PCIe_sequence_item tr);
@@ -1030,6 +1084,11 @@ class PCIe_RC_TL_model extends uvm_component;
       end
       OHC_A3: begin  // OHC-A3 - Configuration
                 dw = '0;
+                // [FIX] OHC-A3 also carries the DW Byte Enables. They were left 0, so
+                // the EP saw first_dw_be=0000 and silently dropped every CfgWr
+                // (Command readback 0000 instead of 0004).
+                dw[7:4] = tr.last_dw_be;   // [7:4] = Last DW BE
+                dw[3:0] = tr.first_dw_be;  // [3:0] = First DW BE
                 ohc_data = new[1];
                 ohc_data[0] = dw;
       end

@@ -961,7 +961,7 @@ task rc_state_config_complete();
       bit [31:0] pre_data;
       bit        parity;
       `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_TX_PROCESS_TASK", UVM_LOW)
-      item.print();
+      if (item != null) item.print();
       `uvm_info("PCIe_PL_MODEL",$sformatf("The data_in_from PL inside tx_prpcess is %d",data_in), UVM_LOW)
         tx_process_executed = 1'b1;
 
