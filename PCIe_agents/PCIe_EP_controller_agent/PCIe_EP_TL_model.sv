@@ -1011,6 +1011,8 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     item.tlp_total_dw_count   = d_total_dw;
     item.flit_type    = PCIe_PAYLOAD_flit;
 
+    print_attr_table_check(item, "RX_REQUEST");      // [ATTR] info : RO / IDO / NS table check
+
   endfunction
 
   //--------------------------------------------------------------------------
@@ -1684,6 +1686,9 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     end
 
     build_completion(req, cpl, cpl_with_data, rdata);
+
+    print_attr_table_check(cpl, "TX_COMPLETION");    // [ATTR] info : RO / IDO / NS table check (just before the 236B completion print)
+
     print_completion(cpl);
 
     n_cpl_sent++;
@@ -2023,10 +2028,75 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     endcase
   endfunction
 
+  //==========================================================================
+  // [ATTR] ATTRIBUTE TABLE CHECK - info prints only (does not change any bit)
+  //   PCIe Base 6.x Sec 2.2.6.4 Ordering Attributes table (RO / IDO)
+  //                 Sec 2.2.6.5 No Snoop Attribute table (Cache Coherency Management)
+  //     Attr[2] = IDO (ID-Based Ordering)
+  //     Attr[1] = RO  (Relaxed Ordering)
+  //     Attr[0] = NS  (No Snoop)
+  //   Called from :
+  //     decode_tlp()       -> request received from RC  ("RX_REQUEST")
+  //     service_request()  -> just before print_completion(), the 236B completion
+  //                           sent back to RC ("TX_COMPLETION")
+  //==========================================================================
+  function void print_attr_table_check(PCIe_sequence_item tr, string where);
+    string seq_name;
+    string ord_type, ord_model;
+    string snp_type, snp_model;
+
+    // name of the sequence that sent this item (item name if no parent)
+    if (tr.get_parent_sequence() != null)
+      seq_name = tr.get_parent_sequence().get_name();
+    else
+      seq_name = tr.get_name();
+
+    `uvm_info("EP_TL_ATTR",
+      $sformatf("ENTERED_ATTR_CHECK [%s] : sequence=%s  %s %s tag=0x%0h  attr[2:0]=%03b",
+                where, seq_name, tr.pkt_mode.name(), tr.txn_type.name(), tr.tag, tr.attr), UVM_LOW)
+
+    // Ordering Attributes table : {Attr[2] IDO , Attr[1] RO}
+    case ({tr.attr[2], tr.attr[1]})
+      2'b00 : begin ord_type = "Default Ordering";
+                    ord_model = "PCI Strongly Ordered Model"; end
+      2'b01 : begin ord_type = "Relaxed Ordering";
+                    ord_model = "PCI-X Relaxed Ordering Model"; end
+      2'b10 : begin ord_type = "ID-Based Ordering";
+                    ord_model = "Independent ordering based on Requester/Completer ID"; end
+      2'b11 : begin ord_type = "Relaxed Ordering plus ID-Based Ordering";
+                    ord_model = "Logical OR of Relaxed Ordering and IDO"; end
+    endcase
+
+    `uvm_info("EP_TL_ATTR",
+      $sformatf("RO_CHECK  [%s] : sequence=%s is RO=%0b  -> Relaxed Ordering %s",
+                where, seq_name, tr.attr[1], tr.attr[1] ? "ENABLED" : "DISABLED"), UVM_LOW)
+
+    `uvm_info("EP_TL_ATTR",
+      $sformatf("IDO_CHECK [%s] : sequence=%s is IDO=%0b -> ID-Based Ordering %s",
+                where, seq_name, tr.attr[2], tr.attr[2] ? "ENABLED" : "DISABLED"), UVM_LOW)
+
+    `uvm_info("EP_TL_ATTR",
+      $sformatf("RO_IDO_ORDERING_ATTRIBUTES_TABLE_CHECKED [%s] : IDO(Attr[2])=%0b RO(Attr[1])=%0b -> Ordering Type = %s | Ordering Model = %s",
+                where, tr.attr[2], tr.attr[1], ord_type, ord_model), UVM_LOW)
+
+    // No Snoop Attribute table : Attr[0]
+    if (tr.attr[0]) begin
+      snp_type  = "No Snoop";
+      snp_model = "Hardware enforced cache coherency not expected";
+    end
+    else begin
+      snp_type  = "Default";
+      snp_model = "Hardware enforced cache coherency expected";
+    end
+
+    `uvm_info("EP_TL_ATTR",
+      $sformatf("NO_SNOOP_ATTRIBUTE_TABLE_CHECKED [%s] : No Snoop(Attr[0])=%0b -> Cache Coherency Management Type = %s | Coherency Model = %s",
+                where, tr.attr[0], snp_type, snp_model), UVM_LOW)
+
+    `uvm_info("EP_TL_ATTR",
+      $sformatf("ATTR_CHECK_DONE [%s] : sequence=%s is RO=%0b IDO=%0b NS=%0b , checked Ordering Attributes table (RO / IDO) and No Snoop Attribute table",
+                where, seq_name, tr.attr[1], tr.attr[2], tr.attr[0]), UVM_LOW)
+  endfunction
+
+
 endclass
-
-
-
-
-
-

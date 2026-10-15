@@ -600,6 +600,77 @@ class PCIe_RC_TL_model extends uvm_component;
     endcase
   endfunction
 
+  //==========================================================================
+  // [ATTR] ATTRIBUTE TABLE CHECK - info prints only (does not change any bit)
+  //   PCIe Base 6.x Sec 2.2.6.4 Table 2-12 (RO / IDO) , Sec 2.2.6.5 Table 2-13 (NS)
+  //     Attr[2] = IDO (ID-Based Ordering)
+  //     Attr[1] = RO  (Relaxed Ordering)
+  //     Attr[0] = NS  (No Snoop)
+  //   Called from send_tlp() just before pack_to_tlp_data() (the 236B TL packet print).
+  //==========================================================================
+  function void print_attr_table_check(PCIe_sequence_item tr);
+    string seq_name;
+    string ord_type, ord_model;
+    string snp_type, snp_model;
+
+    // name of the sequence that sent this item (item name if no parent)
+    if (tr.get_parent_sequence() != null)
+      seq_name = tr.get_parent_sequence().get_name();
+    else
+      seq_name = tr.get_name();
+
+    `uvm_info("RC_TL_ATTR",
+      $sformatf("ENTERED_ATTR_CHECK : sequence=%s  %s %s tag=0x%0h  attr[2:0]=%03b",
+                seq_name, tr.pkt_mode.name(), tr.txn_type.name(), tr.tag, tr.attr), UVM_LOW)
+
+    //------------------------------------------------------------------------
+    // Table 2-12 : Ordering Attributes  ->  {Attr[2] IDO , Attr[1] RO}
+    //------------------------------------------------------------------------
+    case ({tr.attr[2], tr.attr[1]})
+      2'b00 : begin ord_type = "Default Ordering";
+                    ord_model = "PCI Strongly Ordered Model"; end
+      2'b01 : begin ord_type = "Relaxed Ordering";
+                    ord_model = "PCI-X Relaxed Ordering Model"; end
+      2'b10 : begin ord_type = "ID-Based Ordering";
+                    ord_model = "Independent ordering based on Requester/Completer ID"; end
+      2'b11 : begin ord_type = "Relaxed Ordering plus ID-Based Ordering";
+                    ord_model = "Logical OR of Relaxed Ordering and IDO"; end
+    endcase
+
+    `uvm_info("RC_TL_ATTR",
+      $sformatf("RO_CHECK  : sequence=%s is RO=%0b  -> Relaxed Ordering %s",
+                seq_name, tr.attr[1], tr.attr[1] ? "ENABLED" : "DISABLED"), UVM_LOW)
+
+    `uvm_info("RC_TL_ATTR",
+      $sformatf("IDO_CHECK : sequence=%s is IDO=%0b -> ID-Based Ordering %s",
+                seq_name, tr.attr[2], tr.attr[2] ? "ENABLED" : "DISABLED"), UVM_LOW)
+
+    `uvm_info("RC_TL_ATTR",
+      $sformatf("RO_IDO_ORDERING_ATTRIBUTES_TABLE_CHECKED : IDO(Attr[2])=%0b RO(Attr[1])=%0b -> Ordering Type = %s | Ordering Model = %s",
+                tr.attr[2], tr.attr[1], ord_type, ord_model), UVM_LOW)
+
+    //------------------------------------------------------------------------
+    // Table 2-13 : Cache Coherency Management Attribute  ->  Attr[0] NS
+    //------------------------------------------------------------------------
+    if (tr.attr[0]) begin
+      snp_type  = "No Snoop";
+      snp_model = "Hardware enforced cache coherency not expected";
+    end
+    else begin
+      snp_type  = "Default";
+      snp_model = "Hardware enforced cache coherency expected";
+    end
+
+    `uvm_info("RC_TL_ATTR",
+      $sformatf("NO_SNOOP_ATTRIBUTE_TABLE_CHECKED : No Snoop(Attr[0])=%0b -> Cache Coherency Management Type = %s | Coherency Model = %s",
+                tr.attr[0], snp_type, snp_model), UVM_LOW)
+
+    `uvm_info("RC_TL_ATTR",
+      $sformatf("ATTR_CHECK_DONE : sequence=%s is RO=%0b IDO=%0b NS=%0b , checked Ordering Attributes table (RO / IDO) and No Snoop Attribute table",
+                seq_name, tr.attr[1], tr.attr[2], tr.attr[0]), UVM_LOW)
+  endfunction
+
+
   function bit fc_applies(PCIe_sequence_item tr);
     return !((tr.pkt_mode == FLIT) && (tr.flit_type != PCIe_PAYLOAD_flit));
   endfunction
@@ -679,6 +750,8 @@ class PCIe_RC_TL_model extends uvm_component;
     //----------------------------------------------------------------------
     // FLOW CONTROL : CREDITS_CONSUMED += this TLP (gate already passed in the driver)
     fc_account_tlp(tr);
+
+    print_attr_table_check(tr);      // [ATTR] info : RO / IDO / NS table check (just before the 236B TL packet print)
 
     pack_to_tlp_data(tr);
 
