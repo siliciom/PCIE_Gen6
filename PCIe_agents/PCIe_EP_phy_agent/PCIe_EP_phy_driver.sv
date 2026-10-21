@@ -58,6 +58,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
 	   fork
 	    process_sequence_items();
 	    receiving_data_ep(ep_pipe_intf_tx);
+	    serializing_data_ep();
 	    rx_sipo(ep_phy_intf_rx);
             sending_pipe_rx(ep_pipe_intf_rx);
            join_none
@@ -125,7 +126,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
 
    task sending_pipe_rx(virtual PCIe_EP_interface ep_pipe_intf_rx);
       bit [31:0] rx_parallel_data;
-      
+
       `uvm_info("EP_PHY_DRIVER","ENTERED_INTO_SENDING_PARALLEL_DATA_TO_PIPE_RX", UVM_LOW)
        ep_pipe_intf_rx.phy_status   <= 1'b0;
        ep_pipe_intf_rx.rx_elec_idle <= 1'b0;
@@ -133,6 +134,9 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
 
 	  forever begin
         @(posedge ep_pipe_intf_rx.pclk);
+        // rx_valid is driven purely from receive queue occupancy. See the note
+        // in the RC driver's sending_pipe_rx() for why the peer's tx_valid must
+        // not be used to mark Ordered Set burst boundaries here.
 	    if(rc_data_q.size() > 0)begin
             rx_parallel_data = rc_data_q.pop_front();
             ep_pipe_intf_rx.rx_data  <= rx_parallel_data;
@@ -153,15 +157,21 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
        bit        tx_detect_rx;
        bit [1:0]  powerdown;
        bit [2:0]  rate;
-       bit [31:0] serial_word;
 
        `uvm_info("EP_PHY_DRIVER","ENtered_into_Receiving_PIPE_Data_EP_Task",  UVM_LOW)
+       // Free running sampler: look at EVERY negedge and queue whatever
+       // tx_valid presents. The previous shape of this loop was
+       //   wait(tx_valid); while (tx_valid) @(negedge pclk) ...
+       // which still dropped the first dword of a burst: when a new burst
+       // started on the very cycle the previous one ended, the trailing
+       // while() had already exited, so wait() saw tx_valid already high and
+       // returned in the same delta. The following @(negedge) then landed one
+       // full cycle late, by which time the first dword had been replaced on
+       // the bus and was gone for good. That lost dword desynchronised the
+       // receiver's Ordered Set framing and descrambler LFSR. Sampling
+       // unconditionally cannot miss a dword; serialising_data_ep() below
+       // drains the queue at the serial bit rate.
        forever begin
-        wait(ep_pipe_intf_tx.tx_valid);
-        //@(negedge rc_pipe_intf_tx.pclk);
-       `uvm_info("EP_PHY_DRIVER","Started_Receiving_PIPE_Data",  UVM_LOW)
-       while(ep_pipe_intf_tx.tx_valid)
-       begin
         @(negedge ep_pipe_intf_tx.pclk);
           tx_valid      = ep_pipe_intf_tx.tx_valid;
           tx_elec_idle  = ep_pipe_intf_tx.tx_elec_idle;
@@ -172,12 +182,23 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
            tx_data = ep_pipe_intf_tx.tx_data;
            ep_data_q.push_back(tx_data);
            `uvm_info("EP_PHY_DRIVER",$sformatf("Received_Data = %08h Queue_Size = %0d",tx_data,ep_data_q.size()),UVM_LOW)
-           serial_word = ep_data_q.pop_front();
-           tx_piso(serial_word);
           end
        end
-     end
-  endtask
+   endtask
+
+   //-------------------------------------------------------------------------
+   // serializing_data_ep - drain the sampled dwords onto the serial link.
+   //   Runs at its own pace so the PIPE sampler above never misses a negedge.
+   //   tx_piso() is the only thing that drives the PHY TX pins.
+   //-------------------------------------------------------------------------
+   task serializing_data_ep();
+      bit [`PCIe_MON_DATA_W-1:0] serial_word;
+      forever begin
+         wait (ep_data_q.size() > 0);
+         serial_word = ep_data_q.pop_front();
+         tx_piso(serial_word);
+      end
+   endtask
 
 task tx_piso(input bit [`PCIe_MON_DATA_W-1:0] data_in);
        bit piso_data_out;
@@ -196,6 +217,7 @@ task tx_piso(input bit [`PCIe_MON_DATA_W-1:0] data_in);
            //`uvm_info("EP_PHY_DRIVER","EXIT_FROM_PISO_TASK_COMPLETED",UVM_LOW)
    endtask
 endclass
+
 
 
 

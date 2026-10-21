@@ -103,6 +103,22 @@ class PCIe_sequence_item extends uvm_sequence_item;
   rand pkt_mode_e pkt_mode;
 
   //--------------------------------------------------------------------------
+  // RECOVERY / SEQUENTIAL RATE NEGOTIATION CONTROLS
+  //   Non-rand and defaulted so that every existing sequence keeps its
+  //   current behaviour without needing new randomize() constraints.
+  //
+  //   target_gen       : highest PCIe generation this item must reach (1..6).
+  //                      1 => plain link-up, no Recovery at all.
+  //   directed_recovery: 1 => start at `PCIe_RATE_GEN1 and walk
+  //                      Gen1 -> Gen2 -> ... -> target_gen, entering Recovery
+  //                      between every pair of generations. Traffic and the
+  //                      externally visible link_up stay off until the final
+  //                      (target_gen) L0.
+  //--------------------------------------------------------------------------
+  int unsigned  target_gen        = 1;
+  bit           directed_recovery = 1'b0;
+
+  //--------------------------------------------------------------------------
   // FLIT OHC indication
   //   bit 0   : OHC-A
   //   bit 1   : OHC-B
@@ -332,6 +348,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
   //--------------------------------------------------------------------------
   `uvm_object_utils_begin(PCIe_sequence_item)
     `uvm_field_enum (pkt_mode_e,         pkt_mode,     UVM_ALL_ON)
+    `uvm_field_int  (target_gen,         UVM_ALL_ON)
+    `uvm_field_int  (directed_recovery,  UVM_ALL_ON)
     `uvm_field_enum (pcie_tl_txn_type_e, txn_type,     UVM_ALL_ON)
     `uvm_field_enum (pcie_tl_dir_e,      dir,          UVM_ALL_ON)
     `uvm_field_int  (address,        UVM_ALL_ON | UVM_HEX)
@@ -894,4 +912,5 @@ class PCIe_sequence_item extends uvm_sequence_item;
   endfunction
 
 endclass
+
 

@@ -377,6 +377,112 @@
 `define PCIe_TS_K_SYMBOL_IDLE        2'b00  // IDLE (K-symbol for IDLE)
 
 //==============================================================================
+// First decoded symbol of a complete Ordered Set. The 2-bit K symbols above are
+// only visible after de-precoding, so the receive path classifies Ordered Sets
+// on the fully decoded symbol 0: TS1 = 0xBC, TS2 = 0x39, IDLE = 0x4A.
+//==============================================================================
+`define PCIe_OS_SYM0_TS1             8'hBC
+`define PCIe_OS_SYM0_TS2             8'h39
+`define PCIe_OS_SYM0_IDLE            8'h4A
+
+//==============================================================================
+// Scrambler steps per Ordered Set. Symbols 0, 8 and 15 bypass the scrambler,
+// so of the 16 symbols only 13 are descrambled : 13 bytes = 104 LFSR steps.
+// send_ordered_set() keeps ONE LFSR running across every Ordered Set of a
+// burst, so the receiver can re-derive the descrambler state for Ordered Set n
+// of a burst as `PCIe_OS_LFSR_STEPS * n steps from the seed.
+//==============================================================================
+`define PCIe_OS_SCRAMBLED_BYTES     13
+`define PCIe_OS_LFSR_STEPS          (`PCIe_OS_SCRAMBLED_BYTES * 8)
+// Receive-side descrambler phase search, in BYTES, searched BOTH WAYS.
+//
+// The transmit scrambler is one continuous LFSR shared between the Ordered Set
+// path (13 scrambled bytes per 16 symbol slots, so `PCIe_OS_LFSR_STEPS steps per
+// receive window) and the 32 bit data path (scramble_32(), 4 scrambled bytes per
+// dword, so 128 steps per window). The receiver cannot tell the two apart before
+// it has decoded something, so its nominal phase drifts either way:
+//
+//   * data windows cost the transmitter MORE than the nominal 104, so the true
+//     phase runs AHEAD of nominal;
+//   * a data window that the receiver falsely accepts as an Ordered Set costs the
+//     receiver LESS than the transmitter did, so the true phase runs BEHIND.
+//
+// The search therefore has to run in both directions, which needs a backward
+// LFSR step. The polynomial is primitive, so the step is invertible.
+//
+// A window can never cost fewer than 104 steps, because any 16 consecutive slots
+// contain exactly one slot of each residue mod 16 and only slots 0, 8 and 15
+// bypass the scrambler.
+`define PCIe_RX_LFSR_PHASE_SEARCH   200
+
+//==============================================================================
+// Link data rate : PIPE `rate` encoding + TS Data Rate Identifier
+//   PCIe Base 6.0 Table 4-26. The 3-bit value on the PIPE `rate` signal is a
+//   model-internal label; what actually goes on the wire is the 5-bit Data
+//   Rate Identifier carried in TS1/TS2 symbol 4. `PCIe_RATE_GEN6 stays 3'b101
+//   because the existing Polling.Active already drives 3'b101 for Gen6.
+//==============================================================================
+`define PCIe_RATE_NOT_NEGOTIATED  3'b000
+`define PCIe_RATE_GEN1            3'b001  //  2.5 GT/s
+`define PCIe_RATE_GEN2            3'b010  //  5.0 GT/s
+`define PCIe_RATE_GEN3            3'b011  //  8.0 GT/s
+`define PCIe_RATE_GEN4            3'b100  // 16.0 GT/s
+`define PCIe_RATE_GEN5            3'b110  // 32.0 GT/s
+`define PCIe_RATE_GEN6            3'b101  // 64.0 GT/s
+
+//------------------------------------------------------------------------------
+// Data Rate Identifier : TS1/TS2 symbol 4 bit layout (Table 4-26)
+//   bit 0    : speed_change
+//   bits 5:1 : Data Rates Supported (the advertised data rate)
+//   bits 7:6 : Autonomous Change / Flit Mode Supported - not modelled
+//------------------------------------------------------------------------------
+`define PCIe_DRI_SPEED_CHANGE_BIT   0
+`define PCIe_DRI_RATE_SHIFT         1
+`define PCIe_DRI_RATE_W             5
+
+// Advertised data rate, symbol 4 bits [5:1]
+`define PCIe_DRI_GEN1  5'b00001  //  2.5 GT/s
+`define PCIe_DRI_GEN2  5'b00011  //  5.0 GT/s
+`define PCIe_DRI_GEN3  5'b00111  //  8.0 GT/s
+`define PCIe_DRI_GEN4  5'b01111  // 16.0 GT/s
+`define PCIe_DRI_GEN5  5'b11111  // 32.0 GT/s
+`define PCIe_DRI_GEN6  5'b10111  // 64.0 GT/s
+
+//------------------------------------------------------------------------------
+// Symbol indices of the 16-byte TS1/TS2 layout used by this environment.
+//   TS1 : 0 TS1 ID | 1 Link | 2 Lane | 3 N_FTS | 4 Data Rate ID
+//         5 Equalization Control | 6 Equalization Coef | 7 Latency Timer
+//   TS2 : 0 TS2 ID | 1 Link | 2 Lane | 3 N_FTS | 4 Data Rate ID
+//         5 Power/Autonomous BW   | 6 Training Control | 7 TLP Prefix
+//------------------------------------------------------------------------------
+`define PCIe_OS_SYM_TS_ID          0
+`define PCIe_OS_SYM_LINK           1
+`define PCIe_OS_SYM_LANE           2
+`define PCIe_OS_SYM_N_FTS          3
+`define PCIe_OS_SYM_RATE_ID        4
+`define PCIe_OS_SYM_EQ_CTRL        5
+`define PCIe_OS_SYM_EQ_COEF        6
+
+//==============================================================================
+// Recovery substates - PCIe Base 6.0 Section 4.2.7.4
+//==============================================================================
+`define PCIe_RECOVERY_TS1_TX_COUNT   8    // TX 8 TS1 in RcvrLock / Equalization
+`define PCIe_RECOVERY_TS1_RX_COUNT   8    // RX 8 consecutive TS1
+`define PCIe_RECOVERY_TS2_TX_COUNT   16   // TX 16 TS2 in RcvrCfg
+`define PCIe_RECOVERY_TS2_RX_COUNT   8    // RX 8 consecutive TS2
+`define PCIe_RECOVERY_IDLE_COUNT      2   // 2 IDLE in Recovery.Idle -> L0
+`define PCIe_RECOVERY_EQ_PHASE_COUNT  3   // Downstream/Upstream Phases 1..3
+// Lowest generation (8.0 GT/s) at or above which equalization is performed
+`define PCIe_EQ_MIN_GEN              3
+
+// [MERGE] Length, in PIPE dwords, of the training Ordered Set stream of a plain
+// (non directed) link-up: 58 Ordered Sets x 4 dwords. The controller monitors
+// leave Ordered Set mode / place the first flit boundary after this many dwords.
+// A directed Recovery walk uses the real count from the PL model instead
+// (rc_tx_training_dwords() / ep_tx_training_dwords()).
+`define PCIe_LINKUP_TRAINING_DWORDS  232
+
+//==============================================================================
 // FLIT mode configuration
 //==============================================================================
 `define PCIe_FLIT_DWORDS             61
@@ -671,4 +777,5 @@
 `define PCIe_FC_MPS_CREDITS          16
 // EP completion gating on RC's CplH/CplD credits (0 = off by default)
 `define PCIe_FC_GATE_EP_COMPLETIONS  0
+
 

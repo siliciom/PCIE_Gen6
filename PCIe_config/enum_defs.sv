@@ -267,6 +267,49 @@ package typedef_enums;
         CONFIG_COMPLETE,
         CONFIG_IDLE
      } config_state_e; 
+   //--------------------------------------------------------------------------
+   // recovery_state_e - Recovery substates, PCIe Base 6.0 Section 4.2.7.4.
+   //   The happy path a directed speed change walks is
+   //     RcvrLock -> Equalization (>= 8 GT/s only)
+   //            -> RcvrCfg (advertise) -> RcvrLock (re-lock at the new rate)
+   //            -> RcvrCfg (confirm)    -> Speed (only if the peer cannot
+   //                                        reach the advertised rate)
+   //            -> Idle -> L0
+   //--------------------------------------------------------------------------
+   typedef enum
+      {
+         RECOVERY_RCVR_LOCK,
+         RECOVERY_EQUALIZATION,
+         RECOVERY_SPEED,
+         RECOVERY_RCVR_CFG,
+         RECOVERY_IDLE
+      } recovery_state_e;
+
+   //--------------------------------------------------------------------------
+   // pcie_link_rate_e - the link data rate a Port operates at / advertises in
+   // the Data Rate Identifier. The enum value IS the 3-bit PIPE `rate` label.
+   //--------------------------------------------------------------------------
+   typedef enum bit [`PCIe_RATE_W-1:0] {
+      RATE_NOT_NEGOTIATED = `PCIe_RATE_NOT_NEGOTIATED,
+      RATE_GEN1          = `PCIe_RATE_GEN1,
+      RATE_GEN2          = `PCIe_RATE_GEN2,
+      RATE_GEN3          = `PCIe_RATE_GEN3,
+      RATE_GEN4          = `PCIe_RATE_GEN4,
+      RATE_GEN5          = `PCIe_RATE_GEN5,
+      RATE_GEN6          = `PCIe_RATE_GEN6
+   } pcie_link_rate_e;
+
+   //--------------------------------------------------------------------------
+   // equalization_phase_e - Equalization Control field, Section 4.2.7.4.2.
+   //   Phase 0 is the value carried outside of Recovery.Equalization.
+   //--------------------------------------------------------------------------
+   typedef enum bit [1:0] {
+      EQ_PHASE_0 = 2'd0,
+      EQ_PHASE_1 = 2'd1,
+      EQ_PHASE_2 = 2'd2,
+      EQ_PHASE_3 = 2'd3
+   } equalization_phase_e;
+
 
 typedef enum
      {
@@ -296,3 +339,4 @@ typedef struct {
 
 
 endpackage
+

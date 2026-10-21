@@ -71,6 +71,9 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_EP_detect_no_receiver_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_basic_linkup_L0_sequence.sv"
 	`include "../PCIe_sequences/PCIe_EP_basic_linkup_L0_sequence.sv"
+	// [RECOVERY] Directed Recovery / sequential rate negotiation (Gen1 -> Gen6)
+	`include "../PCIe_sequences/PCIe_RC_ltssm_recovery_sequence.sv"
+	`include "../PCIe_sequences/PCIe_EP_ltssm_recovery_sequence.sv"
       //`include "../PCIe_sequences/PCIe_MEM_3DW_FLIT_sequence.sv"
       //`include "../PCIe_sequences/PCIe_MEM_4DW_FLIT_sequence.sv"
 
@@ -194,6 +197,9 @@ package PCIe_pkg;
         `include "../PCIe_tests/PCIe_gen6_ltssm_detect_no_receiver_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_basic_linkup_L0_test.sv"
         `include "../PCIe_tests/PCIe_gen6_enumeration_test.sv"   // [ENUM]
+	// [RECOVERY] Directed Recovery / sequential rate negotiation testcase.
+	// One test drives the complete Gen1 -> Gen2 -> ... -> Gen6 walk.
+	`include "../PCIe_tests/PCIe_gen6_ltssm_recovery_test.sv"
       //`include "../PCIe_tests/PCIe_MEM_3DW_FLIT_test.sv"
       //`include "../PCIe_tests/PCIe_MEM_4DW_FLIT_test.sv"
 
@@ -301,4 +307,5 @@ package PCIe_pkg;
 
 
 endpackage
+
 

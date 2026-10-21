@@ -22,6 +22,10 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
    PCIe_RC_TL_model              rc_tl_model;
    PCIe_RC_DL_model              rc_dl_model;
    PCIe_RC_PL_model              rc_pl_model;
+   // [RECOVERY] Handle on the EP PL model (set by PCIe_environment in
+   // connect_phase). Used only to learn the length of the EP's training
+   // stream for a directed Recovery walk, see rx_training_dwords().
+   PCIe_EP_PL_model              ep_pl_model;
 
    uvm_analysis_port #(PCIe_sequence_item) rc_mon_ap_dl; //RC to EP DLP
    uvm_analysis_port #(PCIe_sequence_item) rc_ep_mon_ap_dl; // EP to RC DLP
@@ -87,7 +91,11 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
  	  rc_con_tx_mon_ap =new("rc_con_tx_mon_ap",this);
  	  rc_con_rx_mon_ap =new("rc_con_rx_mon_ap",this);
  	  rc_con_tx_256b_mon_ap =new("rc_con_tx_256b_mon_ap",this);
-      rc_pl_model = PCIe_RC_PL_model::type_id::create("rc_pl_model", this);
+      // [RECOVERY] rc_pl_model is intentionally NOT created here. PCIe_environment's
+      // connect_phase shares the controller agent's single PL model with this
+      // monitor. Creating a second instance here spawned a second, orphaned
+      // rc_rx_os_decoder() that duplicated every [RC_RECOVERY_RX_OS] message and
+      // doubled the descrambler work in run_phase.
     
       if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf_tx))
             `uvm_fatal("NO_VIF", "RC_PIPE_INTERFACE_not_found")
@@ -112,6 +120,26 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
         `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_BUILD_PHASE",UVM_LOW)
     endfunction
   
+    //-------------------------------------------------------------------------
+    // [RECOVERY] Length of the training Ordered Set stream, in PIPE dwords.
+    //   tx side : stream transmitted by the RC   (rc_pl_model)
+    //   rx side : stream transmitted by the EP   (ep_pl_model)
+    // Plain link-up returns `PCIe_LINKUP_TRAINING_DWORDS (232), exactly the
+    // value this monitor always used. For a directed Gen1 -> Gen<N> Recovery
+    // walk it is the real number of Ordered Set dwords the port sent, so the
+    // OS-mode exit, the descrambler and the 64-dword flit boundaries line up
+    // with the first data flit after the final L0.
+    //-------------------------------------------------------------------------
+    function int tx_training_dwords();
+       if (rc_pl_model == null) return `PCIe_LINKUP_TRAINING_DWORDS;
+       return int'(rc_pl_model.rc_tx_training_dwords());
+    endfunction
+
+    function int rx_training_dwords();
+       if (ep_pl_model == null) return `PCIe_LINKUP_TRAINING_DWORDS;
+       return int'(ep_pl_model.ep_tx_training_dwords());
+    endfunction
+
     task run_phase(uvm_phase phase);
        `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
        fork
@@ -161,6 +189,16 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             if (!tx_os_started) begin
                if (tx_data == '0) continue;
                tx_os_started = 1'b1;
+            end
+            // [RECOVERY] Leave OS mode BEFORE decoding the first data dword. For
+            // a plain link-up this is the same 232 point as the check below; for
+            // a directed Recovery walk the final count is only known once the
+            // last Ordered Set has gone out, i.e. before the first data dword.
+            if (tx_in_os && (tx_os_dword_count >= tx_training_dwords())) begin
+               tx_in_os = 1'b0;
+               `uvm_info("RC_CONTROLLER", $sformatf(
+                  "[TX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h (training stream length)",
+                  tx_os_dword_count, tx_lfsr), UVM_LOW)
             end
             `uvm_info("TX_DATA",$sformatf("tx_data_inside_monitor_rc = %h :: %d ",tx_data,tx_data),UVM_LOW)
 
@@ -225,8 +263,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             // full reverse process (de-precode / gray-decode / descramble) and
             // send it to the scoreboard with write() for the 256-byte compare.
             if ((rc_pl_model.link_up == 1) &&
-                (tx_os_dword_count >= 232) &&
-                (((tx_os_dword_count + 1 - 232) % 64) == 0) &&
+                (tx_os_dword_count >= tx_training_dwords()) &&
+                (((tx_os_dword_count + 1 - tx_training_dwords()) % 64) == 0) &&
                 (rc_tx_256b_flit_dword_q.size() == 64)) begin
                pcie_seq_item.rc_ep_tx_256b_flit.delete();
                for (int i = 0; i < 64; i++) begin
@@ -248,8 +286,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             if (dword_in_os == (`PCIe_TS_OS_SIZE / 4))
                dword_in_os = 0;
 
-            // After 232 training DWORDs, exit OS mode permanently
-            if (tx_in_os && (tx_os_dword_count >= 232)) begin
+            // After the training DWORDs (232 for a plain link-up), exit OS mode permanently
+            if (tx_in_os && (tx_os_dword_count >= tx_training_dwords())) begin
                tx_in_os = 1'b0;
                `uvm_info("RC_CONTROLLER", $sformatf(
                   "[TX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h — full descramble from now on",
@@ -257,7 +295,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             end
          end
        // Packet sent from RC (Actual Packet)
-      if(rc_pl_model.link_up == 1 && pcie_seq_item.data_q_rc_mon_con_tx.size()> 292 ) begin 
+      if(rc_pl_model.link_up == 1 && pcie_seq_item.data_q_rc_mon_con_tx.size()> (tx_training_dwords() + 60) ) begin 
       collect_dlp_RC_tx(dlp_rc_tx,pcie_seq_item);
       pcie_seq_item.dlp=dlp_rc_tx;
 
@@ -295,7 +333,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
          pcie_seq_item.rx_status    = rc_pipe_intf_rx.rx_status;
          pcie_seq_item.phy_status   = rc_pipe_intf_rx.phy_status;
 
-         if (rx_os_dword_count > 30000) break;
+         // [RECOVERY] extended by the extra training dwords of a directed Recovery walk
+         if (rx_os_dword_count > (30000 + rx_training_dwords() - `PCIe_LINKUP_TRAINING_DWORDS)) break;
          if (!pcie_seq_item.rx_valid) continue;
 
          if (pcie_seq_item.rx_valid) begin
@@ -308,6 +347,13 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             if (!rx_os_started) begin
                if (rx_data == '0) continue;
                rx_os_started = 1'b1;
+            end
+            // [RECOVERY] Leave OS mode BEFORE decoding the first data dword (see TX side).
+            if (rx_in_os && (rx_os_dword_count >= rx_training_dwords())) begin
+               rx_in_os = 1'b0;
+               `uvm_info("RC_CONTROLLER", $sformatf(
+                  "[RX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h (training stream length)",
+                  rx_os_dword_count, rx_lfsr), UVM_LOW)
             end
 
             `uvm_info("RC_CONTROLLER", $sformatf(
@@ -384,8 +430,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             if (dword_in_os == (`PCIe_TS_OS_SIZE / 4))
                dword_in_os = 0;
 
-            // After 232 training DWORDs, exit OS mode permanently
-            if (rx_in_os && (rx_os_dword_count >= 232)) begin
+            // After the training DWORDs (232 for a plain link-up), exit OS mode permanently
+            if (rx_in_os && (rx_os_dword_count >= rx_training_dwords())) begin
                rx_in_os = 1'b0;
                `uvm_info("RC_CONTROLLER", $sformatf(
                   "[RX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h — full descramble from now on",
@@ -394,7 +440,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
          end
 	    // Packet collected sent by EP here (Expected packet)
     // Every complete 64-dword (256B) flit after the 232 training dwords
-    if(rx_os_dword_count >= 296 && (((rx_os_dword_count - 232) % 64) == 0)) begin
+    if(rx_os_dword_count >= (rx_training_dwords() + 64) && (((rx_os_dword_count - rx_training_dwords()) % 64) == 0)) begin
     collect_dlp_RC_rx(dlp_rc_rx,pcie_seq_item);
     if(rc_pl_model.link_up==1) begin
     // rc_dl_model.handle_incoming_flit(dlp_rc_rx,is_valid);
@@ -405,7 +451,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
       end
       end
     // Original scoreboard-queue behaviour (must stay identical to the EP monitor)
-    if(rc_pl_model.link_up==1 && pcie_seq_item.data_q_rc_mon_con_rx.size() > 292) begin
+    if(rc_pl_model.link_up==1 && pcie_seq_item.data_q_rc_mon_con_rx.size() > (rx_training_dwords() + 60)) begin
        do void'(pcie_seq_item.data_q_rc_mon_con_rx.pop_front());
        while(pcie_seq_item.data_q_rc_mon_con_rx.size() > 61);
     end
@@ -807,6 +853,11 @@ endtask
       bit [`PCIe_BYTE_W-1:0] calculated_6b_fec_on_250b [0:5];        // 6B FEC calculated over the 250B body
       bit [63:0]             calculated_8b_crc_on_242b;              // 8B CRC calculated over the 242B payload
 
+      // [RECOVERY] --- gating : only the DATA phase carries 256B flits. Ordered
+      // --- Sets of the Detect / Polling / Recovery phases are never flits, so a
+      // --- mismatch there is meaningless.
+      if (rc_pl_model.link_up != 1) return;
+
       // --- reset the check status for this pipeline event ---
       pcie_seq_item.ep_to_rc_flit_fec_crc_check_done = 1'b0;
 
@@ -818,8 +869,9 @@ endtask
       // [CHANGED] was "size() != 64", which checked ONLY the first EP->RC flit.
       // Now "size() < 64" (same as EP monitor) so EVERY EP->RC flit (ACK /
       // completion flits that come later) is checked and sent to the DL.
-      if (total_dword_count < 232) return;                       // first EP->RC flit ends at count 295
-      if (((total_dword_count + 1 - 232) % 64) != 0) return;     // fire only at each 64-dword flit boundary
+      // [RECOVERY] 232 for a plain link-up, the EP's real training length for a directed Recovery walk
+      if (total_dword_count < rx_training_dwords()) return;      // first EP->RC flit ends at count 295 (plain)
+      if (((total_dword_count + 1 - rx_training_dwords()) % 64) != 0) return;     // fire only at each 64-dword flit boundary
       if (ep_flit_dword_q.size() < 64) return;                   // full 256B flit not captured yet
       flit_start = ep_flit_dword_q.size() - 64;                  // current flit = last 64 dwords
       ep_to_rc_flit_cnt++;                                       // [ADDED] EP->RC received flit number (1, 2, 3 ...)
@@ -1005,4 +1057,5 @@ endtask
 
 
 endclass
+
 

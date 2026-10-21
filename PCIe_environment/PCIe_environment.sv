@@ -86,6 +86,12 @@ class PCIe_environment extends uvm_env;
            rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_pl_model = rc_top_agent.rc_controller_agent.rc_pl_model;
 	    rc_top_agent.rc_phy_agent.rc_phy_driver.ep_pl_model = ep_top_agent.ep_controller_agent.ep_pl_model;
 	  uvm_config_db#(PCIe_RC_PL_model)::set(this,"pcie_subscriber","RC_PL_MODEL",rc_top_agent.rc_controller_agent.rc_pl_model);
+         // [RECOVERY] scoreboard : gates the per-dword data compare on the real data phase
+         uvm_config_db#(PCIe_RC_PL_model)::set(this,"pcie_scoreboard","RC_PL_MODEL",rc_top_agent.rc_controller_agent.rc_pl_model);
+         // [RECOVERY] RC monitor needs the EP PL model to know the length of the EP's
+         // training stream after a directed Recovery walk (rx_training_dwords()).
+         if (pcie_ecfg.has_ep_top_agent)
+           rc_top_agent.rc_controller_agent.rc_controller_monitor.ep_pl_model = ep_top_agent.ep_controller_agent.ep_pl_model;
         end
 
         if(pcie_ecfg.has_ep_top_agent)
@@ -98,6 +104,8 @@ class PCIe_environment extends uvm_env;
 	      // ep monitor to dl model handle sharing
 ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_dl_model = ep_top_agent.ep_controller_agent.ep_dl_model;
            uvm_config_db#(PCIe_EP_PL_model)::set(this,"pcie_subscriber","EP_PL_MODEL", ep_top_agent.ep_controller_agent.ep_pl_model);
+           // [RECOVERY] scoreboard : gates the per-dword data compare on the real data phase
+           uvm_config_db#(PCIe_EP_PL_model)::set(this,"pcie_scoreboard","EP_PL_MODEL", ep_top_agent.ep_controller_agent.ep_pl_model);
           // ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_con_rx_mon_ap.connect(ep_top_agent.ep_controller_agent.ep_tl_model.rx_imp);
 	  ep_top_agent.ep_phy_agent.ep_phy_driver.rc_pl_model = rc_top_agent.rc_controller_agent.rc_pl_model;
  
@@ -132,5 +140,6 @@ ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_dl_model = ep_top_agen
    endfunction
 
 endclass
+
 
 

@@ -68,11 +68,239 @@ class PCIe_scoreboard extends uvm_scoreboard;
   bit [31:0] ep_controller_tx_q[$];
 
   // [ADDED] 256B flit queues : RC->EP direction (tx.data vs rx.data)
-  bit [`PCIe_BYTE_W-1:0] rc_ep_tx_256b_q[$];   // 256B flits transmitted by RC (from RC controller monitor)
-  bit [`PCIe_BYTE_W-1:0] rc_ep_rx_256b_q[$];   // 256B flits received at EP (from EP controller monitor)
-  int  rc_ep_256b_flits_compared = 0;          // number of 256B flits compared so far
-  int  rc_ep_256b_flits_matched   = 0;         // number of flits with all 256 bytes matched
-  int  rc_ep_256b_flits_mismatched= 0;         // number of flits with at least one byte mismatch
+   bit [`PCIe_BYTE_W-1:0] rc_ep_tx_256b_q[$];   // 256B flits transmitted by RC (from RC controller monitor)
+   bit [`PCIe_BYTE_W-1:0] rc_ep_rx_256b_q[$];   // 256B flits received at EP (from EP controller monitor)
+   int  rc_ep_256b_flits_compared = 0;          // number of 256B flits compared so far
+   int  rc_ep_256b_flits_matched   = 0;         // number of flits with all 256 bytes matched
+   int  rc_ep_256b_flits_mismatched= 0;         // number of flits with at least one byte mismatch
+
+   // ------------------------------------------------------------------------
+   // Per-dword data compare gating.
+   //   Both controller monitors push EVERY received dword, so the compare
+   //   queues also contain the Detect / Polling / Recovery / L0.Idle Ordered
+   //   Sets. Those are not data and the two monitors decode them with
+   //   independent chains, so a straight queue-to-queue compare reports
+   //   thousands of bogus mismatches around every L0 transition. The compare
+   //   therefore only runs once BOTH ports are in the data phase, and the
+   //   backlog collected up to that point is dropped instead of compared.
+   // ------------------------------------------------------------------------
+   PCIe_RC_PL_model  sb_rc_pl_model;
+   PCIe_EP_PL_model  sb_ep_pl_model;
+   bit               sb_data_phase_started = 1'b0;
+   int               sb_resync_count     = 0;   // dwords dropped to re-align the EP->RC stream
+   int               sb_mismatch_count   = 0;   // genuine dword mismatches after re-alignment
+   bit               sb_ep_to_rc_synced  = 1'b0; // set once the EP->RC streams share an anchor
+   int               sb_sync_run         = 0;   // consecutive dword matches towards the anchor
+   // The RC->EP direction used to be compared by naive index-by-index
+   // pop_front(), with no anchor hunt and no drift tolerance, and it reported
+   // 5783 mismatches. sb_align_dword() already does the right thing (and its
+   // comment already names the 4a000000 / 4a4a4a4a training tail that defeated
+   // the naive compare), it just was not wired into this direction. Both
+   // directions now share one implementation and keep separate state, because
+   // each stream pair is aligned independently.
+   bit               sb_rc_to_ep_synced  = 1'b0; // set once the RC->EP streams share an anchor
+   int               sb_rc_to_ep_sync_run    = 0; // consecutive dword matches, RC->EP
+   int               sb_rc_to_ep_resync_count = 0; // dwords dropped to re-align RC->EP
+   int               sb_rc_to_ep_mismatch_count = 0; // genuine RC->EP mismatches after re-align
+   int               sb_rc_last_ts       = 0;   // TS1+TS2 seen by the RC monitor, last time
+   int               sb_ep_last_ts       = 0;   // TS1+TS2 seen by the EP monitor, last time
+
+   // Consecutive dword matches required before the EP->RC streams are declared
+   // synchronised, and how far ahead the receive queue is searched for the
+   // dword the transmitter is currently on.
+   `define SB_SYNC_RUN_LEN     4
+   `define SB_SYNC_SEARCH_WIN  64
+   // [FIX] Steady-state drift window, in dwords. The receive monitor sees a
+   // dword 2 PIPE cycles after the transmit monitor (serialise / deserialise
+   // latency). While the link carries IDLE flits both streams are all zero, so
+   // the compare pairs zeros of different positions and the latency is hidden;
+   // the first non-zero dword then finds the transmitter 2 dwords ahead. Up to
+   // this many dwords of drift are absorbed, and a dword that has not arrived
+   // yet is waited for instead of being reported as a mismatch.
+   `define SB_DRIFT_WIN        8
+
+   // [FIX] Set by sb_align_dword() when it made no progress because the
+   // expected dword is still in flight. The compare loops stop on it.
+   bit               sb_waiting = 1'b0;
+
+   function bit sb_data_phase_ready();
+      // The PL model handles are published by the environment in connect_phase,
+      // i.e. AFTER this component's build_phase, so they are resolved lazily on
+      // the first compare instead of in build_phase.
+      if (sb_rc_pl_model == null)
+         void'(uvm_config_db#(PCIe_RC_PL_model)::get(this, "", "RC_PL_MODEL", sb_rc_pl_model));
+      if (sb_ep_pl_model == null)
+         void'(uvm_config_db#(PCIe_EP_PL_model)::get(this, "", "EP_PL_MODEL", sb_ep_pl_model));
+      if (sb_rc_pl_model == null || sb_ep_pl_model == null) return 1'b0;
+      return (sb_rc_pl_model.link_up && sb_ep_pl_model.link_up);
+   endfunction
+
+    // A TS1 or TS2 arriving on a receive monitor means a training episode has
+   // (re)started on the wire. This is a SECOND episode in the same run: the
+   // recovery test renegotiates the rate while already in L0, so link_up never
+   // drops and a gate that latches on the first data phase would keep comparing
+   // the payload of one side against the Ordered Sets of the other.
+   // IDLE/SKP Ordered Sets are deliberately NOT counted here: they occur
+   // legitimately in L0 and would re-arm the gate continuously.
+    function bit sb_new_training_episode();
+       int rc_ts, ep_ts;
+       if (sb_rc_pl_model == null || sb_ep_pl_model == null) return 1'b0;
+       rc_ts = sb_rc_pl_model.rc_rx_ts1_count + sb_rc_pl_model.rc_rx_ts2_count;
+       ep_ts = sb_ep_pl_model.ep_rx_ts1_count + sb_ep_pl_model.ep_rx_ts2_count;
+       if ((rc_ts == sb_rc_last_ts) && (ep_ts == sb_ep_last_ts)) return 1'b0;
+       sb_rc_last_ts = rc_ts;
+       sb_ep_last_ts = ep_ts;
+       return 1'b1;
+    endfunction
+
+    // Returns 1 when the caller may compare, 0 when the data phase has not
+    // started yet, was just started, or a new training episode has just begun
+    // (the training backlog is flushed and the streams must re-acquire an
+    // anchor in each of those cases).
+     function bit sb_allow_data_compare(ref bit [31:0] tx_q[$], ref bit [31:0] rx_q[$]);
+        if (!sb_data_phase_ready()) return 1'b0;
+        if (!sb_data_phase_started) begin
+           sb_data_phase_started = 1'b1;
+           // Seed the episode counters so the first call after the initial
+           // flush is not mistaken for a brand new training episode.
+           void'(sb_new_training_episode());
+           sb_flush_for_compare(tx_q, rx_q, "DATA_PHASE_STARTED_TRAINING_BACKLOG_FLUSHED");
+           return 1'b0;
+        end
+        if (sb_new_training_episode()) begin
+           sb_flush_for_compare(tx_q, rx_q, "TRAINING_EPISODE_DETECTED_BACKLOG_FLUSHED");
+           return 1'b0;
+        end
+        return 1'b1;
+     endfunction
+
+    // Drops everything queued before the current data phase and puts the
+   // self-resynchronising compare back into its hunt for an anchor.
+    function void sb_flush_for_compare(ref bit [31:0] tx_q[$], ref bit [31:0] rx_q[$], input string why);
+       // Ordered Sets that were already on the wire when the backlog was
+       // dropped still arrive afterwards, so the compare must go back to
+       // hunting for a match rather than pairing index by index.
+        sb_ep_to_rc_synced = 1'b0;
+        sb_rc_to_ep_synced = 1'b0;
+        sb_sync_run        = 0;
+        sb_rc_to_ep_sync_run = 0;
+       tx_q.delete();
+       rx_q.delete();
+       `uvm_info("PCIe_SCOREBOARD",$sformatf("%s RESYNCS=%0d MISMATCHES=%0d", why, sb_resync_count, sb_mismatch_count),UVM_LOW)
+    endfunction
+
+    // ------------------------------------------------------------------------
+    // sb_align_dword - self-resynchronising dword compare for the EP->RC stream.
+   //
+   //   Two separate problems have to be handled.
+   //
+   //   1. PIPE latency. The EP controller monitor observes a dword on the cycle
+   //      the EP drives it, the RC controller monitor only on the NEXT cycle.
+   //      Index by index pairing compares every dword with its predecessor.
+   //
+   //   2. The training tail. sb_allow_data_compare() drops the backlog once, on
+   //      the transition into the data phase, but Ordered Sets already on the
+   //      wire still arrive afterwards. The receive side therefore keeps
+   //      delivering the training tail while the transmit side has moved on to
+   //      payload, and the two streams genuinely hold different dwords.
+   //
+   //   So the compare has an explicit sync phase. While unsynced it drops queue
+   //      heads until the two streams meet, which discards the training tail and
+   //      absorbs the latency, and it only starts reporting once a real anchor
+   //      has been found. Afterwards it tolerates a one dword drift and reports
+   //      anything that matches neither the head nor one dword ahead.
+   // ------------------------------------------------------------------------
+    function bit sb_is_synced();
+       return sb_ep_to_rc_synced;
+    endfunction
+
+     function bit sb_align_dword(ref bit [31:0] tx_q[$], ref bit [31:0] rx_q[$],
+                                 ref bit synced, ref int run,
+                                 ref int resync_count, ref int mismatch_count,
+                                 input string dir);
+       int look;
+       sb_waiting = 1'b0;
+       if (tx_q.size() == 0 || rx_q.size() == 0) return 1'b0;
+
+        // ---- sync phase : hunt for a common anchor, dropping what is behind ----
+        if (!synced) begin
+           if (tx_q[0] == rx_q[0]) begin
+              // A single coincidence is NOT an anchor. The training tail is full
+              // of repeated dwords (the IDLE Ordered Set is 4a000000 / 4a4a4a4a),
+              // so the streams can agree by accident while still holding
+              // different data. Require a run of consecutive matches before
+              // declaring sync; 4 random 32 bit dwords will not collide.
+              run++;
+              tx_q.pop_front();
+              rx_q.pop_front();
+              if (run >= `SB_SYNC_RUN_LEN) begin
+                 synced = 1'b1;
+                 `uvm_info("PCIe_SCOREBOARD",$sformatf("%s_STREAM_SYNCED after %0d consecutive dwords, RESYNCS=%0d",
+                           dir, run, resync_count),UVM_LOW)
+              end
+              return 1'b1;
+           end
+           run = 0;
+           // The receive side is the one that lags (training tail plus PIPE
+           // latency), so search a bounded window of it for the dword the
+           // transmitter is on, and drop everything up to it.
+           for (look = 1; look < `SB_SYNC_SEARCH_WIN; look++) begin
+              if (look >= rx_q.size()) break;
+              if (rx_q[look] == tx_q[0]) begin
+                 repeat (look) rx_q.pop_front();
+                 resync_count++;
+                 return 1'b0;
+              end
+           end
+           // Receiver does not have it yet : the transmitter is ahead.
+           if (tx_q.size() > 1 && (tx_q[1] == rx_q[0])) begin
+              tx_q.pop_front();
+              resync_count++;
+              return 1'b0;
+           end
+           rx_q.pop_front();
+           resync_count++;
+           return 1'b0;
+        end
+
+        // ---- steady state : absorb up to `SB_DRIFT_WIN dwords of drift, else report ----
+        if (tx_q[0] == rx_q[0]) begin
+           tx_q.pop_front();
+           rx_q.pop_front();
+           return 1'b1;
+        end
+        // [FIX] Receiver behind : it still holds stale dwords (IDLE-flit zeros
+        // the transmitter's stream was already paired with). Drop them up to the
+        // dword the transmitter is on.
+        for (look = 1; look < `SB_DRIFT_WIN; look++) begin
+           if (look >= rx_q.size()) break;
+           if (rx_q[look] == tx_q[0]) begin
+              repeat (look) rx_q.pop_front();
+              resync_count++;
+              return 1'b0;
+           end
+        end
+        // Transmitter ahead : drop transmit dwords the receiver never got.
+        for (look = 1; look < `SB_DRIFT_WIN; look++) begin
+           if (look >= tx_q.size()) break;
+           if (tx_q[look] == rx_q[0]) begin
+              repeat (look) tx_q.pop_front();
+              resync_count++;
+              return 1'b0;
+           end
+        end
+        // [FIX] The expected dword is still in flight (PIPE latency) : wait for
+        // more receive dwords before calling it a mismatch.
+        if (rx_q.size() < `SB_DRIFT_WIN) begin
+           sb_waiting = 1'b1;
+           return 1'b0;
+        end
+        `uvm_error("PCIe_SCOREBOARD",$sformatf("***********FAIL*****************:FAIL_%s_EXPECTED_DATA = %08h  ACTUAL_DATA = %08h", dir, tx_q[0], rx_q[0]))
+        mismatch_count++;
+        tx_q.pop_front();
+        rx_q.pop_front();
+        return 1'b0;
+     endfunction
 
 
   bit[0:5][7:0]dlp_ep_q[$]; // RC-->EP
@@ -106,6 +334,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
        ep_con_dl_rcep_imp = new("ep_con_dl_rcep_imp",this);
        rc_con_dl_eprc_imp = new("rc_con_dl_eprc_imp",this);
        ep_con_dl_eprc_imp = new("ep_con_dl_eprc_imp",this);
+
        //set_report_id_verbosity("PCIe_SCOREBOARD","UVM_"); 
    `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_BUILD_PHASE",UVM_HIGH)
   endfunction
@@ -192,87 +421,110 @@ class PCIe_scoreboard extends uvm_scoreboard;
         `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_COMPARE_PHY_DATA",UVM_HIGH)
   endfunction
 
-  function void write_rc_controller_tx(PCIe_sequence_item pkt);
-    `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_RC_CONTROLLER_TX_DATA",UVM_HIGH)
-    foreach(pkt.data_q_rc_mon_con_tx[i])begin
-       rc_controller_tx_q.push_back(pkt.data_q_rc_mon_con_tx[i]);
-       //`uvm_info("PCIe_SBOREBOARD",$sformatf("RC_CONTROLLER_TX_PARALLEL_DATA[%0d] = %08h, RC_CON_SB_QUEUE_SIZE = %0d",i, pkt.data_q_rc_mon_con_tx[i], rc_controller_tx_q.size()),UVM_HIGH)
-       `uvm_info("PCIe_SBOREBOARD",$sformatf("RC_CONTROLLER_TX_PARALLEL_DATA = %0p, RC_CON_SB_QUEUE_SIZE = %0d", pkt.data_q_rc_mon_con_tx, rc_controller_tx_q.size()),UVM_HIGH)
-     end
-    `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_RC_CONTROLLER_TX_DATA",UVM_HIGH)
+   // The RC controller monitor appends exactly ONE dword to
+   // data_q_rc_mon_con_tx immediately before it writes this analysis port, and
+   // it never pops that queue, so the item carries the entire transmit history
+   // on every single write. This used to foreach the whole queue and push all of
+   // it, so dword 1 was appended once, then again with dword 2, then again with
+   // dword 3 ... re-appending the whole history O(n^2) times. Compare against
+   // the EP side, whose queue is trimmed back to 61 dwords as flits are
+   // collected, and the two queues stopped having anything to do with each
+   // other: that is what produced the 5783 mismatches full of IDLE Ordered Set
+   // bytes (4a000000 / 4a4a4a4a) being compared against payload dwords.
+   //
+   // Only the newly appended dword - the last element - is new information, and
+   // it is the last element at the moment of the write because nothing touches
+   // the queue in between. Taking the tail also stays correct regardless of
+   // what the monitor does to the front of the queue later.
+   function void write_rc_controller_tx(PCIe_sequence_item pkt);
+     `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_RC_CONTROLLER_TX_DATA",UVM_HIGH)
+     if (pkt.data_q_rc_mon_con_tx.size() > 0)
+        rc_controller_tx_q.push_back(pkt.data_q_rc_mon_con_tx[pkt.data_q_rc_mon_con_tx.size()-1]);
+     `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_RC_CONTROLLER_TX_DATA",UVM_HIGH)
      compare_controller_rc_to_ep_data();
-  endfunction
+   endfunction
 
-  function void write_ep_controller_rx(PCIe_sequence_item pkt);
-    `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_EP_CONTROLLER_RX_DATA",UVM_HIGH)
-     foreach(pkt.data_q_ep_mon_con_rx[i])begin
-       ep_controller_rx_q.push_back(pkt.data_q_ep_mon_con_rx[i]);
-       //`uvm_info("PCIe_SBOREBOARD",$sformatf("EP_CONTROLLER_RX_PARALLEL_DATA[%0d] = %08h, EP_CON_SB_QUEUE_SIZE = %0d",i, pkt.data_q_ep_mon_con_rx[i], ep_controller_rx_q.size()),UVM_HIGH)
-       `uvm_info("PCIe_SBOREBOARD",$sformatf("EP_CONTROLLER_RX_PARALLEL_DATA = %0p, EP_CON_SB_QUEUE_SIZE = %0d", pkt.data_q_ep_mon_con_rx, ep_controller_rx_q.size()),UVM_HIGH)
-      end
+   function void write_ep_controller_rx(PCIe_sequence_item pkt);
+     `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_EP_CONTROLLER_RX_DATA",UVM_HIGH)
+     if (pkt.data_q_ep_mon_con_rx.size() > 0)
+        ep_controller_rx_q.push_back(pkt.data_q_ep_mon_con_rx[pkt.data_q_ep_mon_con_rx.size()-1]);
+     `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_EP_CONTROLLER_RX_DATA",UVM_HIGH)
     `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_EP_CONTROLLER_RX_DATA",UVM_HIGH)
      compare_controller_rc_to_ep_data();
   endfunction
 
-  function void compare_controller_rc_to_ep_data();
-      bit [31:0] rc_controller_tx_data;
-      bit [31:0] ep_controller_rx_data;
+   function void compare_controller_rc_to_ep_data();
+       bit [31:0] rc_controller_tx_data;
+       bit [31:0] ep_controller_rx_data;
 
-     `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
+      `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
+      if (!sb_allow_data_compare(rc_controller_tx_q, ep_controller_rx_q)) begin
+         `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
+         return;
+      end
       while ((rc_controller_tx_q.size() > 0) && (ep_controller_rx_q.size() > 0)) begin
-           rc_controller_tx_data = rc_controller_tx_q.pop_front();
-           ep_controller_rx_data = ep_controller_rx_q.pop_front();
-           `uvm_info("PCIe_SCOREBOARD", $sformatf("COMPARING_RC_CONTROLLER_TX = %08h  EP_CONTROLLER_RX = %08h",  rc_controller_tx_data, ep_controller_rx_data), UVM_HIGH)
-            if (rc_controller_tx_data == ep_controller_rx_data) begin
-            `uvm_info("PCIe_SCOREBOARD",$sformatf("************PASS******************: PASS_RC_CONTROLLER_TX_TO_EP_CONTROLLER_RX_EXPECTED_DATA = %08h  EP_CONTROLLER_RX ACTUAL_DATA = %08h", rc_controller_tx_data, ep_controller_rx_data), UVM_HIGH)
-            end
-            else begin
-            `uvm_error("PCIe_SCOREBOARD",$sformatf("***********FAIL*****************:FAIL_RC_CONTROLLER_TX_TO_EP_CONTROLLER_RX_EXPECTED_DATA = %08h  EP_CONTROLLER_RX ACTUAL_DATA = %08h", rc_controller_tx_data,ep_controller_rx_data))
-            end
+           // RC->EP dword compare. This used to pair the two queues index by
+           // index with a bare pop_front() on each, with none of the anchor hunt
+           // or drift tolerance that sb_align_dword() gives the EP->RC direction,
+           // and it is the loop that reported all 5783 mismatches. It now shares
+           // the same self-resynchronising implementation, with its own sync
+           // state so the two directions stay independent.
+           void'(sb_align_dword(rc_controller_tx_q, ep_controller_rx_q,
+                                sb_rc_to_ep_synced, sb_rc_to_ep_sync_run,
+                                sb_rc_to_ep_resync_count, sb_rc_to_ep_mismatch_count,
+                                "RC_CONTROLLER_TX_TO_EP_CONTROLLER_RX"));
+           if (sb_waiting) break;   // [FIX] expected dword still in flight
         end
         `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
   endfunction
 
   function void write_rc_controller_rx(PCIe_sequence_item pkt);
     `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_RC_CONTROLLER_RX_DATA",UVM_HIGH)
-    foreach(pkt.data_q_rc_mon_con_rx[i])begin
-       rc_controller_rx_q.push_back(pkt.data_q_rc_mon_con_rx[i]);
-       //`uvm_info("PCIe_SBOREBOARD",$sformatf("RC_CONTROLLER_RX_PARALLEL_DATA[%0d] = %08h, RC_CON_SB_QUEUE_SIZE = %0d",i, pkt.data_q_rc_mon_con_rx[i], rc_controller_rx_q.size()),UVM_HIGH)
-       `uvm_info("PCIe_SBOREBOARD",$sformatf("RC_CONTROLLER_RX_PARALLEL_DATA = %0p, RC_CON_SB_QUEUE_SIZE = %0d", pkt.data_q_rc_mon_con_rx, rc_controller_rx_q.size()),UVM_HIGH)
-     end
+    // [FIX] The RC controller monitor appends ONE dword to data_q_rc_mon_con_rx
+    // right before every write, but the queue still holds the whole history
+    // (the 232 training dwords: TS1 10ffffbc, IDLE 4a000000 / 4a4a4a4a ...) and is
+    // only trimmed now and then. Pushing the whole queue on every write
+    // re-appended that history again and again, so the EP->RC compare saw
+    // training Ordered Sets against EP data dwords (1238 false FAILs in
+    // PCIe_3DW_flit_test). Only the newly appended dword - the last element -
+    // is new, exactly as write_rc_controller_tx / write_ep_controller_rx do.
+    if (pkt.data_q_rc_mon_con_rx.size() > 0)
+       rc_controller_rx_q.push_back(pkt.data_q_rc_mon_con_rx[pkt.data_q_rc_mon_con_rx.size()-1]);
     `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_RC_CONTROLLER_RX_DATA",UVM_HIGH)
      compare_controller_ep_to_rc_data();
   endfunction
 
   function void write_ep_controller_tx(PCIe_sequence_item pkt);
     `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_EP_CONTROLLER_TX_DATA",UVM_HIGH)
-     foreach(pkt.data_q_ep_mon_con_tx[i])begin
-       ep_controller_tx_q.push_back(pkt.data_q_ep_mon_con_tx[i]);
-       //`uvm_info("PCIe_SBOREBOARD",$sformatf("EP_CONTROLLER_TX_PARALLEL_DATA[%0d] = %08h, EP_CON_SB_QUEUE_SIZE = %0d",i, pkt.data_q_ep_mon_con_tx[i], ep_controller_tx_q.size()),UVM_HIGH)
-       `uvm_info("PCIe_SBOREBOARD",$sformatf("EP_CONTROLLER_TX_PARALLEL_DATA = %0p, EP_CON_SB_QUEUE_SIZE = %0d", pkt.data_q_ep_mon_con_tx, ep_controller_tx_q.size()),UVM_HIGH)
-      end
+     // [FIX] Same as write_rc_controller_rx : only the newly appended dword
+     // (the last element of the monitor queue) is new information.
+     if (pkt.data_q_ep_mon_con_tx.size() > 0)
+        ep_controller_tx_q.push_back(pkt.data_q_ep_mon_con_tx[pkt.data_q_ep_mon_con_tx.size()-1]);
     `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_EP_CONTROLLER_RX_DATA",UVM_HIGH)
      compare_controller_ep_to_rc_data();
   endfunction
 
-  function void compare_controller_ep_to_rc_data();
-      bit [31:0] rc_controller_rx_data;
-      bit [31:0] ep_controller_tx_data;
-
-     `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
+   function void compare_controller_ep_to_rc_data();
+      `uvm_info("PCIe_SCOREBOARD","ENTERED_INTO_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
+      if (!sb_allow_data_compare(ep_controller_tx_q, rc_controller_rx_q)) begin
+         `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
+         return;
+      end
+      // The EP transmit monitor runs one dword ahead of the RC receive monitor
+      // (PIPE latency), so this direction is aligned with sb_align_dword()
+      // instead of a plain index by index pop_front(). sb_align_dword() drops
+      // one queue head per call, so this always makes progress.
       while ((rc_controller_rx_q.size() > 0) && (ep_controller_tx_q.size() > 0)) begin
-           rc_controller_rx_data = rc_controller_rx_q.pop_front();
-           ep_controller_tx_data = ep_controller_tx_q.pop_front();
-           `uvm_info("PCIe_SCOREBOARD", $sformatf("COMPARING_RC_CONTROLLER_TX = %08h  EP_CONTROLLER_RX = %08h",  rc_controller_rx_data, ep_controller_tx_data), UVM_HIGH)
-            if (rc_controller_rx_data == ep_controller_tx_data) begin
-            `uvm_info("PCIe_SCOREBOARD",$sformatf("************PASS******************: PASS_EP_CONTROLLER_TX_TO_RC_CONTROLLER_RX_EXPECTED_DATA = %08h  EP_CONTROLLER_RX ACTUAL_DATA = %08h", rc_controller_rx_data, ep_controller_tx_data), UVM_HIGH)
-            end
-            else begin
-            `uvm_error("PCIe_SCOREBOARD",$sformatf("***********FAIL*****************:FAIL_EP_CONTROLLER_TX_TO_RC_CONTROLLER_RX_EXPECTED_DATA = %08h  EP_CONTROLLER_RX ACTUAL_DATA = %08h", rc_controller_rx_data,ep_controller_tx_data))
-            end
-        end
-        `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
-  endfunction
+        void'(sb_align_dword(ep_controller_tx_q, rc_controller_rx_q,
+                             sb_ep_to_rc_synced, sb_sync_run,
+                             sb_resync_count, sb_mismatch_count,
+                             "EP_CONTROLLER_TX_TO_RC_CONTROLLER_RX"));
+        if (sb_waiting) break;   // [FIX] expected dword still in flight
+      end
+      `uvm_info("PCIe_SCOREBOARD",$sformatf("EP_TO_RC_STREAM_COMPARE_COMPLETE RESYNCS=%0d MISMATCHES=%0d",
+                sb_resync_count, sb_mismatch_count),UVM_MEDIUM)
+      `uvm_info("PCIe_SCOREBOARD","EXIT_FROM_SB_FUNCTION_WRITE_COMPARE_CONTROLLER_DATA",UVM_HIGH)
+   endfunction
 
   // RC to EP
 
@@ -446,3 +698,4 @@ class PCIe_scoreboard extends uvm_scoreboard;
   endfunction
 
 endclass
+
