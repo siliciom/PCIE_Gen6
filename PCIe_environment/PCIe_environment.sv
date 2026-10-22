@@ -22,6 +22,8 @@ class PCIe_environment extends uvm_env;
    PCIe_EP_top_agent            ep_top_agent;
    PCIe_scoreboard              pcie_scoreboard;
    PCIe_subscriber              pcie_subscriber;
+   // [ORDERING] checks that TLPs leave the RC TL in an order allowed by Table 2-42
+   PCIe_ordering_checker        pcie_ordering_checker;
 
    PCIe_env_config              pcie_ecfg;
    uvm_event                    rc_to_ep_bit_event;
@@ -68,6 +70,12 @@ class PCIe_environment extends uvm_env;
       if(pcie_ecfg.has_subscriber)
       begin
          pcie_subscriber = PCIe_subscriber::type_id::create("pcie_subscriber", this);
+      end
+
+      // [ORDERING] ordering checker (only when the RC agent exists)
+      if(pcie_ecfg.has_rc_top_agent)
+      begin
+         pcie_ordering_checker = PCIe_ordering_checker::type_id::create("pcie_ordering_checker", this);
       end
       `uvm_info(get_type_name(),"EXIT_BUILD_PHASE",  UVM_LOW)
    endfunction
@@ -130,6 +138,16 @@ ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_dl_model = ep_top_agen
        end
 
       // Subscriber Connections
+
+      // [ORDERING] listen to EXISTING ports only (no driver / TL model change)
+      //   issued : RC driver tx_tl_ap   (TLP given to the RC TL model)
+      //   sent   : RC TL     tlp_dl_ap  (TLP sent from the RC TL model to the RC DL model)
+      if(pcie_ecfg.has_rc_top_agent)
+      begin
+         rc_top_agent.rc_controller_agent.rc_controller_driver.tx_tl_ap.connect(pcie_ordering_checker.issued_imp);
+         rc_top_agent.rc_controller_agent.rc_tl_model.tlp_dl_ap.connect(pcie_ordering_checker.sent_imp);
+      end
+
       if(pcie_ecfg.has_subscriber)
       begin
          // Example:
@@ -140,6 +158,3 @@ ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_dl_model = ep_top_agen
    endfunction
 
 endclass
-
-
-

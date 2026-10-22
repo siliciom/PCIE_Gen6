@@ -25,6 +25,8 @@ package PCIe_pkg;
 	`include "../PCIe_config/PCIe_env_config.sv"
 	//`include "../PCIe_config/enum_defs.sv"
 `include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_TL_model.sv"
+	// [ORDERING] PCIe 6.1 Table 2-42 ordering rules (used by PCIe_ordering_checker)
+	`include "../PCIe_agents/PCIe_ordering_rules.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_PL_model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_TL_model.sv"
@@ -183,6 +185,8 @@ package PCIe_pkg;
 
 
         `include "../PCIe_environment/PCIe_scoreboard.sv"
+        // [ORDERING] checker : RC TL issue order vs send order against Table 2-42
+        `include "../PCIe_environment/PCIe_ordering_checker.sv"
         `include "../PCIe_environment/PCIe_subscriber.sv"
         `include "../PCIe_environment/PCIe_environment.sv"
 
@@ -307,5 +311,3 @@ package PCIe_pkg;
 
 
 endpackage
-
-
