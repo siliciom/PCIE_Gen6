@@ -1,5 +1,5 @@
 #set testname "PCIe_base_test"
-set testname "PCIe_3DW_flit_test"
+#set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_IO_3DW_FLIT_test"
 #set testname "PCIe_gen6_ltssm_electrical_idle_during_training_test"
 #set testname "PCIe_gen6_ltssm_detect_no_receiver_test"
@@ -12,8 +12,8 @@ set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGWr1_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGRd0_test"
 #set testname "PCIe_gen6_enumeration_test"
-#set testname "PCIe_gen6_ltssm_recovery_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGRd1_test"
+set testname "PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_Random_test"
 
 vlib work
 vmap work work
@@ -34,6 +34,7 @@ add wave -r /PCIe_top/*
 
 add log -r /*
 run -all
+
 
 
 
