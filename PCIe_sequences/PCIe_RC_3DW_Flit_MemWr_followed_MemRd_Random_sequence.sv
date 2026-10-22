@@ -65,7 +65,7 @@ class PCIe_RC_3DW_Flit_MemWr_followed_MemRd_Random_sequence extends PCIe_RC_cont
        })
       `uvm_error("3DW_FLIT_MEMWR_FOLLOWED_MEMRD_RANDOM","randomize failed for mwr")
 
-    `uvm_info("TL_MWR",$sformatf("Sending 3DW Flit MemWr (Random) - part of Wr followed by Rd"), UVM_LOW)
+    `uvm_info("TL_MWR",$sformatf("Sending_3DW_Flit_MemWr (Random) - part of Wr followed by Rd"), UVM_LOW)
     pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
@@ -106,7 +106,7 @@ class PCIe_RC_3DW_Flit_MemWr_followed_MemRd_Random_sequence extends PCIe_RC_cont
        })
       `uvm_error("3DW_FLIT_MEMWR_FOLLOWED_MEMRD_RANDOM","randomize failed for mrd")
 
-    `uvm_info("TL_MRD",$sformatf("Sending 3DW Flit MemRd (Random) - readback of prior MemWr"), UVM_LOW)
+    `uvm_info("TL_MRD",$sformatf("Sending_3DW_Flit_MemRd (Random) - readback of prior MemWr"), UVM_LOW)
     pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
@@ -115,3 +115,4 @@ class PCIe_RC_3DW_Flit_MemWr_followed_MemRd_Random_sequence extends PCIe_RC_cont
   endtask
 
 endclass
+
