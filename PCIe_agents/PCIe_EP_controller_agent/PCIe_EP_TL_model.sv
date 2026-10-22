@@ -145,6 +145,9 @@ class PCIe_EP_TL_model extends uvm_component;
   int unsigned n_cfg_rd;
   int unsigned n_cfg_wr;
   int unsigned n_cfg_ur;
+  int unsigned n_dmwr_rcvd;        // [FLIT_SEG] DMWr TLPs received (one Cpl each)
+  int unsigned n_cpl_split_txn;    // [FLIT_SEG] completions that had to be split
+  int unsigned n_cpl_split_parts;  // [FLIT_SEG] CplD parts sent for them
 
   //==========================================================================
 
@@ -829,6 +832,9 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
                   "cfg_rd=%0d cfg_wr=%0d cfg_unsupported=%0d"},
                  n_tlp_rcvd, n_cpl_sent, n_ecrc_pass, n_ecrc_fail,
                  n_cfg_rd, n_cfg_wr, n_cfg_ur), UVM_LOW)
+    `uvm_info("EP_TL_FLIT_SEG",
+      $sformatf("EP_FLIT_SEG_SUMMARY : DMWr received=%0d (one Cpl each)  split completions=%0d  CplD parts sent=%0d",
+                 n_dmwr_rcvd, n_cpl_split_txn, n_cpl_split_parts), UVM_LOW)
   endfunction
 
   //==========================================================================
@@ -1685,7 +1691,29 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       return;
     end
 
+    // [FLIT_SEG] Deferrable Memory Write : each segment of a split DMWr is its
+    // own request, so it gets its own Cpl (no data) in its own FLIT.
+    if (d_txn_type == PCIe_TL_MEM && d_dir == PCIe_TL_WRITE && d_mem_deferrable) begin
+      n_dmwr_rcvd++;
+      `uvm_info("EP_TL_FLIT_SEG",
+        $sformatf("DMWr #%0d received : addr=0x%0h len=%0d DW tag=0x%0h -> Cpl (SC, no data) sent in its own FLIT : 12 B Cpl header + 224 B zero (NOP) padding",
+                  n_dmwr_rcvd, d_address, d_payload_dw, d_tag), UVM_LOW)
+    end
+
+    // [FLIT_SEG] Completion with data that does not fit one 236 B TLP region
+    // (e.g. MRd of 1024 DW) -> several CplDs, one per FLIT, same rule as the
+    // RC TL model uses for requests.
+    if ((d_mode == FLIT) && cpl_with_data &&
+        ((`PCIe_TL_CPL_HDR_DW + `PCIe_TL_OHC_A_DW + rdata.size()) > `PCIe_FLIT_TLP_REGION_DW)) begin
+      send_split_completions(req, rdata);
+      return;
+    end
+
     build_completion(req, cpl, cpl_with_data, rdata);
+
+    // [FLIT_SEG] completion of one DMWr segment : show its own FLIT layout
+    if (d_txn_type == PCIe_TL_MEM && d_dir == PCIe_TL_WRITE && d_mem_deferrable && d_mode == FLIT)
+      print_cpl_flit_layout(cpl, $sformatf("Cpl for DMWr #%0d (tag 0x%0h)", n_dmwr_rcvd, d_tag));
 
     print_attr_table_check(cpl, "TX_COMPLETION");    // [ATTR] info : RO / IDO / NS table check (just before the 236B completion print)
 
@@ -1719,7 +1747,9 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
   function void build_completion(PCIe_sequence_item req,
                                  PCIe_sequence_item cpl,
                                  bit                with_data,
-                                 bit [`PCIe_TL_DATA_DW_W-1:0] rdata []);
+                                 bit [`PCIe_TL_DATA_DW_W-1:0] rdata [],
+                                 int                bc_ovr = -1,    // [FLIT_SEG] Byte Count of a split CplD part
+                                 int                la_ovr = -1);   // [FLIT_SEG] Lower Address of a split CplD part
 
     bit [`PCIe_TL_DATA_DW_W-1:0] hdr [];
     bit [`PCIe_TL_DATA_DW_W-1:0] dw0, dw1, dw2, ohc_a5;
@@ -1779,6 +1809,11 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       bc = `PCIe_TL_CPL_DEFAULT_BYTE_CNT;
       la = '0;
     end
+
+    // [FLIT_SEG] parts 2..N of a split CplD : remaining Byte Count and the
+    // Lower Address of the first byte this part returns (Section 2.3.1.1)
+    if (bc_ovr >= 0) bc = bc_ovr[`PCIe_TL_CPL_BYTE_COUNT_W-1:0];   // 4096 -> 000h
+    if (la_ovr >= 0) la = la_ovr[`PCIe_TL_CPL_LOWER_ADDR_W-1:0];
 
     cpl.byte_count    = bc;
     cpl.lower_address = la;
@@ -1890,6 +1925,142 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
     pack_completion_region(cpl);
 
+  endfunction
+
+  //==========================================================================
+  // [FLIT_SEG] send_split_completions
+  //
+  //   A CplD whose 3 DW header (+ OHC-A5) + data does not fit the 236 byte
+  //   FLIT TLP region is returned as several CplDs, each a complete TLP in
+  //   its own FLIT (same split rule as the RC TL model uses for requests):
+  //
+  //     max data / CplD = 59 - 3 (Cpl header) - OHC-A5 (0|1)  DW
+  //       no OHC-A5 : 56 DW -> 1024 DW = 19 CplDs (last 16 DW)
+  //       OHC-A5    : 55 DW -> 1024 DW = 19 CplDs (last 34 DW)
+  //
+  //   Every part carries the same Tag / Requester ID. Byte Count = bytes
+  //   still to be returned INCLUDING this part (Section 2.2.9), so only the
+  //   last part has Byte Count == its own data; Lower Address = address of
+  //   the first byte the part returns.
+  //==========================================================================
+  function void send_split_completions(PCIe_sequence_item req,
+                                       bit [`PCIe_TL_DATA_DW_W-1:0] rdata []);
+    bit [`PCIe_TL_DATA_DW_W-1:0]        part [];
+    bit [`PCIe_TL_CPL_LOWER_ADDR_W-1:0] la0;
+    PCIe_sequence_item                  cpl;
+    int unsigned total_dw, max_dw, n_part, off_dw, len_dw, lead_off;
+    int          bc_total, bc_left, bytes_this;
+    bit          first_needs_ohc;
+    string       rows;
+
+    // Byte Count / Lower Address of the whole request (Table 2-40 / 2-41)
+    req.first_dw_be = d_first_dw_be;
+    req.last_dw_be  = d_last_dw_be;
+    req.length      = d_length;
+    req.address     = d_address;
+    bc_total = req.calc_byte_count();
+    if (bc_total == 0) bc_total = 4096;            // 000h encodes 4096
+    la0      = req.calc_lower_address();
+
+    // leading disabled bytes of the first DW (they are not counted in Byte Count)
+    casez (d_first_dw_be)
+      4'b???1 : lead_off = 0;
+      4'b??10 : lead_off = 1;
+      4'b?100 : lead_off = 2;
+      4'b1000 : lead_off = 3;
+      default : lead_off = 0;
+    endcase
+
+    first_needs_ohc = (cfg_status_override != `PCIe_CPL_STATUS_SC) || (la0[1:0] != 2'b00);
+    total_dw = rdata.size();
+    max_dw   = PCIe_sequence_item::flit_seg_max_payload_dw(`PCIe_TL_CPL_HDR_DW,
+                                                           first_needs_ohc ? `PCIe_TL_OHC_A_DW : 0, 0);
+    n_part   = PCIe_sequence_item::flit_seg_count(total_dw, max_dw);
+
+    n_cpl_split_txn++;
+    rows    = "";
+    off_dw  = 0;
+    bc_left = bc_total;
+
+    for (int unsigned i = 0; i < n_part; i++) begin
+      len_dw = ((total_dw - off_dw) > max_dw) ? max_dw : (total_dw - off_dw);
+      part   = new[len_dw];
+      for (int unsigned k = 0; k < len_dw; k++) part[k] = rdata[off_dw + k];
+
+      cpl = PCIe_sequence_item::type_id::create($sformatf("ep_tl_completion_part%0d", i));
+      if (i == 0)
+        build_completion(req, cpl, 1'b1, part);                        // Byte Count = whole request
+      else
+        build_completion(req, cpl, 1'b1, part, bc_left,
+                         int'((d_address + (64'(off_dw) * `PCIe_TL_DW_BYTES)) & 64'h7F));
+      cpl.is_flit_segment = 1'b1;
+      cpl.flit_seg_idx    = i;
+      cpl.flit_seg_total  = n_part;
+
+      rows = {rows, $sformatf("          %3d  | tag 0x%04h | %3d DW (%4d B) | Byte Count %4d | Lower Addr 0x%02h | %3d B zero (NOP) padded\n",
+                              i + 1, cpl.tag, len_dw, len_dw * `PCIe_TL_DW_BYTES,
+                              (cpl.byte_count == 0) ? 4096 : int'(cpl.byte_count), cpl.lower_address,
+                              `PCIe_FLIT_TLP_BYTES - (cpl.tlp_total_dw_count * `PCIe_TL_DW_BYTES))};
+
+      print_cpl_flit_layout(cpl, $sformatf("CplD part %0d / %0d (tag 0x%0h)", i + 1, n_part, d_tag));
+      print_attr_table_check(cpl, "TX_COMPLETION");
+      print_completion(cpl);
+      n_cpl_sent++;
+      n_cpl_split_parts++;
+      `uvm_info("EP_TL_FLIT_SEG",
+        $sformatf("SPLIT_CPLD_PART %0d/%0d SENT_TO_EP_DL_MODEL : %0d DW, Byte Count=%0d (completion #%0d)",
+                  i + 1, n_part, len_dw, bc_left, n_cpl_sent), UVM_LOW)
+      fc_account_cpl(cpl);
+      tl_ap.write(cpl);
+
+      bytes_this = (len_dw * `PCIe_TL_DW_BYTES) - ((i == 0) ? lead_off : 0);
+      bc_left   -= bytes_this;
+      off_dw    += len_dw;
+    end
+
+    `uvm_info("EP_TL_FLIT_SEG",
+      $sformatf({"\n",
+        "         ============================================================================\n",
+        "            FLIT MODE COMPLETION SEGMENTATION  (CplD does not fit one 236 B region)\n",
+        "         ============================================================================\n",
+        "          Request            : MRd tag=0x%0h  %0d DW (%0d B, Byte Count %0d)\n",
+        "          CplD header        : %0d DW (%0d B)  OHC-A5 : %0d DW\n",
+        "          Max data / CplD    : %0d DW (%0d B)\n",
+        "          CplDs / FLITs      : ceil(%0d / %0d) = %0d\n",
+        "         ----------------------------------------------------------------------------\n",
+        "%s",
+        "         ============================================================================"},
+        d_tag, total_dw, total_dw * `PCIe_TL_DW_BYTES, bc_total,
+        `PCIe_TL_CPL_HDR_DW, `PCIe_TL_CPL_HDR_DW * `PCIe_TL_DW_BYTES, first_needs_ohc ? 1 : 0,
+        max_dw, max_dw * `PCIe_TL_DW_BYTES,
+        total_dw, max_dw, n_part, rows), UVM_LOW)
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // [FLIT_SEG] print_cpl_flit_layout : Cpl / CplD inside its 236 B TLP region
+  //   Cpl  (DMWr) : bytes 0-11 Cpl header, 12-235 zero (224 B)
+  //   CplD (MRd)  : bytes 0-11 Cpl header, 12-.. data, rest zero
+  //--------------------------------------------------------------------------
+  function void print_cpl_flit_layout(PCIe_sequence_item cpl, string what);
+    int unsigned hdr_b, pl_b, used_b, zero_b, pos;
+    string       s;
+    hdr_b  = cpl.tlp_header_dw_count  * `PCIe_TL_DW_BYTES;
+    pl_b   = cpl.tlp_payload_dw_count * `PCIe_TL_DW_BYTES;
+    used_b = hdr_b + pl_b;
+    zero_b = `PCIe_FLIT_TLP_BYTES - used_b;
+    s   = $sformatf("\n          ===== COMPLETION FLIT : %s (236 B TLP region) =====\n", what);
+    pos = 0;
+    s   = {s, $sformatf("          bytes %3d - %3d : %s header %3d B\n", pos, pos + hdr_b - 1,
+                        cpl.cpl_has_data ? "CplD" : "Cpl ", hdr_b)};
+    pos += hdr_b;
+    if (pl_b != 0) begin
+      s   = {s, $sformatf("          bytes %3d - %3d : Data        %3d B (%0d DW)\n", pos, pos + pl_b - 1, pl_b, cpl.tlp_payload_dw_count)};
+      pos += pl_b;
+    end
+    if (zero_b != 0)
+      s = {s, $sformatf("          bytes %3d - %3d : ZERO (NOP)  %3d B\n", pos, `PCIe_FLIT_TLP_BYTES - 1, zero_b)};
+    s = {s, $sformatf("          used %0d B + zero %0d B = %0d B", used_b, zero_b, `PCIe_FLIT_TLP_BYTES)};
+    `uvm_info("EP_TL_FLIT_LAYOUT", s, UVM_LOW)
   endfunction
 
   //--------------------------------------------------------------------------

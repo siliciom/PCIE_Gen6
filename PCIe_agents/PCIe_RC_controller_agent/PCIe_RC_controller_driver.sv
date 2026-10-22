@@ -90,9 +90,9 @@ task run_phase(uvm_phase phase);
               `uvm_info("RC_DLCMSM",$sformatf("DL_ACTIVE=1 :: SENDING_TLP_PACKET tl_link_active=%0d",tl_link_active),UVM_LOW)
               // FLOW CONTROL : transmitter gate (Eq 2-11). Blocks until the peer's
               // CREDIT_LIMIT covers this TLP (InitFC1 / UpdateFC received by the DL).
-              rc_tl_model.wait_for_fc_credits(pcie_seq_item);
-              tx_tl_ap.write(pcie_seq_item);
-              drive_flit(pcie_seq_item);
+              // [FLIT_SEG] send_request() splits a TLP that does not fit one
+              // 236 B FLIT TLP region and sends every segment in its own FLIT.
+              send_request(pcie_seq_item);
             end
             else begin
               `uvm_error("RC_DLCMSM","DL_ACTIVE_NOT_REACHED :: TLP_PACKET_NOT_SENT")
@@ -126,10 +126,8 @@ end
               // drive the ones already queued, so they cannot overwrite this TLP.
               rc_dl_model.fc_tx_allowed = 1'b0;
               drain_dl_dllp_flits();
-              rc_tl_model.wait_for_fc_credits(pcie_seq_item);   // FLOW CONTROL gate
               `uvm_info("RC_CONTROLLER","LINK_UP=1 :: DL_ACTIVE=1 :: SENDING_NEXT_TLP_PACKET",UVM_LOW)
-              tx_tl_ap.write(pcie_seq_item);
-              drive_flit(pcie_seq_item);
+              send_request(pcie_seq_item);                      // FLOW CONTROL gate + [FLIT_SEG]
               rc_dl_model.fc_tx_allowed = 1'b1;                  // UpdateFC allowed again
             end
             else begin
@@ -144,6 +142,50 @@ end
       end
      end
    endtask
+
+  //--------------------------------------------------------------------------
+  // [FLIT_SEG] send_request : TL -> DL -> PL -> PIPE for one sequence item.
+  //   FLIT mode and the TLP does not fit the 236 B TLP region (e.g. a 1024 DW
+  //   MWr / DMWr) : the RC TL model splits it into N complete TLPs and each
+  //   one is sent in its own FLIT, one after the other :
+  //       FC gate -> TL (header + payload + NOP pad) -> DL -> PL -> drive FLIT
+  //   Otherwise the item is sent exactly as before (one TLP, one FLIT).
+  //   The RC PL model holds one FLIT, so DL UpdateFC flits already queued are
+  //   drained between two segments and new ones stay paused (fc_tx_allowed is
+  //   restored to the caller's value at the end).
+  //--------------------------------------------------------------------------
+  task send_request(PCIe_sequence_item req);
+    PCIe_sequence_item segs[$];
+    bit                fc_allowed_saved;
+
+    if (!rc_tl_model.flit_needs_segmentation(req)) begin
+      rc_tl_model.wait_for_fc_credits(req);
+      tx_tl_ap.write(req);
+      drive_flit(req);
+      return;
+    end
+
+    rc_tl_model.split_flit_tlp(req, segs);
+
+    fc_allowed_saved          = rc_dl_model.fc_tx_allowed;
+    rc_dl_model.fc_tx_allowed = 1'b0;
+
+    foreach (segs[i]) begin
+      if (rc_dl_model.dllp_tx_pending) drain_dl_dllp_flits();
+      rc_tl_model.wait_for_fc_credits(segs[i]);
+      `uvm_info("RC_FLIT_SEG_DRV",
+        $sformatf("SENDING_SEGMENT %0d/%0d : addr=0x%0h len=%0d DW tag=0x%0h -> own FLIT",
+                  i + 1, segs.size(), segs[i].address, segs[i].data.size(), segs[i].tag), UVM_LOW)
+      tx_tl_ap.write(segs[i]);
+      drive_flit(segs[i]);
+    end
+
+    `uvm_info("RC_FLIT_SEG_DRV",
+      $sformatf("ALL_SEGMENTS_SENT : %0d TLPs in %0d FLITs for the %0d DW request",
+                segs.size(), segs.size(), req.data.size()), UVM_LOW)
+
+    rc_dl_model.fc_tx_allowed = fc_allowed_saved;
+  endtask
 
   // [ENUM] Drive every DLLP flit (UpdateFC) the DL model has already queued,
   // until nothing is pending. Called with fc_tx_allowed = 0, so the DL model

@@ -48,7 +48,13 @@ class PCIe_RC_4DW_Flit_MemWr_MaxPayload_sequence extends PCIe_RC_controller_base
 
          address == 64'h0000_0001_0000_3000;
 
-         length  == `PCIe_TL_LEN_MAX;
+         // [FLIT_SEG] max payload = 1024 DW (Length field 0 encodes 1024 DW).
+         // The RC TL model splits it into 19 TLPs, one per 236 B FLIT TLP region.
+         length  == `PCIe_TL_LEN_1024DW;
+
+         // [FLIT_SEG] no ECRC trailer, so the split matches 3DW=56 / 4DW=55 DW per TLP
+         // (with td==1 every TLP also carries a 1 DW ECRC and holds 1 DW less payload)
+         td      == 1'b0;
 
          first_dw_be == 4'hF;
          last_dw_be  == 4'hF;

@@ -148,6 +148,27 @@ class PCIe_sequence_item extends uvm_sequence_item;
   int tlp_payload_dw_count;
   int tlp_total_dw_count;
 
+  //--------------------------------------------------------------------------
+  // [FLIT_SEG] FLIT-mode TLP segmentation
+  //   A request (or completion) whose Header + OHC + Payload (+ ECRC) does not
+  //   fit in the 236 byte (59 DW) FLIT TLP region is split into several
+  //   smaller TLPs, each one complete (own header) and each one sent in its
+  //   own FLIT. Unused bytes of the last FLIT are NOP TLPs (all zero).
+  //
+  //   flit_seg_keep_ohc : the parent request needed OHC-A1, so every segment
+  //                       carries OHC-A1 too (uniform per-TLP payload size:
+  //                       3DW+OHC = 55 DW, 4DW+OHC = 54 DW per TLP).
+  //   is_flit_segment   : this item is one segment of a bigger transaction
+  //   flit_seg_idx      : 0 .. flit_seg_total-1
+  //   flit_seg_parent_* : what the original (unsplit) transaction looked like
+  //--------------------------------------------------------------------------
+  bit                          flit_seg_keep_ohc;
+  bit                          is_flit_segment;
+  int unsigned                 flit_seg_idx;
+  int unsigned                 flit_seg_total;
+  int unsigned                 flit_seg_parent_len_dw;
+  bit [`PCIe_TL_TAG_W-1:0]     flit_seg_parent_tag;
+
   //==========================================================================
   //           DATA-LINK / PHYSICAL LAYER FIELDS  (consumed by DL / PL)
   //==========================================================================
@@ -517,12 +538,14 @@ class PCIe_sequence_item extends uvm_sequence_item;
       (ohc[4:1] == 4'b0000);
 
     // FLIT Memory Request with explicit BE -> OHC-A1
+    // [FLIT_SEG] length == 0 encodes 1024 DW, so "more than 1 DW" is
+    // (length != 1) - the old (length > 1) treated 1024 DW as 1 DW.
     ((pkt_mode == FLIT) &&
      (txn_type == PCIe_TL_MEM) &&
      (
        (first_dw_be != 4'hF) ||
        (
-         (length > 10'd1) &&
+         (length != 10'd1) &&
          (last_dw_be != 4'hF)
        )
      ))
@@ -534,7 +557,7 @@ class PCIe_sequence_item extends uvm_sequence_item;
      (txn_type == PCIe_TL_MEM) &&
      (first_dw_be == 4'hF) &&
      (
-       (length <= 10'd1) ||
+       (length == 10'd1) ||
        (last_dw_be == 4'hF)
      ))
     ->
@@ -689,6 +712,31 @@ class PCIe_sequence_item extends uvm_sequence_item;
   endfunction
 
   //==========================================================================
+  // [FLIT_SEG] FLIT segmentation helpers (shared by the RC and EP TL models)
+  //
+  //   max payload per TLP = 59 DW region - Header Base - OHC - ECRC trailer
+  //
+  //     3DW        : 59 - 3         = 56 DW (224 B)  -> 1024 DW = 19 TLPs
+  //     4DW        : 59 - 4         = 55 DW (220 B)  -> 1024 DW = 19 TLPs
+  //     3DW + OHC  : 59 - 3 - 1     = 55 DW (220 B)  -> 1024 DW = 19 TLPs
+  //     4DW + OHC  : 59 - 4 - 1     = 54 DW (216 B)  -> 1024 DW = 19 TLPs
+  //==========================================================================
+  static function int unsigned flit_seg_max_payload_dw(int unsigned hdr_base_dw,
+                                                       int unsigned ohc_dw,
+                                                       int unsigned trailer_dw);
+    int unsigned used;
+    used = hdr_base_dw + ohc_dw + trailer_dw;
+    if (used >= `PCIe_FLIT_TLP_REGION_DW) return 0;
+    return `PCIe_FLIT_TLP_REGION_DW - used;
+  endfunction
+
+  // ceil(total_dw / max_dw)
+  static function int unsigned flit_seg_count(int unsigned total_dw, int unsigned max_dw);
+    if (max_dw == 0) return 0;
+    return (total_dw + max_dw - 1) / max_dw;
+  endfunction
+
+  //==========================================================================
   // Determine OHC-A subtype
   //==========================================================================
   function void determine_ohc_a();
@@ -699,8 +747,10 @@ class PCIe_sequence_item extends uvm_sequence_item;
 
       PCIe_TL_MEM: begin
         // Explicit byte enables require OHC-A1
+        // [FLIT_SEG] a segment of a request that needed OHC-A1 keeps it
         if ((first_dw_be != 4'hF) ||
-            ((get_payload_dw() > 1) && (last_dw_be != 4'hF))) begin
+            ((get_payload_dw() > 1) && (last_dw_be != 4'hF)) ||
+            flit_seg_keep_ohc) begin
           ohc_a_type = OHC_A1;
         end
         else begin

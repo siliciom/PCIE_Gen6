@@ -48,6 +48,34 @@ class PCIe_RC_TL_model extends uvm_component;
   PCIe_sequence_item cpl_rcvd [bit [`PCIe_TL_TAG_W-1:0]];
   event              cpl_event;
 
+  // [FLIT_SEG] a CplD that is split over several FLITs : the first parts are
+  // collected here (key = tag) until the last part (Byte Count covers only
+  // its own payload) arrives; only then is the completion published.
+  PCIe_sequence_item cpl_partial [bit [`PCIe_TL_TAG_W-1:0]];
+
+  // [FLIT_SEG] segmented Non-Posted request (DMWr) : every segment is its own
+  // TLP with its own tag and gets its own Cpl.
+  //   seg_parent_of [segment tag] = tag of the original (unsplit) request
+  //   seg_cpl_expect[parent tag]  = number of segments / completions expected
+  //   seg_cpl_got   [parent tag]  = completions received so far
+  bit [`PCIe_TL_TAG_W-1:0] seg_parent_of  [bit [`PCIe_TL_TAG_W-1:0]];
+  int unsigned             seg_cpl_expect [bit [`PCIe_TL_TAG_W-1:0]];
+  int unsigned             seg_cpl_got    [bit [`PCIe_TL_TAG_W-1:0]];
+  string                   seg_desc_of    [bit [`PCIe_TL_TAG_W-1:0]];   // "seg i/N addr len" per segment tag
+  string                   seg_cpl_rows   [bit [`PCIe_TL_TAG_W-1:0]];   // completion table per parent tag
+
+  // [FLIT_SEG] read completions (CplD) : how many FLITs each one came in, and
+  // the request it answers (address / length) so the full data can be checked
+  int unsigned             cpl_part_cnt   [bit [`PCIe_TL_TAG_W-1:0]];
+  PCIe_sequence_item       cpl_req_of     [bit [`PCIe_TL_TAG_W-1:0]];
+  // [FLIT_SEG] shadow of every DW the RC has written (DW address -> data),
+  // used to check the 1024 DW read back in the CplD against what was written
+  bit [31:0]               wr_shadow      [bit [63:0]];
+  int unsigned             n_rd_cpl_checked, n_rd_cpl_dw_match, n_rd_cpl_dw_mismatch, n_rd_cpl_dw_unwritten;
+  int unsigned             n_seg_txn;        // transactions that were split
+  int unsigned             n_seg_tlp;        // segment TLPs created
+  int unsigned             n_seg_txn_done;   // segmented Non-Posted txns fully completed
+
 
   PCIe_sequence_item item;
 
@@ -409,6 +437,9 @@ class PCIe_RC_TL_model extends uvm_component;
      dl_tl_imp = new("dl_tl_imp", this);   // [ADDED] DL -> TL received TLP path
      n_tlp_rcvd = 0;
      n_cpl_rcvd = 0;
+     n_seg_txn      = 0;   // [FLIT_SEG]
+     n_seg_tlp      = 0;
+     n_seg_txn_done = 0;
      fc_init();
     `uvm_info("RC_TL_MODEL","EXIT_FROM_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
   endfunction
@@ -429,6 +460,18 @@ class PCIe_RC_TL_model extends uvm_component;
     fc_report();
     `uvm_info("RC_TL_MODEL", $sformatf("RX_FROM_DL_SUMMARY : TLPs received from RC DL=%0d  completions=%0d  outstanding requests still open=%0d",
               n_tlp_rcvd, n_cpl_rcvd, outstanding.size()), UVM_LOW)
+    // [FLIT_SEG] summary + every segmented Non-Posted request must be fully completed
+    `uvm_info("RC_TL_FLIT_SEG", $sformatf("FLIT_SEGMENTATION_SUMMARY : transactions split=%0d  segment TLPs sent=%0d  segmented Non-Posted txns fully completed=%0d",
+              n_seg_txn, n_seg_tlp, n_seg_txn_done), UVM_LOW)
+    `uvm_info("RC_TL_FULL_CPLD", $sformatf("READ_COMPLETION_SUMMARY : reads completed=%0d  DW match=%0d  DW mismatch=%0d  DW never written=%0d  partial CplD still waiting=%0d",
+              n_rd_cpl_checked, n_rd_cpl_dw_match, n_rd_cpl_dw_mismatch, n_rd_cpl_dw_unwritten, cpl_partial.size()), UVM_LOW)
+    if (cpl_partial.size() != 0)
+      `uvm_error("RC_TL_FULL_CPLD", $sformatf("%0d read completion(s) never received their last CplD part", cpl_partial.size()))
+    foreach (seg_cpl_expect[ptag]) begin
+      if (seg_cpl_got[ptag] != seg_cpl_expect[ptag])
+        `uvm_error("RC_TL_FLIT_SEG", $sformatf("SEGMENTED_REQUEST_NOT_FULLY_COMPLETED : parent tag=0x%0h got %0d of %0d completions",
+                   ptag, seg_cpl_got[ptag], seg_cpl_expect[ptag]))
+    end
   endfunction
 
   //==========================================================================
@@ -549,13 +592,119 @@ class PCIe_RC_TL_model extends uvm_component;
     for (int i = 0; i < payload_dw; i++)
       cpl_it.cpl_data[i] = rc_rx_get_dw(item, hdr_dw + i);
 
+    if (outstanding.exists(cpl_it.tag) && !cpl_req_of.exists(cpl_it.tag))
+      cpl_req_of[cpl_it.tag] = outstanding[cpl_it.tag];
+    if (has_data) begin
+      if (cpl_part_cnt.exists(cpl_it.tag)) cpl_part_cnt[cpl_it.tag]++;
+      else                                 cpl_part_cnt[cpl_it.tag] = 1;
+    end
+
     cpl_write(cpl_it);
+
+    // [FLIT_SEG] CplD split over several FLITs : Byte Count is the number of
+    // bytes still to come INCLUDING this CplD (000h = 4096). Not the last part
+    // -> keep the data and wait for the rest before publishing.
+    begin
+      int unsigned bc_val;
+      bc_val = (bc == 12'h000) ? 4096 : int'(bc);
+      if (has_data && (bc_val > payload_dw * `PCIe_TL_DW_BYTES)) begin
+        if (cpl_partial.exists(cpl_it.tag))
+          cpl_partial[cpl_it.tag].cpl_data = {cpl_partial[cpl_it.tag].cpl_data, cpl_it.cpl_data};
+        else
+          cpl_partial[cpl_it.tag] = cpl_it;
+        `uvm_info("RC_TL_FLIT_SEG",
+          $sformatf("PARTIAL_CPLD tag=0x%0h : %0d DW in this FLIT, Byte Count still to come=%0d -> waiting for the next CplD (collected %0d DW)",
+                    cpl_it.tag, payload_dw, bc_val, cpl_partial[cpl_it.tag].cpl_data.size()), UVM_LOW)
+        return;
+      end
+      if (cpl_partial.exists(cpl_it.tag)) begin
+        cpl_it.cpl_data = {cpl_partial[cpl_it.tag].cpl_data, cpl_it.cpl_data};
+        cpl_partial.delete(cpl_it.tag);
+        `uvm_info("RC_TL_FLIT_SEG",
+          $sformatf("LAST_CPLD tag=0x%0h : split completion reassembled, total %0d DW", cpl_it.tag, cpl_it.cpl_data.size()), UVM_LOW)
+      end
+      if (has_data) begin
+        print_full_read_completion(cpl_it, cpl_part_cnt[cpl_it.tag],
+                                   cpl_req_of.exists(cpl_it.tag) ? cpl_req_of[cpl_it.tag] : null);
+        cpl_part_cnt.delete(cpl_it.tag);
+      end
+      cpl_req_of.delete(cpl_it.tag);
+    end
 
     // [ENUM] keep it for the sequence that is waiting on this tag
     if (cpl_rcvd.exists(cpl_it.tag))
       `uvm_warning("RC_TL_MODEL", $sformatf("DUPLICATE_COMPLETION tag=0x%0h - older one replaced", cpl_it.tag))
     cpl_rcvd[cpl_it.tag] = cpl_it;
     -> cpl_event;
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // [FLIT_SEG] print_full_read_completion
+  //   Called once per Memory Read when the LAST CplD part has arrived. Shows
+  //   the whole data payload the RC TL received (e.g. 1024 DW collected from
+  //   19 CplD FLITs) and checks every DW against what the RC wrote earlier to
+  //   the same address (wr_shadow). DWs never written are reported, not failed.
+  //--------------------------------------------------------------------------
+  function void print_full_read_completion(PCIe_sequence_item cpl, int unsigned n_parts,
+                                           PCIe_sequence_item req);
+    string       dump, line;
+    bit [63:0]   base_dw;
+    int unsigned n_match, n_mis, n_unw;
+    bit          have_req;
+
+    // data check only for Memory Reads (Config / IO reads have no RC write to compare with)
+    have_req = (req != null) && (req.txn_type == PCIe_TL_MEM);
+    base_dw  = have_req ? (64'(req.address) >> 2) : 64'h0;
+    n_match  = 0; n_mis = 0; n_unw = 0;
+
+    dump = "\n";
+    for (int i = 0; i < cpl.cpl_data.size(); i++) begin
+      if ((i % 8) == 0) line = $sformatf("           DW[%4d] :", i);
+      line = {line, $sformatf(" %08h", cpl.cpl_data[i])};
+      if (((i % 8) == 7) || (i == cpl.cpl_data.size() - 1)) dump = {dump, line, "\n"};
+
+      if (have_req) begin
+        if (!wr_shadow.exists(base_dw + i))           n_unw++;
+        else if (wr_shadow[base_dw + i] == cpl.cpl_data[i]) n_match++;
+        else begin
+          n_mis++;
+          if (n_mis <= 10)
+            `uvm_error("RC_TL_RD_CHECK", $sformatf("READ_DATA_MISMATCH tag=0x%0h DW[%0d] addr=0x%0h : read=%08h written=%08h",
+                       cpl.tag, i, (base_dw + i) << 2, cpl.cpl_data[i], wr_shadow[base_dw + i]))
+        end
+      end
+    end
+
+    n_rd_cpl_checked++;
+    n_rd_cpl_dw_match     += n_match;
+    n_rd_cpl_dw_mismatch  += n_mis;
+    n_rd_cpl_dw_unwritten += n_unw;
+
+    `uvm_info("RC_TL_FULL_CPLD",
+      $sformatf({"\n",
+        "         ============================================================================\n",
+        "              RC TL MODEL : FULL READ COMPLETION RECEIVED (all CplD parts joined)\n",
+        "         ============================================================================\n",
+        "          Tag                : 0x%0h\n",
+        "          Request            : MRd addr=0x%0h  %0d DW\n",
+        "          CplD FLITs received: %0d\n",
+        "          Total data         : %0d DW (%0d B)\n",
+        "          Status             : %s\n",
+        "          Check vs RC writes : %0d DW match, %0d DW mismatch, %0d DW never written by RC\n",
+        "         ----------------------------------------------------------------------------\n",
+        "          DATA%s",
+        "         ============================================================================"},
+        cpl.tag,
+        have_req ? req.address : '0, have_req ? req.get_payload_dw() : 0,
+        n_parts,
+        cpl.cpl_data.size(), cpl.cpl_data.size() * `PCIe_TL_DW_BYTES,
+        cpl_status_str(cpl.cpl_status),
+        n_match, n_mis, n_unw,
+        dump), UVM_LOW)
+
+    if (have_req && (cpl.cpl_data.size() != req.get_payload_dw()))
+      `uvm_error("RC_TL_RD_CHECK", $sformatf("READ_LENGTH_MISMATCH tag=0x%0h : requested %0d DW, completions returned %0d DW",
+                 cpl.tag, req.get_payload_dw(), cpl.cpl_data.size()))
   endfunction
 
   //--------------------------------------------------------------------------
@@ -692,6 +841,227 @@ class PCIe_RC_TL_model extends uvm_component;
     fc_tx_consume(c, h, d, tr.convert2string());
   endfunction
 
+  //==========================================================================
+  // [FLIT_SEG] FLIT-MODE TLP SEGMENTATION
+  //
+  //   One FLIT has a 236 byte (59 DW) TLP region. Header Base + OHC + Payload
+  //   (+ 1 DW ECRC trailer when TS = 001b) must all fit inside it. A Memory
+  //   Write / Deferrable Memory Write whose payload does not fit is split into
+  //   N complete TLPs (each with its own header, address advanced by the bytes
+  //   already sent) and every TLP is sent in its own FLIT. The last TLP carries
+  //   the remainder; the unused bytes of its FLIT are NOP TLPs (all zeros).
+  //
+  //     max payload/TLP = 59 - HeaderBase(3|4) - OHC(0|1) - ECRC(0|1)  DW
+  //     TLPs            = ceil(payload_dw / max payload/TLP)
+  //
+  //   1024 DW (4096 B), no ECRC :
+  //     3DW       : 56 DW/TLP -> 19 TLPs, last 16 DW , 160 B unused
+  //     4DW       : 55 DW/TLP -> 19 TLPs, last 34 DW , 84 B unused
+  //     3DW + OHC : 55 DW/TLP -> 19 TLPs, last 34 DW , 84 B unused
+  //     4DW + OHC : 54 DW/TLP -> 19 TLPs, last 52 DW , 8 B unused
+  //
+  //   Posted MWr  : every segment keeps the request tag.
+  //   DMWr (Non-Posted) : every segment gets its own tag (tag, tag+1, ...)
+  //   because each one is a separate request that receives its own Cpl. The
+  //   completions are tracked back to the original request (seg_parent_of).
+  //==========================================================================
+
+  // Header Base / OHC / trailer DWs the request needs (same rules as
+  // serialize_flit_header / serialize_ohc / append_ecrc)
+  function void flit_seg_overhead(PCIe_sequence_item tr,
+                                  output int unsigned hb_dw,
+                                  output int unsigned ohc_dw,
+                                  output int unsigned trl_dw);
+    hb_dw  = tr.is_64bit_addr() ? `PCIe_TL_HDR4DW : `PCIe_TL_HDR3DW;
+    tr.determine_ohc_a();
+    ohc_dw = (tr.ohc_a_type != OHC_A_NONE) ? `PCIe_TL_OHC_A_DW : 0;
+    trl_dw = ((tr.ts == `PCIe_TL_TS_1DW_ECRC) || (tr.td == 1'b1)) ? `PCIe_TL_ECRC_DW : 0;
+  endfunction
+
+  // 1 => this FLIT-mode request does not fit in one 236 byte TLP region
+  function bit flit_needs_segmentation(PCIe_sequence_item tr);
+    int unsigned hb_dw, ohc_dw, trl_dw;
+    if (tr == null)                            return 1'b0;
+    if (tr.pkt_mode != FLIT)                   return 1'b0;
+    if (tr.flit_type != PCIe_PAYLOAD_flit)     return 1'b0;
+    if (tr.is_flit_segment)                    return 1'b0;
+    if (!((tr.txn_type == PCIe_TL_MEM) && (tr.dir == PCIe_TL_WRITE))) return 1'b0;
+    flit_seg_overhead(tr, hb_dw, ohc_dw, trl_dw);
+    return ((hb_dw + ohc_dw + trl_dw + tr.data.size()) > `PCIe_FLIT_TLP_REGION_DW);
+  endfunction
+
+  // Copy every request field a segment needs from the parent request
+  function void flit_seg_copy_fields(PCIe_sequence_item src, PCIe_sequence_item dst);
+    dst.pkt_mode             = src.pkt_mode;
+    dst.target_gen           = src.target_gen;
+    dst.directed_recovery    = src.directed_recovery;
+    dst.txn_type             = src.txn_type;
+    dst.dir                  = src.dir;
+    dst.mem_locked           = src.mem_locked;
+    dst.mem_deferrable       = src.mem_deferrable;
+    dst.requester_id         = src.requester_id;
+    dst.completer_id         = src.completer_id;
+    dst.tc                   = src.tc;
+    dst.attr                 = src.attr;
+    dst.td                   = src.td;
+    dst.ep                   = src.ep;
+    dst.ts                   = src.ts;
+    dst.at                   = src.at;
+    dst.cfg_reg_num          = src.cfg_reg_num;
+    dst.cfg_ext_reg_num      = src.cfg_ext_reg_num;
+    dst.cfg_bus_num          = src.cfg_bus_num;
+    dst.cfg_dev_num          = src.cfg_dev_num;
+    dst.cfg_fn_num           = src.cfg_fn_num;
+    dst.cfg_type1            = src.cfg_type1;
+    dst.io_data              = src.io_data;
+    dst.msg_code             = src.msg_code;
+    dst.msg_route            = src.msg_route;
+    dst.msg_has_data         = src.msg_has_data;
+    dst.flit_type            = src.flit_type;
+    dst.electrical_idle_test = src.electrical_idle_test;
+    dst.no_receiver_test     = src.no_receiver_test;
+    dst.tx_elec_idle         = src.tx_elec_idle;
+    dst.tx_valid             = src.tx_valid;
+    dst.rate                 = src.rate;
+    dst.dllp_content         = src.dllp_content;
+    dst.credit               = src.credit;
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // split_flit_tlp : parent request -> segs[] (one complete TLP per FLIT)
+  //   Called by the RC controller driver; the driver sends segs[i] through
+  //   the normal TL -> DL -> PL path and drives one FLIT per segment.
+  //--------------------------------------------------------------------------
+  function void split_flit_tlp(PCIe_sequence_item tr, ref PCIe_sequence_item segs[$]);
+    int unsigned hb_dw, ohc_dw, trl_dw;
+    int unsigned total_dw, max_dw, n_seg, off_dw, len_dw, last_dw, used_b;
+    bit [`PCIe_TL_TAG_W-1:0] seg_tag;
+    bit                      non_posted;
+    PCIe_sequence_item       seg;
+    string                   rows;
+
+    segs.delete();
+    flit_seg_overhead(tr, hb_dw, ohc_dw, trl_dw);
+
+    total_dw   = tr.data.size();
+    max_dw     = PCIe_sequence_item::flit_seg_max_payload_dw(hb_dw, ohc_dw, trl_dw);
+    n_seg      = PCIe_sequence_item::flit_seg_count(total_dw, max_dw);
+    non_posted = is_non_posted(tr);
+
+    if (n_seg == 0) begin
+      `uvm_error("RC_TL_FLIT_SEG", $sformatf("CANNOT_SEGMENT : header+OHC+trailer=%0d DW leave no payload room in the %0d DW region",
+                 hb_dw + ohc_dw + trl_dw, `PCIe_FLIT_TLP_REGION_DW))
+      return;
+    end
+
+    last_dw = total_dw - ((n_seg - 1) * max_dw);
+    rows    = "";
+    off_dw  = 0;
+
+    for (int unsigned i = 0; i < n_seg; i++) begin
+      len_dw = ((total_dw - off_dw) > max_dw) ? max_dw : (total_dw - off_dw);
+
+      seg = PCIe_sequence_item::type_id::create($sformatf("%s_seg%0d", tr.get_name(), i));
+      flit_seg_copy_fields(tr, seg);
+
+      seg.address = tr.address + (off_dw * `PCIe_TL_DW_BYTES);
+      seg.length  = len_dw[`PCIe_TL_LEN_W-1:0];          // <= 56, never needs the 0 => 1024 encoding
+
+      seg.data = new[len_dw];
+      for (int unsigned k = 0; k < len_dw; k++)
+        seg.data[k] = tr.data[off_dw + k];
+
+      // Byte enables : the original First DW BE on the first segment, the
+      // original Last DW BE on the last segment, all bytes in between.
+      seg.first_dw_be = (i == 0)         ? tr.first_dw_be : 4'hF;
+      seg.last_dw_be  = (i == n_seg - 1) ? tr.last_dw_be  : 4'hF;
+      if (len_dw == 1) begin
+        // 1 DW TLP : Last DW BE must be 0000b, the last-byte enables move into First DW BE
+        if (i == n_seg - 1) seg.first_dw_be = tr.last_dw_be;
+        seg.last_dw_be = 4'h0;
+      end
+
+      // keep OHC-A1 on every segment when the parent needed it (uniform size)
+      seg.flit_seg_keep_ohc = (ohc_dw != 0);
+
+      // Non-Posted (DMWr) : one tag per segment, each gets its own completion
+      seg_tag  = non_posted ? (tr.tag + i) : tr.tag;
+      seg.tag  = seg_tag;
+
+      seg.is_flit_segment        = 1'b1;
+      seg.flit_seg_idx           = i;
+      seg.flit_seg_total         = n_seg;
+      seg.flit_seg_parent_len_dw = total_dw;
+      seg.flit_seg_parent_tag    = tr.tag;
+
+      if (non_posted) begin
+        if (seg_parent_of.exists(seg_tag))
+          `uvm_warning("RC_TL_FLIT_SEG", $sformatf("TAG_REUSED : segment tag 0x%0h still outstanding", seg_tag))
+        seg_parent_of[seg_tag] = tr.tag;
+        seg_desc_of[seg_tag]   = $sformatf("%3d/%0d | 0x%016h | %3d DW (%4d B)",
+                                           i + 1, n_seg, seg.address, len_dw, len_dw * `PCIe_TL_DW_BYTES);
+      end
+
+      used_b = (hb_dw + ohc_dw + trl_dw + len_dw) * `PCIe_TL_DW_BYTES;
+      rows = {rows, $sformatf("          %3d  | 0x%016h | 0x%04h | %3d DW (%4d B) | %3d B used | %3d B zero (NOP) padded\n",
+                              i + 1, seg.address, seg_tag, len_dw, len_dw * `PCIe_TL_DW_BYTES,
+                              used_b, `PCIe_FLIT_TLP_BYTES - used_b)};
+
+      segs.push_back(seg);
+      off_dw += len_dw;
+    end
+
+    if (non_posted) begin
+      seg_cpl_expect[tr.tag] = n_seg;
+      seg_cpl_got[tr.tag]    = 0;
+      seg_cpl_rows[tr.tag]   = "";
+    end
+    n_seg_txn++;
+    n_seg_tlp += n_seg;
+
+    `uvm_info("RC_TL_FLIT_SEG",
+      $sformatf({"\n",
+        "         ============================================================================\n",
+        "                 FLIT MODE TLP SEGMENTATION  (TLP does not fit one 236 B region)\n",
+        "         ============================================================================\n",
+        "          Request            : %s %s%s  tag=0x%0h\n",
+        "          Payload            : %0d DW (%0d B)\n",
+        "          TLP region / FLIT  : %0d B (%0d DW)\n",
+        "          Header Base        : %0d DW (%0d B)\n",
+        "          OHC                : %0d DW (%0d B)%s\n",
+        "          ECRC trailer       : %0d DW (%0d B)\n",
+        "          Max payload / TLP  : %0d - %0d = %0d B (%0d DW)\n",
+        "          TLPs / FLITs       : ceil(%0d / %0d) = %0d\n",
+        "          First %0d TLPs      : %0d DW each\n",
+        "          Last TLP           : %0d DW (%0d B) -> %0d + %0d = %0d B used, %0d B unused (zero / NOP padded)\n",
+        "          Completions        : %s\n",
+        "         ----------------------------------------------------------------------------\n",
+        "          seg  | address            | tag    | payload        | region usage\n",
+        "         ----------------------------------------------------------------------------\n",
+        "%s",
+        "         ============================================================================"},
+        tr.is_64bit_addr() ? "4DW" : "3DW",
+        tr.mem_deferrable ? "DMWr" : "MWr",
+        (ohc_dw != 0) ? " + OHC-A1" : "",
+        tr.tag,
+        total_dw, total_dw * `PCIe_TL_DW_BYTES,
+        `PCIe_FLIT_TLP_BYTES, `PCIe_FLIT_TLP_REGION_DW,
+        hb_dw, hb_dw * `PCIe_TL_DW_BYTES,
+        ohc_dw, ohc_dw * `PCIe_TL_DW_BYTES, (ohc_dw != 0) ? "  (kept on every segment)" : "",
+        trl_dw, trl_dw * `PCIe_TL_DW_BYTES,
+        `PCIe_FLIT_TLP_BYTES, (hb_dw + ohc_dw + trl_dw) * `PCIe_TL_DW_BYTES,
+        max_dw * `PCIe_TL_DW_BYTES, max_dw,
+        total_dw, max_dw, n_seg,
+        n_seg - 1, max_dw,
+        last_dw, last_dw * `PCIe_TL_DW_BYTES,
+        (hb_dw + ohc_dw + trl_dw) * `PCIe_TL_DW_BYTES, last_dw * `PCIe_TL_DW_BYTES,
+        (hb_dw + ohc_dw + trl_dw + last_dw) * `PCIe_TL_DW_BYTES,
+        `PCIe_FLIT_TLP_BYTES - ((hb_dw + ohc_dw + trl_dw + last_dw) * `PCIe_TL_DW_BYTES),
+        non_posted ? $sformatf("%0d expected (one Cpl per segment, tags 0x%0h..0x%0h)", n_seg, tr.tag, seg_tag)
+                   : "none (Posted Memory Write)",
+        rows), UVM_LOW)
+  endfunction
+
   //--------------------------------------------------------------------------
   // FUNCTION: write (tx_tl_imp) - entry point from the RC controller driver.
   //--------------------------------------------------------------------------
@@ -755,6 +1125,13 @@ class PCIe_RC_TL_model extends uvm_component;
 
     pack_to_tlp_data(tr);
 
+    // [FLIT_SEG] byte layout of this segment inside its 236 B FLIT TLP region
+    if (tr.is_flit_segment) print_flit_seg_layout(tr);
+
+    // [FLIT_SEG] remember what was written, to check later read completions
+    if ((tr.txn_type == PCIe_TL_MEM) && (tr.dir == PCIe_TL_WRITE))
+      foreach (tr.data[i]) wr_shadow[(64'(tr.address) >> 2) + i] = tr.data[i];
+
     `uvm_info(get_type_name(), "[TL->DL] TLP_SENT_TO_DL", UVM_MEDIUM);
      tlp_dl_ap.write(tr);
 
@@ -801,6 +1178,47 @@ class PCIe_RC_TL_model extends uvm_component;
     print_tlp_data(tr);
     print_full_packet(tr);
 
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // [FLIT_SEG] print_flit_seg_layout : where Header / OHC / Payload / zeros
+  // sit inside the 236 byte TLP region of one segment FLIT, e.g. 3DW + OHC :
+  //   FLIT 1..18 : bytes 0-11 header, 12-15 OHC, 16-235 payload (220 B)
+  //   FLIT 19    : bytes 0-11 header, 12-15 OHC, 16-151 payload, 152-235 zero
+  //--------------------------------------------------------------------------
+  virtual function void print_flit_seg_layout(PCIe_sequence_item tr);
+    int unsigned hb_b, ohc_b, pl_b, trl_b, used_b, zero_b, pos;
+    string       s;
+
+    hb_b   = (tr.is_64bit_addr() ? `PCIe_TL_HDR4DW : `PCIe_TL_HDR3DW) * `PCIe_TL_DW_BYTES;
+    ohc_b  = (tr.tlp_header_dw_count * `PCIe_TL_DW_BYTES) - hb_b;
+    pl_b   = tr.tlp_payload_dw_count * `PCIe_TL_DW_BYTES;
+    trl_b  = tr.ecrc_present ? (`PCIe_TL_ECRC_DW * `PCIe_TL_DW_BYTES) : 0;
+    used_b = hb_b + ohc_b + pl_b + trl_b;
+    zero_b = `PCIe_FLIT_TLP_BYTES - used_b;
+
+    s   = $sformatf("\n          ===== FLIT %0d / %0d  (236 B TLP region, %s%s) =====\n",
+                    tr.flit_seg_idx + 1, tr.flit_seg_total,
+                    tr.is_64bit_addr() ? "4DW" : "3DW", (ohc_b != 0) ? " + OHC" : "");
+    pos = 0;
+    s   = {s, $sformatf("          bytes %3d - %3d : Header Base  %3d B\n", pos, pos + hb_b - 1, hb_b)};
+    pos += hb_b;
+    if (ohc_b != 0) begin
+      s   = {s, $sformatf("          bytes %3d - %3d : OHC          %3d B\n", pos, pos + ohc_b - 1, ohc_b)};
+      pos += ohc_b;
+    end
+    s   = {s, $sformatf("          bytes %3d - %3d : Payload      %3d B (%0d DW)  address 0x%0h\n",
+                        pos, pos + pl_b - 1, pl_b, tr.tlp_payload_dw_count, tr.address)};
+    pos += pl_b;
+    if (trl_b != 0) begin
+      s   = {s, $sformatf("          bytes %3d - %3d : ECRC trailer %3d B\n", pos, pos + trl_b - 1, trl_b)};
+      pos += trl_b;
+    end
+    if (zero_b != 0)
+      s = {s, $sformatf("          bytes %3d - %3d : ZERO (NOP)   %3d B\n", pos, `PCIe_FLIT_TLP_BYTES - 1, zero_b)};
+    s = {s, $sformatf("          used %0d B + zero %0d B = %0d B", used_b, zero_b, `PCIe_FLIT_TLP_BYTES)};
+
+    `uvm_info("RC_TL_FLIT_LAYOUT", s, UVM_LOW)
   endfunction
 
   //--------------------------------------------------------------------------
@@ -954,14 +1372,67 @@ class PCIe_RC_TL_model extends uvm_component;
   //--------------------------------------------------------------------------
   virtual function void cpl_write(PCIe_sequence_item cpl);
     PCIe_sequence_item req_h;
+    int unsigned       bc_val;
+    bit                last_part;
     if (outstanding.exists(cpl.tag)) begin
       req_h = outstanding[cpl.tag];
-      req_h.cpl_data   = cpl.cpl_data;
+      // [FLIT_SEG] a CplD may be split over several FLITs; the request stays
+      // outstanding until the part whose Byte Count covers only its own data.
+      bc_val    = (cpl.byte_count == 12'h000) ? 4096 : int'(cpl.byte_count);
+      last_part = !cpl.cpl_has_data || (bc_val <= cpl.cpl_data.size() * `PCIe_TL_DW_BYTES);
+      req_h.cpl_data   = {req_h.cpl_data, cpl.cpl_data};
       req_h.cpl_status = cpl.cpl_status;
-      outstanding.delete(cpl.tag);
-      `uvm_info(get_type_name(),
-        $sformatf("RC-TL got completion tag=0x%0h status=%0d dw=%0d",
-                   cpl.tag, cpl.cpl_status, cpl.cpl_data.size()), UVM_LOW)
+      if (last_part) begin
+        outstanding.delete(cpl.tag);
+        `uvm_info(get_type_name(),
+          $sformatf("RC-TL got completion tag=0x%0h status=%0d dw=%0d (total collected %0d DW)",
+                     cpl.tag, cpl.cpl_status, cpl.cpl_data.size(), req_h.cpl_data.size()), UVM_LOW)
+      end
+      else begin
+        `uvm_info(get_type_name(),
+          $sformatf("RC-TL got PART of a split completion tag=0x%0h dw=%0d byte_count_remaining=%0d (collected %0d DW so far)",
+                     cpl.tag, cpl.cpl_data.size(), bc_val, req_h.cpl_data.size()), UVM_LOW)
+      end
+
+      // [FLIT_SEG] completion of one segment of a split Non-Posted request (DMWr)
+      if (seg_parent_of.exists(cpl.tag)) begin
+        bit [`PCIe_TL_TAG_W-1:0] ptag;
+        ptag = seg_parent_of[cpl.tag];
+        seg_parent_of.delete(cpl.tag);
+        seg_cpl_got[ptag]++;
+        // Cpl (no data) = 3 DW header (+1 DW OHC-A5 when not SC) in its own FLIT,
+        // the rest of the 236 B TLP region is zero (NOP TLPs)
+        seg_cpl_rows[ptag] = {seg_cpl_rows[ptag],
+          $sformatf("          %s | tag 0x%04h | Cpl %-3s | %2d B hdr + %3d B zero (NOP) padded\n",
+                    seg_desc_of.exists(cpl.tag) ? seg_desc_of[cpl.tag] : "?", cpl.tag,
+                    cpl_status_str(cpl.cpl_status),
+                    (cpl.cpl_status == `PCIe_CPL_STATUS_SC) ? 12 : 16,
+                    `PCIe_FLIT_TLP_BYTES - ((cpl.cpl_status == `PCIe_CPL_STATUS_SC) ? 12 : 16))};
+        seg_desc_of.delete(cpl.tag);
+        `uvm_info("RC_TL_FLIT_SEG",
+          $sformatf("SEGMENT_COMPLETION_RECEIVED : parent tag=0x%0h segment tag=0x%0h status=%s -> %0d / %0d completions",
+                    ptag, cpl.tag, cpl_status_str(cpl.cpl_status), seg_cpl_got[ptag], seg_cpl_expect[ptag]), UVM_LOW)
+        if (cpl.cpl_status != `PCIe_CPL_STATUS_SC)
+          `uvm_error("RC_TL_FLIT_SEG", $sformatf("SEGMENT_COMPLETION_NOT_SC : segment tag=0x%0h status=%s",
+                     cpl.tag, cpl_status_str(cpl.cpl_status)))
+        if (seg_cpl_got[ptag] == seg_cpl_expect[ptag]) begin
+          n_seg_txn_done++;
+          `uvm_info("RC_TL_FLIT_SEG",
+            $sformatf({"\n",
+              "         ============================================================\n",
+              "          SEGMENTED NON-POSTED REQUEST FULLY COMPLETED\n",
+              "         ============================================================\n",
+              "          Parent tag          : 0x%0h\n",
+              "          Segments (TLPs/FLITs): %0d\n",
+              "          Completions received: %0d (one Cpl per segment, each in its own FLIT)\n",
+              "         ------------------------------------------------------------------------------------------\n",
+              "          seg     | segment address    | segment payload | completion\n",
+              "         ------------------------------------------------------------------------------------------\n",
+              "%s",
+              "         ============================================================"},
+              ptag, seg_cpl_expect[ptag], seg_cpl_got[ptag], seg_cpl_rows[ptag]), UVM_LOW)
+        end
+      end
     end
     else begin
       `uvm_warning(get_type_name(),
@@ -1413,7 +1884,7 @@ class PCIe_RC_TL_model extends uvm_component;
     //----------------------------------------------------------------------
     if (tlp_dw > `PCIe_FLIT_TLP_DW) begin
       `uvm_warning("FLIT_ASSEMBLY",
-         $sformatf("TLP is %0d DW (%0d B) which exceeds the %0d DW (%0d B) FLIT TLP region - multi-FLIT segmentation is not implemented, region left unpadded",
+         $sformatf("TLP is %0d DW (%0d B) which exceeds the %0d DW (%0d B) FLIT TLP region - it should have been split by split_flit_tlp() (send it through the RC controller driver), region left unpadded",
                     tlp_dw, tlp_dw*4, `PCIe_FLIT_TLP_DW, `PCIe_FLIT_TLP_BYTES))
       tr.flit_tlp_region = new[tlp_dw];
       foreach (tr.serialized_tlp[i])

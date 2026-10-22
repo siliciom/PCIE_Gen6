@@ -660,6 +660,7 @@
 //==============================================================================
 `define PCIe_TL_DW_BYTES             4
 `define PCIe_TL_MAX_PAYLOAD_DW       1024        // Length==0 encodes 1024 DW
+`define PCIe_TL_LEN_1024DW           10'd0       // [FLIT_SEG] Length field value for a 1024 DW payload
 `define PCIe_TL_HDR3DW               3
 `define PCIe_TL_HDR4DW               4
 `define PCIe_TL_OHC_A_DW             1
