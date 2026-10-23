@@ -35,6 +35,14 @@
 //                               Bus Master Enable, read back and check
 //   STEP 8  Print a summary
 //
+// HOW SOFTWARE REACHES CONFIGURATION SPACE (PCIe Base 6.2, Section 7.2.1 - CAM)
+//   The CPU cannot send a Configuration Request by itself. It talks to the
+//   host bridge registers (PCIe_RC_config_access) and the host bridge turns
+//   that into a CfgRd/CfgWr TLP :
+//     step 1 : I/O write 0CF8h (CONFIG_ADDRESS) = which Bus/Dev/Fn/register
+//     step 2 : I/O read/write 0CFCh (CONFIG_DATA) = the data -> TLP goes out
+//   CAM only reaches offset 000h-0FFh (CONFIG_ADDRESS has room for 000h-0FCh).
+//
 // HOW A CONFIG REQUEST IS SENT AND HOW ITS COMPLETION COMES BACK
 //
 //   sequence --start_item/finish_item--> RC driver -> RC TL -> RC DL -> RC PL -> PIPE
@@ -77,6 +85,7 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
   // Internal
   //------------------------------------------------------------------------
   PCIe_RC_TL_model          rc_tl;
+  PCIe_RC_config_access     host_bridge;   // CF8 / CFC registers of the Root Complex host bridge
   bit [`PCIe_TL_TAG_W-1:0]  next_tag = 'h40;
   bit                       first_request = 1'b1;   // first item also brings the link up
 
@@ -121,6 +130,11 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
     // Handle to the RC TL model : the place where completions arrive.
     if (!uvm_config_db#(PCIe_RC_TL_model)::get(m_sequencer, "", "rc_tl_model", rc_tl))
       `uvm_fatal("RC_ENUM","rc_tl_model handle not found in uvm_config_db (set in PCIe_RC_controller_agent::connect_phase)")
+
+    // Host bridge registers : CONFIG_ADDRESS (CF8), CONFIG_DATA (CFC)
+    host_bridge = PCIe_RC_config_access::type_id::create("host_bridge");
+    `uvm_info("RC_ENUM", $sformatf("CONFIG ACCESS MECHANISM : CAM (I/O 0CF8h CONFIG_ADDRESS / 0CFCh CONFIG_DATA) | Root Port secondary bus=%0d subordinate bus=%0d",
+              host_bridge.secondary_bus, host_bridge.subordinate_bus), UVM_LOW)
 
     `uvm_info("RC_ENUM", $sformatf("TARGET EP (from PCIe_defines.sv) : Bus=%0d Device=%0d Function=%0d",
               bus_num, dev_num, fn_num), UVM_LOW)
@@ -441,25 +455,147 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
   endtask
 
   //========================================================================
-  // cfg_read / cfg_write : one Configuration Request + wait for its completion
+  // cfg_read / cfg_write : what every enumeration step calls.
+  //   They act like software : they go through the host bridge registers
+  //     step 1 : write CONFIG_ADDRESS (0CF8h) = which Bus/Dev/Fn/register
+  //     step 2 : read / write CONFIG_DATA (0CFCh) -> CfgRd / CfgWr TLP
+  //   The host bridge part then calls cfg_request(), which sends the TLP.
   //   ok = 1 only when the completion came back with status SC
   //========================================================================
   task cfg_read(input bit [4:0] dev, input bit [2:0] fn, input bit [11:0] off,
                 output bit [31:0] rdata, output bit [2:0] status, output bit ok);
-    cfg_request(1'b0, dev, fn, off, 32'h0, 4'hF, rdata, status, ok);
+    if (off >= 12'h100) begin
+      // CONFIG_ADDRESS has room only for offset 000h-0FCh
+      `uvm_info("RC_CAM", $sformatf("  offset %03h is above 0FFh : not reachable with CF8/CFC -> FFFFFFFFh", off), UVM_LOW)
+      rdata  = 32'hFFFF_FFFF;
+      status = `PCIe_CPL_STATUS_SC;
+      ok     = 1'b0;
+      return;
+    end
+    // step 1 = say WHICH register (CF8), step 2 = read the DATA (CFC)
+    io_write(PCIe_RC_config_access::PORT_CONFIG_ADDRESS, host_bridge.make_config_address(bus_num, dev, fn, off), 4'hF, status, ok);
+    io_read (PCIe_RC_config_access::PORT_CONFIG_DATA, rdata, status, ok);
   endtask
 
   task cfg_write(input bit [4:0] dev, input bit [2:0] fn, input bit [11:0] off,
                  input bit [31:0] wdata, input bit [3:0] be,
                  output bit [2:0] status, output bit ok);
-    bit [31:0] unused;
-    cfg_request(1'b1, dev, fn, off, wdata, be, unused, status, ok);
+    if (off >= 12'h100) begin
+      `uvm_info("RC_CAM", $sformatf("  offset %03h is above 0FFh : not reachable with CF8/CFC -> write dropped", off), UVM_LOW)
+      status = `PCIe_CPL_STATUS_SC;
+      ok     = 1'b0;
+      return;
+    end
+    // step 1 = say WHICH register (CF8), step 2 = write the DATA (CFC)
+    io_write(PCIe_RC_config_access::PORT_CONFIG_ADDRESS, host_bridge.make_config_address(bus_num, dev, fn, off), 4'hF, status, ok);
+    io_write(PCIe_RC_config_access::PORT_CONFIG_DATA, wdata, be, status, ok);
   endtask
 
+  //========================================================================
+  // CAM : CPU I/O access to the host bridge ports 0CF8h / 0CFCh
+  //========================================================================
+  // I/O WRITE
+  //   0CF8h : only stores CONFIG_ADDRESS. NO packet goes out.
+  //   0CFCh : stores CONFIG_DATA, then (if CF8 Enable=1) sends a CfgWr TLP
+  task io_write(input bit [15:0] port, input bit [31:0] data, input bit [3:0] be,
+                output bit [2:0] status, output bit ok);
+    bit        en;
+    bit [7:0]  bus;
+    bit [4:0]  dev;
+    bit [2:0]  fn;
+    bit [11:0] off;
+    bit [31:0] unused;
+    int        r;
+
+    status = `PCIe_CPL_STATUS_SC;
+    ok     = 1'b1;
+
+    if (port == PCIe_RC_config_access::PORT_CONFIG_ADDRESS) begin
+      host_bridge.config_address_reg = data;
+      host_bridge.split_config_address(data, en, bus, dev, fn, off);
+      `uvm_info("RC_CAM", $sformatf("  IO_WR 0CF8h (CONFIG_ADDRESS) <= %08h : Enable=%0b Bus=%0d Dev=%0d Fn=%0d Reg=%03h",
+                data, en, bus, dev, fn, off), UVM_LOW)
+      return;
+    end
+
+    if (port == PCIe_RC_config_access::PORT_CONFIG_DATA) begin
+      host_bridge.config_data_reg = data;
+      host_bridge.split_config_address(host_bridge.config_address_reg, en, bus, dev, fn, off);
+      `uvm_info("RC_CAM", $sformatf("  IO_WR 0CFCh (CONFIG_DATA)    <= %08h BE=%04b", data, be), UVM_LOW)
+      if (!en) begin
+        `uvm_info("RC_CAM", "  CONFIG_ADDRESS Enable=0 : no Configuration Request (normal I/O write)", UVM_LOW)
+        return;
+      end
+      r = host_bridge.route(bus);
+      if (r == 2) begin
+        `uvm_info("RC_CAM", $sformatf("  Bus %0d is not below the Root Port : write dropped", bus), UVM_LOW)
+        ok = 1'b0;
+        return;
+      end
+      cfg_request(1'b1, bus, dev, fn, off, (r == 1), data, be, unused, status, ok);
+      return;
+    end
+
+    `uvm_warning("RC_CAM", $sformatf("IO_WR to port %04h is not a configuration port", port))
+    ok = 1'b0;
+  endtask
+
+  // I/O READ
+  //   0CF8h : returns CONFIG_ADDRESS. NO packet goes out.
+  //   0CFCh : (if CF8 Enable=1) sends a CfgRd TLP, completion data -> CONFIG_DATA
+  task io_read(input bit [15:0] port, output bit [31:0] data,
+               output bit [2:0] status, output bit ok);
+    bit        en;
+    bit [7:0]  bus;
+    bit [4:0]  dev;
+    bit [2:0]  fn;
+    bit [11:0] off;
+    int        r;
+
+    status = `PCIe_CPL_STATUS_SC;
+    ok     = 1'b1;
+
+    if (port == PCIe_RC_config_access::PORT_CONFIG_ADDRESS) begin
+      data = host_bridge.config_address_reg;
+      return;
+    end
+
+    if (port == PCIe_RC_config_access::PORT_CONFIG_DATA) begin
+      host_bridge.split_config_address(host_bridge.config_address_reg, en, bus, dev, fn, off);
+      if (!en) begin
+        `uvm_info("RC_CAM", "  IO_RD 0CFCh with Enable=0 : no Configuration Request -> FFFFFFFFh", UVM_LOW)
+        data = 32'hFFFF_FFFF;
+        ok   = 1'b0;
+        return;
+      end
+      r = host_bridge.route(bus);
+      if (r == 2) begin
+        `uvm_info("RC_CAM", $sformatf("  Bus %0d is not below the Root Port -> FFFFFFFFh (Master Abort)", bus), UVM_LOW)
+        data = 32'hFFFF_FFFF;
+        ok   = 1'b0;
+        return;
+      end
+      cfg_request(1'b0, bus, dev, fn, off, (r == 1), 32'h0, 4'hF, host_bridge.config_data_reg, status, ok);
+      data = host_bridge.config_data_reg;
+      `uvm_info("RC_CAM", $sformatf("  IO_RD 0CFCh (CONFIG_DATA)    => %08h", data), UVM_LOW)
+      return;
+    end
+
+    `uvm_warning("RC_CAM", $sformatf("IO_RD from port %04h is not a configuration port", port))
+    data = 32'hFFFF_FFFF;
+    ok   = 1'b0;
+  endtask
+
+  //========================================================================
+  // cfg_request : HOST BRIDGE -> one Configuration Request TLP + wait for
+  //   its completion. tgt_bus / type1 come from CONFIG_ADDRESS (CF8).
+  //========================================================================
   task cfg_request(input  bit        is_write,
+                   input  bit [7:0]  tgt_bus,
                    input  bit [4:0]  dev,
                    input  bit [2:0]  fn,
                    input  bit [11:0] off,
+                   input  bit        type1,
                    input  bit [31:0] wdata,
                    input  bit [3:0]  be,
                    output bit [31:0] rdata,
@@ -490,9 +626,9 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
          txn_type  == PCIe_TL_CFG;
          dir       == (local::is_write ? PCIe_TL_WRITE : PCIe_TL_READ);
          length    == `PCIe_TL_LEN_MIN;
-         cfg_type1 == 1'b0;
+         cfg_type1 == local::type1;        // Type 0 or Type 1 (decided by the host bridge)
 
-         cfg_bus_num     == local::bus_num;
+         cfg_bus_num     == local::tgt_bus;
          cfg_dev_num     == local::dev;
          cfg_fn_num      == local::fn;
          cfg_reg_num     == {local::off[11:2], 2'b00};   // byte offset of the DW
@@ -535,8 +671,8 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
 
     if (timed_out) begin
       n_timeout++;
-      `uvm_error("RC_ENUM", $sformatf("COMPLETION_TIMEOUT : CfgWr0/CfgRd0 %s %0d:%0d.%0d off=%03h tag=0x%0h - no completion in %0d ns",
-                 is_write ? "WRITE" : "READ", bus_num, dev, fn, off, tag, cpl_timeout_ns))
+      `uvm_error("RC_ENUM", $sformatf("COMPLETION_TIMEOUT : Cfg%s%0d %0d:%0d.%0d off=%03h tag=0x%0h - no completion in %0d ns",
+                 is_write ? "Wr" : "Rd", type1, tgt_bus, dev, fn, off, tag, cpl_timeout_ns))
       rdata = 32'hFFFF_FFFF;                  // what software sees when nothing answers
       return;
     end
@@ -556,10 +692,10 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
         return;
       end
       rdata = cpl.cpl_data[0];
-      `uvm_info("RC_ENUM", $sformatf("  CFG_RD %0d:%0d.%0d off=%03h tag=0x%0h -> %08h", bus_num, dev, fn, off, tag, rdata), UVM_LOW)
+      `uvm_info("RC_ENUM", $sformatf("  CFG_RD%0d %0d:%0d.%0d off=%03h tag=0x%0h -> %08h", type1, tgt_bus, dev, fn, off, tag, rdata), UVM_LOW)
     end
     else begin
-      `uvm_info("RC_ENUM", $sformatf("  CFG_WR %0d:%0d.%0d off=%03h tag=0x%0h data=%08h be=%04b -> SC", bus_num, dev, fn, off, tag, wdata, be), UVM_LOW)
+      `uvm_info("RC_ENUM", $sformatf("  CFG_WR%0d %0d:%0d.%0d off=%03h tag=0x%0h data=%08h be=%04b -> SC", type1, tgt_bus, dev, fn, off, tag, wdata, be), UVM_LOW)
     end
     ok = 1'b1;
   endtask

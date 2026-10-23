@@ -27,6 +27,7 @@ package PCIe_pkg;
 `include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_TL_model.sv"
 	// [ORDERING] PCIe 6.1 Table 2-42 ordering rules (used by PCIe_ordering_checker)
 	`include "../PCIe_agents/PCIe_ordering_rules.sv"
+	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_config_access.sv"   // [CAM] CF8 / CFC registers
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_PL_model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_TL_model.sv"
