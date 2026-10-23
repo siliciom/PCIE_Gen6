@@ -809,21 +809,36 @@ class PCIe_sequence_item extends uvm_sequence_item;
   bit            fc_hdr_inf [3];
   bit            fc_dat_inf [3];
 
+  // [FC SHARED] Flit Mode shared credit pool (same layout as the dedicated one)
+  bit [2:0]      fc_cls_mask_shr = 3'b000;   // classes the shared values apply to
+  int unsigned   fc_hdr_shr [3];             // shared PH   NPH   CPLH
+  int unsigned   fc_dat_shr [3];             // shared PD   NPD   CPLD
+  bit            fc_hdr_inf_shr [3];
+  bit            fc_dat_inf_shr [3];
+
   function void set_fc_cls(int unsigned c, int unsigned h, int unsigned d);
     fc_hdr[c] = h;
     fc_dat[c] = d;
     fc_cls_mask[c] = 1'b1;
   endfunction
 
+  // [FC SHARED] shared credit values of class c
+  function void set_fc_cls_shr(int unsigned c, int unsigned h, int unsigned d);
+    fc_hdr_shr[c] = h;
+    fc_dat_shr[c] = d;
+    fc_cls_mask_shr[c] = 1'b1;
+  endfunction
+
   // Same print format on the TL and the DL side so the values can be compared by eye
   function string fc_values_str();
-    return $sformatf("PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d",
-                     fc_hdr[0], fc_dat[0], fc_hdr[1], fc_dat[1], fc_hdr[2], fc_dat[2]);
+    return $sformatf("DED: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d  SHR: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d",
+                     fc_hdr[0], fc_dat[0], fc_hdr[1], fc_dat[1], fc_hdr[2], fc_dat[2],
+                     fc_hdr_shr[0], fc_dat_shr[0], fc_hdr_shr[1], fc_dat_shr[1], fc_hdr_shr[2], fc_dat_shr[2]);
   endfunction
 
   function string fc_convert2string();
-    return $sformatf("%s from %s mask=%03b reason=%s :: %s",
-                     fc_kind.name(), fc_origin, fc_cls_mask, fc_reason, fc_values_str());
+    return $sformatf("%s from %s mask=%03b mask_shr=%03b reason=%s :: %s",
+                     fc_kind.name(), fc_origin, fc_cls_mask, fc_cls_mask_shr, fc_reason, fc_values_str());
   endfunction
 
   // (a - b) mod 2^bits

@@ -780,3 +780,39 @@
 `define PCIe_FC_GATE_EP_COMPLETIONS  0
 
 
+//==============================================================================
+// SHARED / DEDICATED FLOW CONTROL - Flit Mode  (PCIe Base 6.0)    [FC SHARED]
+//
+//   Two credit pools per FC type (P / NP / Cpl) in Flit Mode :
+//     DEDICATED : per VC, small. Lets every VC send at least one TLP (no deadlock)
+//     SHARED    : common to all VCs, big
+//   Transmitter (Sec 2.6.1.1) : SHARED gate first (Eq 2-8); if it fails,
+//     DEDICATED gate (Eq 2-11); if both fail, wait for UpdateFC.
+//   A TLP sent on DEDICATED credits carries the Flit Mode Local TLP Prefix
+//     (Sec 2.2.10.3, Fig 2-77) : Byte0 = 8Dh, Byte1 bit7 = TLP Uses Dedicated
+//     Credits. No prefix (or bit Clear) -> SHARED. Receiver accounts per prefix
+//     (Sec 2.6.1.2). The prefix is not allowed on a Non-Flit TLP.
+//   Only VC0 here : Table 3-2 row 3/4, note 4 -> dedicated = 0 ("Zero"),
+//     all credits shared. Note 7 -> shared must not be 0 on VC0.
+//
+//   Pool sizes = receive buffer size in credits. Run-time override (no
+//   recompile) : +FC_DED_HDR=<n> +FC_DED_DATA=<n> +FC_SHR_HDR=<n> +FC_SHR_DATA=<n>
+//   Example, both pools used in one run :
+//     +FC_SHR_HDR=2 +FC_SHR_DATA=32 +FC_DED_HDR=8 +FC_DED_DATA=64
+//==============================================================================
+`define PCIe_FC_DED_HDR_CREDITS      0                            // dedicated header credits / type (VC0 : 0)
+`define PCIe_FC_DED_DATA_CREDITS     0                            // dedicated data credits / type   (VC0 : 0)
+`define PCIe_FC_SHR_HDR_CREDITS      `PCIe_FC_MAX_HDR_CREDITS     // shared header credits / type
+`define PCIe_FC_SHR_DATA_CREDITS     `PCIe_FC_MAX_DATA_CREDITS    // shared data credits / type
+
+// Flit Mode Local TLP Prefix, "TLP Uses Dedicated Credits" Set (Fig 2-77)
+//   byte0 = 8Dh (Type)   byte1 bit7 = TLP Uses Dedicated Credits   rest reserved
+`define PCIe_FC_DED_PREFIX_BYTE1     8'h80
+`define PCIe_FC_DED_PREFIX_DW        {`PCIe_FLITTYPE_PREFIX, `PCIe_FC_DED_PREFIX_BYTE1, 16'h0000}
+
+// Pool choice of the transmitter (debug knob, run time : +FC_POOL_MODE=<n>)
+//   0 = SPEC      : shared first, dedicated when shared is full  (default)
+//   1 = DEDICATED : every Flit Mode TLP uses dedicated (needs dedicated credits)
+//   2 = SHARED    : every TLP uses shared
+//   3 = ALTERNATE : per type, TLPs take turns shared / dedicated / shared ...
+`define PCIe_FC_POOL_MODE            0

@@ -123,7 +123,7 @@ class PCIe_RC_DL_model extends uvm_component;
     bit   dllp_tx_pending;
     // --------------------------------------------------------------------
 
-    // ---- FLOW CONTROL (dedicated credits, VC0) ------------------------------
+    // ---- FLOW CONTROL (dedicated + shared credits, VC0) ----------------------
     uvm_analysis_imp_fc_from_tl #(PCIe_sequence_item, PCIe_RC_DL_model) fc_tl_imp;  // TL -> DL : local credits
     uvm_analysis_port #(PCIe_sequence_item)                  fc_tl_ap;   // DL -> TL : peer credit limits
     int unsigned adv_h [3];          // local CREDITS_ALLOCATED to advertise (from the TL)
@@ -138,6 +138,16 @@ class PCIe_RC_DL_model extends uvm_component;
     bit          fi2;                // FI2
     bit [2:0]    pend_mask;          // classes that need an UpdateFC DLLP on the wire
     bit          peer_init_fwd [3];  // initial limit of the class already given to the TL
+    // [FC SHARED] Flit Mode shared pool (same meaning as the dedicated fields above)
+    int unsigned adv_h_shr [3];      // local shared CREDITS_ALLOCATED to advertise (from the TL)
+    int unsigned adv_d_shr [3];
+    int unsigned peer_h_shr [3];     // peer shared values = transmitter SHARED_CREDIT_LIMIT
+    int unsigned peer_d_shr [3];
+    bit          peer_hinf_shr [3];
+    bit          peer_dinf_shr [3];
+    bit          peer_init_fwd_shr [3];
+    bit [2:0]    pend_mask_shr;      // classes that need an UpdateFC (shared) DLLP on the wire
+    int unsigned n_updfc_tx_shr, n_updfc_rx_shr;
     bit          fc_tx_allowed = 1'b0;   // gate for DL-initiated DLLPs after DL_ACTIVE
     int unsigned n_initfc1_tx, n_initfc1_rx, n_initfc2_tx, n_initfc2_rx, n_updfc_tx, n_updfc_rx;
 
@@ -192,7 +202,7 @@ endfunction
   endfunction
 
   // =========================================================================
-  // DLCMSM FSM â€” ADDED / ACTIVATED BLOCK
+  // DLCMSM FSM — ADDED / ACTIVATED BLOCK
   // Structured exactly like PCIe_RC_PL_model::rc_ltssm(): a forever+case loop,
   // one task per state/substate, each task prints its own entry banner, checks
   // its own dependency condition, prints the check, and only transitions when
@@ -1274,10 +1284,13 @@ endfunction
 
 
   // =========================================================================
-  // FLOW CONTROL  (PCIe Base 6.0 Sec 3.4 / Sec 2.6)  -  DEDICATED credits, VC0
+  // FLOW CONTROL  (PCIe Base 6.0 Sec 3.4 / Sec 2.6)  -  DEDICATED + SHARED credits, VC0
   //
   //   TL -> DL : write_fc_from_tl()  local credits  PH PD NPH NPD CPLH CPLD
-  //                                  (printed here exactly as the TL sent them)
+  //                                  dedicated AND shared (printed as the TL sent them)
+  //   [FC SHARED] InitFC rounds carry the real shared values (not 0 any more),
+  //   UpdateFC is sent for the dedicated and/or the shared pool, and the peer
+  //   shared values are forwarded to the TL (SHARED_CREDIT_LIMIT).
   //   DL -> PL : InitFC1 / InitFC2 rounds (6 DLLPs each in Flit Mode) during
   //              DL_INIT, UpdateFC DLLPs during DL_ACTIVE
   //   PL -> DL : fc_rx_flit()        peer InitFC / UpdateFC  ==> CREDIT_LIMIT,
@@ -1290,16 +1303,20 @@ endfunction
       adv_h[c] = 0; adv_d[c] = 0;
       peer_h[c] = 0; peer_d[c] = 0; peer_hinf[c] = 0; peer_dinf[c] = 0;
       fi1_ded[c] = 0; fi1_shr[c] = 0; peer_init_fwd[c] = 0;
+      adv_h_shr[c] = 0; adv_d_shr[c] = 0;                                           // [FC SHARED]
+      peer_h_shr[c] = 0; peer_d_shr[c] = 0; peer_hinf_shr[c] = 0; peer_dinf_shr[c] = 0;
+      peer_init_fwd_shr[c] = 0;
     end
-    fi2 = 0; adv_valid = 0; pend_mask = 3'b000;
+    fi2 = 0; adv_valid = 0; pend_mask = 3'b000; pend_mask_shr = 3'b000;
     n_initfc1_tx = 0; n_initfc1_rx = 0; n_initfc2_tx = 0; n_initfc2_rx = 0; n_updfc_tx = 0; n_updfc_rx = 0;
+    n_updfc_tx_shr = 0; n_updfc_rx_shr = 0;
   endfunction
 
   // link (re)training : restart only the handshake flags, keep local values
   function void fc_restart_init();
-    for (int c = 0; c < 3; c++) begin fi1_ded[c] = 0; fi1_shr[c] = 0; peer_init_fwd[c] = 0; end
+    for (int c = 0; c < 3; c++) begin fi1_ded[c] = 0; fi1_shr[c] = 0; peer_init_fwd[c] = 0; peer_init_fwd_shr[c] = 0; end
     fi2 = 0;
-    pend_mask = 3'b000;
+    pend_mask = 3'b000; pend_mask_shr = 3'b000;
   endfunction
 
   // Flit Mode : FI1 is Set once all SIX FC unit values were recorded (Sec 3.4.2)
@@ -1314,12 +1331,25 @@ endfunction
               it.fc_kind.name(), it.fc_values_str(), it.fc_origin, it.fc_reason), UVM_LOW)
     if (it.fc_kind == FC_ADV_INIT || it.fc_kind == FC_ADV_UPDATE) begin
       for (int c = 0; c < 3; c++)
-        if (it.fc_cls_mask[c]) begin
-          adv_h[c] = it.fc_hdr[c];
-          adv_d[c] = it.fc_dat[c];
-          adv_valid = 1'b1;
+        begin
+          if (it.fc_cls_mask[c]) begin
+            adv_h[c] = it.fc_hdr[c];
+            adv_d[c] = it.fc_dat[c];
+            adv_valid = 1'b1;
+          end
+          if (it.fc_cls_mask_shr[c]) begin                       // [FC SHARED]
+            adv_h_shr[c] = it.fc_hdr_shr[c];
+            adv_d_shr[c] = it.fc_dat_shr[c];
+          end
+          // [FC SHARED] each value must fit its DLLP field (HdrFC 8 bit, DataFC 12 bit)
+          if (adv_h[c] >= 256 || adv_d[c] >= 4096 || adv_h_shr[c] >= 256 || adv_d_shr[c] >= 4096)
+            `uvm_error("RC_DL_FC", $sformatf("ADVERTISED_CREDITS_DO_NOT_FIT_DLLP_FIELD class %0d : ded %0d/%0d shr %0d/%0d",
+                       c, adv_h[c], adv_d[c], adv_h_shr[c], adv_d_shr[c]))
         end
-      if (it.fc_kind == FC_ADV_UPDATE) pend_mask |= it.fc_cls_mask;
+      if (it.fc_kind == FC_ADV_UPDATE) begin
+        pend_mask     |= it.fc_cls_mask;
+        pend_mask_shr |= it.fc_cls_mask_shr;                     // [FC SHARED]
+      end
     end
   endfunction
 
@@ -1330,11 +1360,11 @@ endfunction
                                          `PCIe_FC_SCALE_1X, adv_d[c][11:0]);
   endfunction
 
-  // Shared credits are not implemented : advertised as scale 01b / 0 credits
-  function bit [31:0] fc_build_shared_zero(bit [1:0] typ, int unsigned c);
+  // [FC SHARED] shared FC DLLP of class c carrying the shared credits the TL advertised
+  function bit [31:0] fc_build_shared(bit [1:0] typ, int unsigned c);
     return PCIe_sequence_item::fc_encode(typ, c[1:0], 1'b1, `PCIe_FC_VC0,
-                                         `PCIe_FC_SCALE_1X, 8'd0,
-                                         `PCIe_FC_SCALE_1X, 12'd0);
+                                         `PCIe_FC_SCALE_1X, adv_h_shr[c][7:0],
+                                         `PCIe_FC_SCALE_1X, adv_d_shr[c][11:0]);
   endfunction
 
   // RC : the PL model has no queue, so the flit is handed over with the same
@@ -1352,9 +1382,10 @@ endfunction
     if (!adv_valid)
       `uvm_warning("RC_DL_FC", "InitFC round started before the TL advertised its credits")
     for (int c = 0; c < 3; c++) q.push_back(fc_build_dedicated(typ, c));
-    for (int c = 0; c < 3; c++) q.push_back(fc_build_shared_zero(typ, c));
-    `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] %s ROUND :: advertising  PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d (shared credits: 0)",
-              nm, adv_h[0], adv_d[0], adv_h[1], adv_d[1], adv_h[2], adv_d[2]), UVM_LOW)
+    for (int c = 0; c < 3; c++) q.push_back(fc_build_shared(typ, c));     // [FC SHARED]
+    `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] %s ROUND :: advertising  DED: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d  SHR: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d",
+              nm, adv_h[0], adv_d[0], adv_h[1], adv_d[1], adv_h[2], adv_d[2],
+              adv_h_shr[0], adv_d_shr[0], adv_h_shr[1], adv_d_shr[1], adv_h_shr[2], adv_d_shr[2]), UVM_LOW)
     foreach (q[i]) begin
       `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] %s %0d/6 : %s", nm, i+1, PCIe_sequence_item::fc_dllp_str(q[i])), UVM_LOW)
       send_dllp_flit(q[i]);
@@ -1362,7 +1393,7 @@ endfunction
     end
   endtask
 
-  // UpdateFC for every class that is pending
+  // UpdateFC for every class that is pending (dedicated and / or shared)
   task fc_send_pending_updates();
     bit [31:0] v;
     for (int c = 0; c < 3; c++) begin
@@ -1375,6 +1406,15 @@ endfunction
         fc_send_active(v);
         n_updfc_tx++;
       end
+      if (pend_mask_shr[c]) begin                                // [FC SHARED]
+        pend_mask_shr[c] = 1'b0;
+        v = fc_build_shared(`PCIe_FC_TYPE_UPDATEFC, c);
+        `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] UpdateFC-SHARED class %s : SHARED CREDITS_ALLOCATED %s=%0d %s=%0d :: %s",
+                  PCIe_sequence_item::fc_cls_name(c), PCIe_sequence_item::fc_hdr_name(c), adv_h_shr[c],
+                  PCIe_sequence_item::fc_dat_name(c), adv_d_shr[c], PCIe_sequence_item::fc_dllp_str(v)), UVM_LOW)
+        fc_send_active(v);
+        n_updfc_tx_shr++;
+      end
     end
   endtask
 
@@ -1383,10 +1423,11 @@ endfunction
   // after DL_ACTIVE also satisfies the peer's FI2.
   task run_fc_update_loop();
     wait (dl_link_active);
-    pend_mask = 3'b111;
-    `uvm_info("RC_DL_FC", "[FC_DL] DL_ACTIVE :: INITIAL UpdateFC FOR P/NP/CPL (completes FC_INIT2 at the peer)", UVM_LOW)
+    pend_mask     = 3'b111;
+    pend_mask_shr = 3'b111;                                      // [FC SHARED]
+    `uvm_info("RC_DL_FC", "[FC_DL] DL_ACTIVE :: INITIAL UpdateFC (dedicated + shared) FOR P/NP/CPL (completes FC_INIT2 at the peer)", UVM_LOW)
     forever begin
-      if (pend_mask != 3'b000 && fc_tx_allowed) fc_send_pending_updates();
+      if ((pend_mask != 3'b000 || pend_mask_shr != 3'b000) && fc_tx_allowed) fc_send_pending_updates();
       else #1ns;
     end
   endtask
@@ -1418,7 +1459,12 @@ endfunction
       `PCIe_FC_TYPE_INITFC1,
       `PCIe_FC_TYPE_INITFC2: begin
         if (typ == `PCIe_FC_TYPE_INITFC1) n_initfc1_rx++; else n_initfc2_rx++;
-        if (shared) fi1_shr[c] = 1'b1;              // recorded, but not used (dedicated only)
+        if (shared) begin                           // [FC SHARED]
+          peer_h_shr[c] = hfc; peer_hinf_shr[c] = hinf;
+          peer_d_shr[c] = dfc; peer_dinf_shr[c] = dinf;
+          fi1_shr[c] = 1'b1;
+          fwd = 1'b1;
+        end
         else begin
           peer_h[c] = hfc; peer_hinf[c] = hinf;
           peer_d[c] = dfc; peer_dinf[c] = dinf;
@@ -1428,45 +1474,69 @@ endfunction
         if (typ == `PCIe_FC_TYPE_INITFC2) fi2 = 1'b1;
       end
       `PCIe_FC_TYPE_UPDATEFC: begin
-        n_updfc_rx++;
+        if (shared) n_updfc_rx_shr++; else n_updfc_rx++;
         fi2 = 1'b1;
         if (!shared) begin
           peer_h[c] = hfc; peer_hinf[c] = hinf;
           peer_d[c] = dfc; peer_dinf[c] = dinf;
-          fwd = 1'b1;
-          upd = 1'b1;
+          //fwd = 1'b1;
+          //upd = 1'b1;
         end
+        else begin                                  // [FC SHARED]
+          peer_h_shr[c] = hfc; peer_hinf_shr[c] = hinf;
+          peer_d_shr[c] = dfc; peer_dinf_shr[c] = dinf;
+        end
+        fwd = 1'b1;
+        upd = 1'b1;
       end
       default: ;
     endcase
     if (!fwd) return;
     if (!upd) begin
-      if (peer_init_fwd[c]) return;      // initial limit already applied
-      peer_init_fwd[c] = 1'b1;
+      if (shared) begin                                          // [FC SHARED]
+        if (peer_init_fwd_shr[c]) return;  // initial shared limit already applied
+        peer_init_fwd_shr[c] = 1'b1;
+      end
+      else begin
+        if (peer_init_fwd[c]) return;      // initial limit already applied
+        peer_init_fwd[c] = 1'b1;
+      end
     end
     it = PCIe_sequence_item::type_id::create("fc_peer_item");
     it.fc_kind   = upd ? FC_PEER_UPDATE : FC_PEER_INIT;
     it.fc_origin = "RC_DL";
     it.fc_reason = PCIe_sequence_item::fc_type_name(typ);
-    it.set_fc_cls(c, hfc, dfc);
-    it.fc_hdr_inf[c] = hinf;
-    it.fc_dat_inf[c] = dinf;
-    `uvm_info("RC_DL_FC", $sformatf("[FC_DL->TL] %s class %s : %s=%0d %s=%0d  (%s)",
+    if (shared) begin                                            // [FC SHARED]
+      it.set_fc_cls_shr(c, hfc, dfc);
+      it.fc_hdr_inf_shr[c] = hinf;
+      it.fc_dat_inf_shr[c] = dinf;
+    end
+    else begin
+      it.set_fc_cls(c, hfc, dfc);
+      it.fc_hdr_inf[c] = hinf;
+      it.fc_dat_inf[c] = dinf;
+    end
+    `uvm_info("RC_DL_FC", $sformatf("[FC_DL->TL] %s class %s : %s=%0d %s=%0d  (%s %s)",
               it.fc_kind.name(), PCIe_sequence_item::fc_cls_name(c),
               PCIe_sequence_item::fc_hdr_name(c), hfc, PCIe_sequence_item::fc_dat_name(c), dfc,
-              PCIe_sequence_item::fc_type_name(typ)), UVM_LOW)
+              PCIe_sequence_item::fc_type_name(typ), shared ? "SHARED" : "DEDICATED"), UVM_LOW)
     fc_tl_ap.write(it);
   endfunction
 
   function void report_phase(uvm_phase phase);
     super.report_phase(phase);
     `uvm_info("RC_DL_FC", $sformatf({"\n  ========== RC DL FLOW CONTROL SUMMARY ==========\n",
-        "  local credits (from TL) : PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d\n",
-        "  peer credits (from DLLP): PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d\n",
-        "  InitFC1 tx/rx=%0d/%0d  InitFC2 tx/rx=%0d/%0d  UpdateFC tx/rx=%0d/%0d  FI1=%0b FI2=%0b"},
+        "  local credits (from TL) dedicated : PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d\n",
+        "  local credits (from TL) shared    : PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d\n",
+        "  peer credits (from DLLP) dedicated: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d\n",
+        "  peer credits (from DLLP) shared   : PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d\n",
+        "  InitFC1 tx/rx=%0d/%0d  InitFC2 tx/rx=%0d/%0d  UpdateFC tx/rx=%0d/%0d  UpdateFC-SHR tx/rx=%0d/%0d  FI1=%0b FI2=%0b"},
         adv_h[0], adv_d[0], adv_h[1], adv_d[1], adv_h[2], adv_d[2],
+        adv_h_shr[0], adv_d_shr[0], adv_h_shr[1], adv_d_shr[1], adv_h_shr[2], adv_d_shr[2],
         peer_h[0], peer_d[0], peer_h[1], peer_d[1], peer_h[2], peer_d[2],
+        peer_h_shr[0], peer_d_shr[0], peer_h_shr[1], peer_d_shr[1], peer_h_shr[2], peer_d_shr[2],
         n_initfc1_tx, n_initfc1_rx, n_initfc2_tx, n_initfc2_rx, n_updfc_tx, n_updfc_rx,
+        n_updfc_tx_shr, n_updfc_rx_shr,
         fi1_done(), fi2_done()), UVM_LOW)
   endfunction
 
