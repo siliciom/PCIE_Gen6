@@ -163,6 +163,22 @@ class PCIe_ordering_checker extends uvm_component;
                      t.tag, t.requester_id, t.attr[2], t.attr[1], t.attr[0]);
   endfunction
 
+  //---------------------------------------------------------------------------------------
+  // [FIX] same_request : 1 when t2 is the next piece of the SAME split request as t1
+  //                      (same type, same direction, same requester, same tag, and the
+  //                      address continues from where t1 ended). Two pieces of one
+  //                      request are one transaction, so Table 2-42 does not apply.
+  //---------------------------------------------------------------------------------------
+  protected function bit same_request(PCIe_sequence_item t2, PCIe_sequence_item t1);
+    int unsigned t1_dw;
+    t1_dw = (t1.length == 0) ? 1024 : t1.length;     // Length = 0 means 1024 DW
+    return (t2.txn_type     == t1.txn_type)     &&
+           (t2.dir          == t1.dir)          &&
+           (t2.requester_id == t1.requester_id) &&
+           (t2.tag          == t1.tag)          &&
+           (t2.address      == t1.address + (t1_dw * 4));
+  endfunction
+
   //=======================================================================================
   // print_table_decision : the 3 info prints asked for
   //   1) ENTERED_ORDERING_TABLE_CHECK : which two TLPs are compared (T1 older, T2 newer)
@@ -215,6 +231,11 @@ class PCIe_ordering_checker extends uvm_component;
     if (last_sent == null) begin
       `uvm_info("ORD_CHK", $sformatf("ENTERED_ORDERING_TABLE_CHECK : %s is the FIRST TLP, nothing older to compare",
                 tlp_desc(waiting[pos], waiting_no[pos])), UVM_LOW)
+    end
+    else if (same_request(waiting[pos], last_sent)) begin
+      // [FIX] next piece of the same split request -> not a new transaction, no table check
+      `uvm_info("ORD_CHK", $sformatf("SAME_REQUEST_PIECE : %s is the next piece of %s, no ordering check",
+                tlp_desc(waiting[pos], waiting_no[pos]), tlp_desc(last_sent, last_sent_no)), UVM_LOW)
     end
     else if (last_sent_no < waiting_no[pos]) begin
       // normal case : the older TLP (T1 = last_sent) went first, now the newer one (T2)
