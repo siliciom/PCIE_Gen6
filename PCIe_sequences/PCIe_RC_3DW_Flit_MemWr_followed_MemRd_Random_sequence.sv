@@ -87,7 +87,9 @@ class PCIe_RC_3DW_Flit_MemWr_followed_MemRd_Random_sequence extends PCIe_RC_cont
 
          address == 32'h0000_2000;
 
-         tag          == 14'h0011;
+         tag          == 14'h0011; // same requester id
+        //requester_id == 16'h0200; //different requester id
+
          requester_id == 16'h0100;
          attr         == 3'b110;      // [ATTR] IDO = 1 and RO = 1 (attr[2:0] = {IDO, RO, NS})
 
