@@ -1812,18 +1812,18 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
               "CFG_WRITE_NO_PAYLOAD : Configuration Write TLP decoded with 0 payload DW - no write data available from the monitor path, write not applied with real data")
           end
 
-	  if (d_cfg_type1) begin 
+	
 
-            cfg_access(PCIe_TL_CFG_WRITE, d_cfg_reg_num, d_first_dw_be,
-                       cfg_wdata, cfg_rdata, cfg_ur, cfg_space_t1, cfg_ro_mask_t1);
-
-	    `uvm_info("EP_TL_CFG",
-           $sformatf("CFG_SPACE_TYPE1_WRITE_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
-                 `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
-                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
-
-          end
-
+	  
+	  if (d_cfg_type1) begin
+            // Endpoint gets a Type 1 request -> Unsupported Request (UR)
+           
+	    cfg_ur    = 1'b1;
+            cfg_rdata = '0;
+            
+	    `uvm_info("EP_TL_CFG", "TYPE1_CFG_TO_ENDPOINT : UR", UVM_LOW)
+          
+    end 
 	  else begin
             cfg_access(PCIe_TL_CFG_WRITE, d_cfg_reg_num, d_first_dw_be,
                        cfg_wdata, cfg_rdata, cfg_ur, cfg_space_t0, cfg_ro_mask_t0);
@@ -1840,17 +1840,12 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
         end
         else begin
 
-          if (d_cfg_type1) begin 
-
-            cfg_access(PCIe_TL_CFG_READ, d_cfg_reg_num, d_first_dw_be,
-                       '0, cfg_rdata, cfg_ur, cfg_space_t1, cfg_ro_mask_t1);
-
-            `uvm_info("EP_TL_CFG",
-               $sformatf("CFG_SPACE_TYPE1_READ_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
-                 `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
-                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
-
-	  end
+                   if (d_cfg_type1) begin
+            // Endpoint gets a Type 1 request -> Unsupported Request (UR)
+            cfg_ur    = 1'b1;
+            cfg_rdata = '0;
+            `uvm_info("EP_TL_CFG", "TYPE1_CFG_TO_ENDPOINT : UR", UVM_LOW)
+          end
 
 	  else begin
             cfg_access(PCIe_TL_CFG_READ, d_cfg_reg_num, d_first_dw_be,

@@ -29,6 +29,9 @@ class PCIe_RC_3DW_Flit_CFGWr1_sequence extends PCIe_RC_controller_base_sequence;
   endfunction
 
   task body();
+	   PCIe_RC_TL_model   rc_tl;       // RC TL handle : completions arrive here
+    PCIe_sequence_item cpl;         // the completion we receive
+    bit                timed_out;   // 1 = no completion came
     `uvm_info("3DW_FLIT_CFGWR1","ENTERED_INTO_3DW_FLIT_CFGWR1_SEQUENCE_BODY", UVM_LOW)
 
     pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
@@ -45,10 +48,11 @@ class PCIe_RC_3DW_Flit_CFGWr1_sequence extends PCIe_RC_controller_base_sequence;
          length   == `PCIe_TL_LEN_MIN;
          cfg_type1 == 1'b1;
 
-         cfg_bus_num     == 8'h01;
-         cfg_dev_num     == 5'h01;
-         cfg_fn_num      == 3'h0;
-         cfg_reg_num     == 12'h010;
+        cfg_bus_num == `PCIe_EP_BUS_NUMBER;
+        cfg_dev_num == `PCIe_EP_DEVICE_NUMBER;
+        cfg_fn_num  == `PCIe_EP_FUNCTION_NUMBER;
+ 
+	 cfg_reg_num     == 12'h010;
          cfg_ext_reg_num == 4'h0;
 
          first_dw_be == 4'hF;
@@ -77,6 +81,18 @@ class PCIe_RC_3DW_Flit_CFGWr1_sequence extends PCIe_RC_controller_base_sequence;
     pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
+        // ---- CHECK : Endpoint must reply UR to a Type 1 config request ----
+    if (!uvm_config_db#(PCIe_RC_TL_model)::get(m_sequencer, "", "rc_tl_model", rc_tl))
+      `uvm_fatal("CFG_TYPE1", "rc_tl_model handle not found")
+
+    rc_tl.wait_completion(pcie_seq_item.tag, 20000, cpl, timed_out);
+
+    if (timed_out)
+      `uvm_error("CFG_TYPE1", $sformatf("NO_COMPLETION for tag=0x%0h", pcie_seq_item.tag))
+    else if (cpl.cpl_status != `PCIe_CPL_STATUS_UR)
+      `uvm_error("CFG_TYPE1", $sformatf("EXPECTED_UR but got %s", rc_tl.cpl_status_str(cpl.cpl_status)))
+    else
+      `uvm_info("CFG_TYPE1", $sformatf("UR_RECEIVED_AS_EXPECTED tag=0x%0h", pcie_seq_item.tag), UVM_LOW)
 
     `uvm_info("3DW_FLIT_CFGWR1","EXIT_FROM_3DW_FLIT_CFGWR1_SEQUENCE_BODY", UVM_LOW)
   endtask
