@@ -114,6 +114,9 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MemWr_followed_MemRd_MaxPayload_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MemWr_followed_MemRd_MinPayload_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MemWr_followed_MemRd_Random_sequence.sv"
+	// [ORDERING] fork-join ordering rule sequences
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MemWr_followed_IOWr_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MemRd_followed_MemWr_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MsgWr_withdata_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MsgWr_withoutdata_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_NonFlit_CFGRd0_Random_sequence.sv"
@@ -241,6 +244,9 @@ package PCIe_pkg;
 	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_MaxPayload_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_MinPayload_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_Random_test.sv"
+	// [ORDERING] tests for the fork-join ordering rule sequences
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MemWr_followed_IOWr_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MsgWr_withdata_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MsgWr_withoutdata_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_3DW_NonFlit_CFGRd0_Random_test.sv"
