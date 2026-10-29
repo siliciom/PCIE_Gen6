@@ -68,7 +68,7 @@ class PCIe_RC_3DW_flit_sequence extends PCIe_RC_controller_base_sequence;
          tag          == 14'h0010;
          requester_id == 16'h0100;
          tc   == 3'h0;
-         ts   == 3'b000;
+         ts   == 3'b001;
          attr == 3'b000;
          at == 2'b00;  
          // Configuration fields MUST be zero for MEM transaction
