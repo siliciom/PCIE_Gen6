@@ -499,6 +499,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
 	 tc == 3'b000;
 	 }
 	 }
+constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)); }
+	 
 
   //--------------------------------------------------------------------------
   // Byte Enable rules - PCIe Base 6.0 Sec 2.2.5.1 / 2.2.5.2
