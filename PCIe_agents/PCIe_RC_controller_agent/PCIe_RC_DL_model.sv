@@ -168,7 +168,7 @@ function void build_phase(uvm_phase phase);
     fc_tl_ap  = new("fc_tl_ap",  this);
     fc_dl_init();
 
-
+    void'(uvm_config_db#(pkt_mode_e)::get(this, "", "link_mode", dl_rx_pkt_mode));
   endfunction
 
 // DL model consumes TL output, creates the DLP, then publishes to PL.

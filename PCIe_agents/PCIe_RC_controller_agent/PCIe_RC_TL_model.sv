@@ -1824,11 +1824,12 @@ class PCIe_RC_TL_model extends uvm_component;
       PCIe_TL_MSG: begin
         dw0[26:24] = tr.msg_route;
         dw1[7:0]   = tr.msg_code;
-        dw2 = '0;
-        hdr = new[3];
+        dw3 = '0;
+        hdr = new[4];
         hdr[0] = dw0;
         hdr[1] = dw1;
         hdr[2] = dw2;
+        hdr[3] = dw3;;
       end
 
       default: begin
@@ -1933,7 +1934,8 @@ class PCIe_RC_TL_model extends uvm_component;
     //======================================================================
     // Header Base size
     //======================================================================
-    if (tr.is_64bit_addr())
+    //if (tr.is_64bit_addr())
+	        if (tr.is_64bit_addr() || (tr.txn_type == PCIe_TL_MSG))
       header_base_dw = 4;
     else
       header_base_dw = 3;
@@ -2032,6 +2034,12 @@ class PCIe_RC_TL_model extends uvm_component;
 
     end
 
+    else if (tr.txn_type == PCIe_TL_MSG) begin
+      dw1[14:0] = '0;
+      dw1[7:0]  = tr.msg_code;      // Message Code
+      hdr = new[4];
+      hdr[0] = dw0; hdr[1] = dw1; hdr[2] = dw2; hdr[3] = dw3;
+    end
 
     else begin
       hdr = new[1];
