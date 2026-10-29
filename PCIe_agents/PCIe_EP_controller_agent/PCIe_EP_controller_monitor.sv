@@ -809,6 +809,211 @@ if (pcie_seq_item.tx_valid) begin
    endfunction : calculate_fec_on_250b_body
 
    // ============================================================================
+   // FEC DECODER (RX side) - PCIe Base Spec 6.x Section 4.2.3.4.4,
+   //                         Figure 4-40 / 4-41 and Appendix J.4 / J.5
+   // ----------------------------------------------------------------------------
+   // The 256B flit has 3 ECC groups. Each group = 84 info bytes + Check + Parity.
+   //   Synd_Parity = (XOR of received B0..B83) ^ received B85
+   //   Synd_Check  = (Check recomputed from received B0..B83) ^ received B84
+   //   Check = 00h, Parity = 00h : no error
+   //   Check = 00h, Parity != 00h : error in B85  -> B85 ^= Synd_Parity
+   //   Check != 00h, Parity = 00h : error in B84  -> B84 ^= Synd_Check
+   //   Check != 00h, Parity != 00h : byte = 84 - ((log(Check) - log(Parity)) mod 255)
+   //                                 0..83  -> single symbol error, byte ^= Synd_Parity
+   //                                 other  -> uncorrectable error (non-existing column)
+   // After correction the CRC check decides if the flit is accepted or replayed.
+   // ============================================================================
+
+   // ---- FEC correction counters (printed in report_phase) ----
+   int unsigned fec_flit_cnt              = 0;   // flits that went through the FEC decoder
+   int unsigned fec_no_error_flit_cnt     = 0;   // flits with no error in any group
+   int unsigned fec_corrected_flit_cnt    = 0;   // flits with >= 1 corrected symbol and no uncorrectable group
+   int unsigned fec_uncorrectable_flit_cnt= 0;   // flits with >= 1 uncorrectable group
+   int unsigned fec_corrected_symbol_cnt  = 0;   // total corrected symbols (bytes)
+   int unsigned fec_uncorrectable_grp_cnt = 0;   // total uncorrectable groups
+   int unsigned fec_corrected_cnt_grp [3] = '{0, 0, 0};   // corrected symbols per ECC group
+   int unsigned fec_unc_cnt_grp       [3] = '{0, 0, 0};   // uncorrectable errors per ECC group
+   // last syndromes per group (Flit Error Log style, for debug)
+   bit [`PCIe_BYTE_W-1:0] fec_last_synd_check  [3];
+   bit [`PCIe_BYTE_W-1:0] fec_last_synd_parity [3];
+
+   // Decode one ECC group : 86 bytes in -> 86 bytes out (corrected)
+   //   data_in[0:83] = info bytes, data_in[84] = Check, data_in[85] = Parity
+   function automatic void fec_decode_group_86b(
+     input  bit [`PCIe_BYTE_W-1:0] data_in  [0:85],
+     output bit [`PCIe_BYTE_W-1:0] data_out [0:85],
+     output bit [`PCIe_BYTE_W-1:0] synd_check,
+     output bit [`PCIe_BYTE_W-1:0] synd_parity,
+     output bit [`PCIe_BYTE_W-1:0] error_magnitude,
+     output int                    error_byte,      // 0..85, -1 when no error / uncorrectable
+     output bit                    no_error,
+     output bit                    single_error,
+     output bit                    unc_error
+   );
+     bit [`PCIe_BYTE_W-1:0] info [0:83];
+     bit [`PCIe_BYTE_W-1:0] exp_check;
+     bit [`PCIe_BYTE_W-1:0] exp_parity;
+     int                    log_diff;
+
+     foreach(data_in[i]) data_out[i] = data_in[i];
+     for(int i = 0; i < 84; i++) info[i] = data_in[i];
+
+     // the decoder first runs the encoder on the received info bytes
+     fec_encode_group(info, exp_check, exp_parity);
+     synd_check  = exp_check  ^ data_in[84];
+     synd_parity = exp_parity ^ data_in[85];
+
+     no_error        = 1'b0;
+     single_error    = 1'b0;
+     unc_error       = 1'b0;
+     error_byte      = -1;
+     error_magnitude = synd_parity;
+
+     if((synd_check == 8'h00) && (synd_parity == 8'h00)) begin
+       no_error = 1'b1;                                  // no error
+     end
+     else if(synd_check == 8'h00) begin
+       single_error  = 1'b1;                             // error in B85 (Parity byte)
+       error_byte    = 85;
+       data_out[85] ^= synd_parity;
+     end
+     else if(synd_parity == 8'h00) begin
+       single_error    = 1'b1;                           // error in B84 (Check byte)
+       error_byte      = 84;
+       error_magnitude = synd_check;
+       data_out[84]   ^= synd_check;
+     end
+     else begin
+       // log(Check) - log(Parity), modulo 255, gives (84 - byte position)
+       log_diff   = (int'(fec_log_table[synd_check]) - int'(fec_log_table[synd_parity]) + 255) % 255;
+       error_byte = 84 - log_diff;
+       if((error_byte >= 0) && (error_byte < 84)) begin
+         single_error          = 1'b1;                   // single symbol error -> correct it
+         data_out[error_byte] ^= synd_parity;
+       end
+       else begin
+         unc_error  = 1'b1;                              // points to a non-existing column
+         error_byte = -1;
+       end
+     end
+   endfunction : fec_decode_group_86b
+
+   // Decode a full 256B flit (3-way interleaved ECC groups).
+   //   flit_out          : 256 corrected bytes (242B payload + 8B CRC + 6B ECC)
+   //   fec_unc_any       : 1 when any group has an uncorrectable error
+   //   fec_corrected_syms: number of symbols corrected in this flit (0..3)
+   function void fec_decode_flit_256b(
+     input  bit [`PCIe_BYTE_W-1:0] flit_in  [$],
+     output bit [`PCIe_BYTE_W-1:0] flit_out [$],
+     output bit                    fec_unc_any,
+     output int                    fec_corrected_syms
+   );
+     // Spec byte mapping of the ECC bytes : Check of group g at chk_pos[g],
+     // Parity of group g at par_pos[g]
+     int chk_pos [3] = '{252, 250, 251};
+     int par_pos [3] = '{255, 253, 254};
+     bit [`PCIe_BYTE_W-1:0] grp_in  [0:85];
+     bit [`PCIe_BYTE_W-1:0] grp_out [0:85];
+     bit [`PCIe_BYTE_W-1:0] synd_check, synd_parity, err_mag;
+     int                    err_byte;
+     int                    err_flit_pos;
+     bit                    no_err, single_err, unc_err;
+
+     fec_unc_any        = 1'b0;
+     fec_corrected_syms = 0;
+     flit_out.delete();
+
+     if(flit_in.size() < (`PCIe_DLP_FLIT_BYTE_W + `PCIe_FLIT_CRC_BYTES + `PCIe_FLIT_FEC_BYTES)) begin
+       `uvm_error(get_type_name(),
+                  $sformatf("fec_decode_flit_256b: need %0d Bytes, got %0d",
+                            `PCIe_DLP_FLIT_BYTE_W + `PCIe_FLIT_CRC_BYTES + `PCIe_FLIT_FEC_BYTES, flit_in.size()))
+       foreach(flit_in[i]) flit_out.push_back(flit_in[i]);
+       fec_unc_any = 1'b1;
+       return;
+     end
+
+     for(int i = 0; i < 256; i++) flit_out.push_back(flit_in[i]);
+     fec_flit_cnt++;
+
+     for(int g = 0; g < 3; g++) begin
+       // ---- split : byte i of the flit (i <= 248) -> group i%3, offset i/3 ----
+       for(int k = 0; k < 83; k++) grp_in[k] = flit_in[(k * 3) + g];
+       grp_in[83] = (g == 0) ? flit_in[249] : 8'h00;   // groups 1 and 2 : byte 83 is 00h
+       grp_in[84] = flit_in[chk_pos[g]];
+       grp_in[85] = flit_in[par_pos[g]];
+
+       fec_decode_group_86b(grp_in, grp_out, synd_check, synd_parity, err_mag,
+                            err_byte, no_err, single_err, unc_err);
+
+       fec_last_synd_check[g]  = synd_check;
+       fec_last_synd_parity[g] = synd_parity;
+
+       // ---- merge corrected group back into the flit ----
+       for(int k = 0; k < 83; k++) flit_out[(k * 3) + g] = grp_out[k];
+       if(g == 0) flit_out[249] = grp_out[83];
+       flit_out[chk_pos[g]] = grp_out[84];
+       flit_out[par_pos[g]] = grp_out[85];
+
+       if(single_err) begin
+         // byte position inside the 256B flit (for the log)
+         if(err_byte < 83)       err_flit_pos = (err_byte * 3) + g;
+         else if(err_byte == 83) err_flit_pos = (g == 0) ? 249 : -1;   // -1 : padding byte (not on the wire)
+         else if(err_byte == 84) err_flit_pos = chk_pos[g];
+         else                    err_flit_pos = par_pos[g];
+         fec_corrected_syms++;
+         fec_corrected_symbol_cnt++;
+         fec_corrected_cnt_grp[g]++;
+         `uvm_info(get_type_name(),
+                   $sformatf("FEC_DECODE : GROUP%0d SINGLE_SYMBOL_ERROR CORRECTED : group_byte=%0d flit_byte=%0d error_magnitude=0x%02h SYND_CHECK=0x%02h SYND_PARITY=0x%02h",
+                             g, err_byte, err_flit_pos, err_mag, synd_check, synd_parity), UVM_LOW)
+       end
+       else if(unc_err) begin
+         fec_unc_any = 1'b1;
+         fec_uncorrectable_grp_cnt++;
+         fec_unc_cnt_grp[g]++;
+         `uvm_warning(get_type_name(),
+                      $sformatf("FEC_DECODE : GROUP%0d UNCORRECTABLE_ERROR : SYND_CHECK=0x%02h SYND_PARITY=0x%02h (CRC check decides flit replay)",
+                                g, synd_check, synd_parity))
+       end
+       else begin
+         `uvm_info(get_type_name(),
+                   $sformatf("FEC_DECODE : GROUP%0d NO_ERROR", g), UVM_HIGH)
+       end
+     end
+
+     if(fec_unc_any)                  fec_uncorrectable_flit_cnt++;
+     else if(fec_corrected_syms != 0) fec_corrected_flit_cnt++;
+     else                             fec_no_error_flit_cnt++;
+
+     `uvm_info(get_type_name(),
+               $sformatf("FEC_DECODE_RESULT : corrected_symbols=%0d uncorrectable=%0b | SYND G0(C=0x%02h,P=0x%02h) G1(C=0x%02h,P=0x%02h) G2(C=0x%02h,P=0x%02h)",
+                         fec_corrected_syms, fec_unc_any,
+                         fec_last_synd_check[0], fec_last_synd_parity[0],
+                         fec_last_synd_check[1], fec_last_synd_parity[1],
+                         fec_last_synd_check[2], fec_last_synd_parity[2]), UVM_LOW)
+   endfunction : fec_decode_flit_256b
+
+   // FEC correction counter summary
+   function void report_phase(uvm_phase phase);
+     super.report_phase(phase);
+     `uvm_info(get_type_name(),
+               $sformatf({"\n",
+                          "  ================ FEC CORRECTION COUNTERS ================\n",
+                          "  flits decoded                 : %0d\n",
+                          "  flits with no error           : %0d\n",
+                          "  flits corrected               : %0d\n",
+                          "  flits with uncorrectable error: %0d\n",
+                          "  total corrected symbols       : %0d  (G0=%0d G1=%0d G2=%0d)\n",
+                          "  total uncorrectable groups    : %0d  (G0=%0d G1=%0d G2=%0d)\n",
+                          "  ========================================================="},
+                         fec_flit_cnt, fec_no_error_flit_cnt, fec_corrected_flit_cnt,
+                         fec_uncorrectable_flit_cnt,
+                         fec_corrected_symbol_cnt, fec_corrected_cnt_grp[0], fec_corrected_cnt_grp[1], fec_corrected_cnt_grp[2],
+                         fec_uncorrectable_grp_cnt, fec_unc_cnt_grp[0], fec_unc_cnt_grp[1], fec_unc_cnt_grp[2]), UVM_LOW)
+   endfunction : report_phase
+
+
+   // ============================================================================
    // CRC LOGIC (kept in one place)
    // ----------------------------------------------------------------------------
    // Gen6 Flit CRC : 8B CRC (GF(2^8), reduction 8'h2B) generated over the
@@ -970,6 +1175,24 @@ if (pcie_seq_item.tx_valid) begin
                               rc_to_ep_flit_242b, rc_to_ep_crc_8b, rc_to_ep_fec_6b), UVM_LOW)
        end : rc_to_ep_rx_flit_print
 
+      // ==== STEP 0 : FEC DECODE / CORRECTION (Sec 4.2.3.4.4, Appendix J.5) ====
+      // Each of the 3 ECC groups corrects one symbol. The corrected bytes are
+      // used from here on : FEC re-check, CRC check and the 242B sent to the DL.
+      begin : rc_to_ep_fec_decode
+         bit [`PCIe_BYTE_W-1:0] corrected_256b_flit[$];
+         bit                    fec_unc_any;
+         int                    fec_corrected_syms;
+         fec_decode_flit_256b(ep_mon_256b_flit_received_from_rc, corrected_256b_flit, fec_unc_any, fec_corrected_syms);
+         received_242b_payload_from_rc.delete();
+         for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
+            received_242b_payload_from_rc.push_back(corrected_256b_flit[i]);
+         for(int i = 0; i < `PCIe_FLIT_CRC_BYTES; i++)
+            received_8b_crc_from_rc_flit[i] = corrected_256b_flit[`PCIe_DLP_FLIT_BYTE_W + i];
+         for(int i = 0; i < `PCIe_FLIT_FEC_BYTES; i++)
+            received_6b_fec_from_rc_flit[i] = corrected_256b_flit[`PCIe_DLP_FLIT_BYTE_W + `PCIe_FLIT_CRC_BYTES + i];
+      end : rc_to_ep_fec_decode
+
+
       // ==== STEP 1 : FEC CHECK (first) - FEC calculated over the 250B body ====
       fec_body_250b_payload_plus_rc_crc.delete();
       for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
@@ -1069,16 +1292,19 @@ if (pcie_seq_item.tx_valid) begin
       // CRC and FEC MATCH    -> is_valid=1
       // CRC and FEC NO MATCH -> is_valid=0
       begin : rc_to_ep_flit_rx_retry_gate
-         if ((pcie_seq_item.rc_to_ep_flit_fec_match == 1'b1) &&
-             (pcie_seq_item.rc_to_ep_flit_crc_match == 1'b1)) begin
+         // [FEC] Spec Appendix J.5 : after FEC correction, the 8B CRC check
+         // decides if the flit is consumed (is_valid=1) or replayed (is_valid=0).
+         if (pcie_seq_item.rc_to_ep_flit_crc_match == 1'b1) begin
             is_valid = 1'b1;
             `uvm_info("EP_CONTROLLER_MONITOR",
-                      "RC_TO_EP_GATE : FEC_CRC_MATCH => is_valid=1", UVM_LOW)
+                      $sformatf("RC_TO_EP_GATE : CRC_MATCH_AFTER_FEC (fec_match=%0b) => is_valid=1",
+                                pcie_seq_item.rc_to_ep_flit_fec_match), UVM_LOW)
          end
          else begin
             is_valid = 1'b0;
             `uvm_info("EP_CONTROLLER_MONITOR",
-                      "RC_TO_EP_GATE : FEC_CRC_NO_MATCH => is_valid=0", UVM_LOW)
+                      $sformatf("RC_TO_EP_GATE : CRC_NO_MATCH_AFTER_FEC (fec_match=%0b) => is_valid=0",
+                                pcie_seq_item.rc_to_ep_flit_fec_match), UVM_LOW)
          end
       end : rc_to_ep_flit_rx_retry_gate
 
@@ -1105,5 +1331,6 @@ if (pcie_seq_item.tx_valid) begin
    `endif
 
 endclass
+
 
 
