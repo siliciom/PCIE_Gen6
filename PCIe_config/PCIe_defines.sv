@@ -735,6 +735,30 @@
 `define PCIe_EP_DEVICE_NUMBER        5'h00
 `define PCIe_EP_FUNCTION_NUMBER      3'h0
 
+//==============================================================================
+// LTSSM SUB-STATE TIMEOUTS  (PCIe Base 6.0, Sec 4.2.7 - Detect..L0)  [ADDED]
+//   Used by the RC/EP PL models to bound the time spent in each LTSSM
+//   sub-state. On expiry the sub-state watchdog forces the spec-defined exit
+//   transition. Only Detect..L0 are covered (Recovery is out of scope).
+//   Time literals assume a 1ns/1ps timescale (1 PIPE cycle = 1ns).
+//==============================================================================
+`define PCIe_LTSSM_T_DETECT_QUIET            12ms
+`define PCIe_LTSSM_T_POLLING_ACTIVE          24ms
+`define PCIe_LTSSM_T_POLLING_CONFIGURATION   48ms
+`define PCIe_LTSSM_T_CFG_LINKWIDTH_START     24ms
+`define PCIe_LTSSM_T_CFG_LINKWIDTH_ACCEPT     2ms
+`define PCIe_LTSSM_T_CFG_LANENUM_WAIT         2ms
+`define PCIe_LTSSM_T_CFG_LANENUM_ACCEPT       2ms
+`define PCIe_LTSSM_T_CFG_COMPLETE             2ms
+`define PCIe_LTSSM_T_CFG_IDLE                 2ms
+`define PCIe_LTSSM_T_RCVRY_RCVRLOCK          24ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH1            12ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH2            24ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH2_64G        48ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH3            32ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH3_64G        64ms
+`define PCIe_LTSSM_T_RCVRY_RCVRCFG           48ms
+`define PCIe_LTSSM_T_RCVRY_IDLE               2ms
 
 `endif 
 // PCIe_DEFINES_SVH
