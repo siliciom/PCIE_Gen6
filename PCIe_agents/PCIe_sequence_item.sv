@@ -467,7 +467,7 @@ class PCIe_sequence_item extends uvm_sequence_item;
   constraint c_data_size {
      if ((txn_type == PCIe_TL_MEM && dir == PCIe_TL_WRITE) ||
          (txn_type == PCIe_TL_MSG && msg_has_data))
-       data.size() == get_payload_dw();
+       data.size() == ((length == 10'd0) ? `PCIe_TL_MAX_PAYLOAD_DW : length);
      // IO and Configuration Writes are always exactly 1 DW (Sec 2.2.7)
      else if ((txn_type == PCIe_TL_IO  && dir == PCIe_TL_WRITE) ||
               (txn_type == PCIe_TL_CFG && dir == PCIe_TL_WRITE))

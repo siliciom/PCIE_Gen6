@@ -27,7 +27,17 @@
 #set testname "PCIe_gen6_3DW_Flit_CFGRd1_Random_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGWr1_Random_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGWr1_followed_CFGRd1_test"
-set testname "PCIe_gen6_3DW_Flit_CFGWr1_followed_CFGRd1_Random_test"
+#set testname "PCIe_gen6_3DW_Flit_CFGWr1_followed_CFGRd1_Random_test"
+#set testname "PCIe_gen6_3DW_Flit_MemWr_Random_test"
+#set testname "PCIe_gen6_3DW_Flit_DefMemWr_MinPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_DefMemWr_Random_test"
+#set testname "PCIe_gen6_3DW_Flit_MemRd_MinPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_MemRd_MaxPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_MemRd_Random_test"
+#set testname "PCIe_gen6_3DW_Flit_MemRdlock_MinPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_MemRdlock_MaxPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_MemRdlock_Random_test"
+#set testname "PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_MinPayload_test"
 
 vlib work
 vmap work work
