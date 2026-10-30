@@ -1269,10 +1269,18 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       `PCIe_FLITTYPE_CFGRD1   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_READ;  d_is_4dw=0; d_has_data=0; d_cfg_type1=1; end
       `PCIe_FLITTYPE_CFGWR1   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_WRITE; d_is_4dw=1'b0; d_has_data=1; d_cfg_type1=1; end
       default : begin
-        `uvm_warning("EP_TL_DECODE",
-           $sformatf("UNSUPPORTED_FLIT_TYPE=0x%02h - TLP ignored by the EP TL model", d_byte0))
-        return;
-      end
+        if ((d_byte0 == `PCIe_FLITTYPE_MSG) || (d_byte0 == `PCIe_FLITTYPE_MSGD)) begin
+          d_txn_type = PCIe_TL_MSG;
+          d_dir      = PCIe_TL_WRITE;    // Posted
+          d_is_4dw   = 1'b1;             // 4 DW header
+          d_has_data = (d_byte0 == `PCIe_FLITTYPE_MSGD);
+        end
+        else begin
+          `uvm_warning("EP_TL_DECODE",
+             $sformatf("UNSUPPORTED_FLIT_TYPE=0x%02h - TLP ignored by the EP TL model", d_byte0))
+          return;
+        end
+        end
     endcase
 
     d_hdr_base_dw = d_is_4dw ? `PCIe_TL_HDR4DW : `PCIe_TL_HDR3DW;
@@ -1347,11 +1355,19 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       `PCIe_FMTTYPE_CFGRD1   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_READ;  d_is_4dw=0; d_has_data=0; d_cfg_type1=1; end
       `PCIe_FMTTYPE_CFGWR1   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_cfg_type1=1; end
       default : begin
-        `uvm_warning("EP_TL_DECODE",
-           $sformatf("UNSUPPORTED_NONFLIT_FMTTYPE=0x%02h - TLP ignored by the EP TL model", d_byte0))
-        return;
-      end
-    endcase
+        if ((d_byte0 == `PCIe_FMTTYPE_MSG) || (d_byte0 == `PCIe_FMTTYPE_MSGD)) begin
+          d_txn_type = PCIe_TL_MSG;
+          d_dir      = PCIe_TL_WRITE;    // Posted
+          d_is_4dw   = 1'b1;             // 4 DW header
+          d_has_data = (d_byte0 == `PCIe_FMTTYPE_MSGD);
+        end
+        else begin
+          `uvm_warning("EP_TL_DECODE",
+             $sformatf("UNSUPPORTED_NONFLIT_FMTTYPE=0x%02h - TLP ignored by the EP TL model", d_byte0))
+          return;
+        end
+      end   
+ endcase
 
     d_hdr_base_dw = d_is_4dw ? `PCIe_TL_HDR4DW : `PCIe_TL_HDR3DW;
 
@@ -1812,18 +1828,18 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
               "CFG_WRITE_NO_PAYLOAD : Configuration Write TLP decoded with 0 payload DW - no write data available from the monitor path, write not applied with real data")
           end
 
-	
+	  if (d_cfg_type1) begin 
 
-	  
-	  if (d_cfg_type1) begin
-            // Endpoint gets a Type 1 request -> Unsupported Request (UR)
-           
-	    cfg_ur    = 1'b1;
-            cfg_rdata = '0;
-            
-	    `uvm_info("EP_TL_CFG", "TYPE1_CFG_TO_ENDPOINT : UR", UVM_LOW)
-          
-    end 
+            cfg_access(PCIe_TL_CFG_WRITE, d_cfg_reg_num, d_first_dw_be,
+                       cfg_wdata, cfg_rdata, cfg_ur, cfg_space_t1, cfg_ro_mask_t1);
+
+	    `uvm_info("EP_TL_CFG",
+           $sformatf("CFG_SPACE_TYPE1_WRITE_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
+                 `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+
+          end
+
 	  else begin
             cfg_access(PCIe_TL_CFG_WRITE, d_cfg_reg_num, d_first_dw_be,
                        cfg_wdata, cfg_rdata, cfg_ur, cfg_space_t0, cfg_ro_mask_t0);
@@ -1840,12 +1856,17 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
         end
         else begin
 
-                   if (d_cfg_type1) begin
-            // Endpoint gets a Type 1 request -> Unsupported Request (UR)
-            cfg_ur    = 1'b1;
-            cfg_rdata = '0;
-            `uvm_info("EP_TL_CFG", "TYPE1_CFG_TO_ENDPOINT : UR", UVM_LOW)
-          end
+          if (d_cfg_type1) begin 
+
+            cfg_access(PCIe_TL_CFG_READ, d_cfg_reg_num, d_first_dw_be,
+                       '0, cfg_rdata, cfg_ur, cfg_space_t1, cfg_ro_mask_t1);
+
+            `uvm_info("EP_TL_CFG",
+               $sformatf("CFG_SPACE_TYPE1_READ_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
+                 `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+
+	  end
 
 	  else begin
             cfg_access(PCIe_TL_CFG_READ, d_cfg_reg_num, d_first_dw_be,

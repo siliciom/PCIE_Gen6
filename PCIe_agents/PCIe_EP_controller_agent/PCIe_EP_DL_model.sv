@@ -153,7 +153,8 @@ class PCIe_EP_DL_model extends uvm_component;
     fc_tl_imp = new("fc_tl_imp", this);
     fc_tl_ap  = new("fc_tl_ap",  this);
     fc_dl_init();
-
+///////////////////to enable to non flit mode//////////
+     void'(uvm_config_db#(pkt_mode_e)::get(this, "", "link_mode", dl_rx_pkt_mode));
 
   endfunction
 
@@ -162,6 +163,7 @@ class PCIe_EP_DL_model extends uvm_component;
     int sum = int'(a) + int'(b_inc);
     while(sum > (`PCIe_MAX_UNACK_FLITS + 512)) sum -= (`PCIe_MAX_UNACK_FLITS + 512);
     return sum;
+  
   endfunction
   
   // Modulo 1023 helper for sequence number subtraction (1 to 1023)
@@ -1440,5 +1442,6 @@ endfunction
 
 
 endclass
+
 
 

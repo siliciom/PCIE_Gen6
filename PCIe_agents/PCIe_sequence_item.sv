@@ -483,6 +483,16 @@ class PCIe_sequence_item extends uvm_sequence_item;
        length inside {0, [1:`PCIe_TL_LEN_MAX]};
   }
 
+  // Message without data : Length is Reserved and must be 0
+ 
+  // Message Length rules
+  constraint c_msg_length {
+    if (txn_type == PCIe_TL_MSG) {
+      if (!msg_has_data) length == 10'd0;          // Msg  : Length reserved, must be 0
+      else               length inside {[1:32]};   // MsgD : must fit in one flit
+    }
+  }
+
   //--------------------------------------------------------------------------
   // IO / Configuration Request restrictions - PCIe Base 6.0 Sec 2.2.7
   //   TC[2:0] = 000b, Attr = 000b, AT = 00b, Length = 1 DW, Last DW BE = 0000b
@@ -499,6 +509,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
 	 tc == 3'b000;
 	 }
 	 }
+constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)); }
+	 
 
   //--------------------------------------------------------------------------
   // Byte Enable rules - PCIe Base 6.0 Sec 2.2.5.1 / 2.2.5.2
@@ -694,6 +706,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
         else
           return (dir == PCIe_TL_WRITE) ? PCIe_FLITTYPE_CFGWR0 : PCIe_FLITTYPE_CFGRD0;
       end
+      PCIe_TL_MSG:
+        return msg_has_data ? PCIe_FLITTYPE_MSGD : PCIe_FLITTYPE_MSG;   // 70h : 30h
 
       default:
         return PCIe_FLITTYPE_MRD_32;

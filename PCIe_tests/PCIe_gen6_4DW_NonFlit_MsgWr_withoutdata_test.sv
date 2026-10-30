@@ -39,6 +39,14 @@ class PCIe_gen6_4DW_NonFlit_MsgWr_withoutdata_test extends PCIe_base_test;
     // Override the EP controller sequence to run the common 3DW-Flit EP sequence for every test case.
     PCIe_EP_controller_base_sequence::type_id::set_type_override(
         PCIe_EP_3DW_flit_sequence::get_type());
+
+
+
+
+
+// This test is Non-Flit : tell both DL models
+    uvm_config_db#(pkt_mode_e)::set(null, "*", "link_mode", NON_FLIT);
+	
     super.build_phase(phase);
     `uvm_info("PCIE_GEN6_4DW_NONFLIT_MSGWR_WITHOUTDATA_TEST","EXIT_FROM_PCIE_GEN6_4DW_NONFLIT_MSGWR_WITHOUTDATA_TEST_BUILD_PHASE", UVM_LOW)
   endfunction
