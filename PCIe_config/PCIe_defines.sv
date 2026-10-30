@@ -771,7 +771,22 @@
 `define PCIe_FC_INIT_MAX_ROUNDS 20
 `define PCIe_FC_INIT_ROUND_GAP_NS    200    // pause between InitFC rounds while waiting for the peer
 // UpdateFC policy
-`define PCIe_FC_UPDATE_PERIOD_NS     10000  // periodic refresh (debug 10us, Flit Mode)
+// [FC_OPT] OLD : `define PCIe_FC_UPDATE_PERIOD_NS     10000  // periodic refresh (debug 10us, Flit Mode)
+// [FC_OPT] NEW : spec Sec 2.6.1.2 : in L0 an UpdateFC for each non-infinite credit type must be sent at
+//                least once every 30 us (-0%/+50%). The refresh is now sent only when 30 us have passed
+//                since the last UpdateFC of that type (see fc_run_periodic in the RC / EP TL models).
+`define PCIe_FC_UPDATE_PERIOD_NS     30000  // max time between UpdateFCs of one type (spec : 30 us)
+// [FC_OPT] Flow-control initialization : avoid sending extra (not required) DLLP flits
+//   PCIe_FC_INIT_WAIT_NS : after sending one InitFC1 / InitFC2 round (6 DLLPs), wait up to this
+//     long for the peer's DLLPs (FI1 / FI2) before sending the round again. Spec 3.4.1 : the
+//     six DLLPs must be sent at least once every 34 us, so this MUST be < 34000.
+//   PCIe_FC_SEND_INITIAL_UPDATEFC : 1 = send 6 UpdateFC (P/NP/Cpl dedicated + shared) right at
+//     DL_ACTIVE, 0 = do not. They are optional : the peer sets FI2 on the received InitFC2, and the
+//     periodic / mandatory UpdateFCs (Sec 2.6.1.2) are still sent.
+//   With 5000 / 0 a 2-TLP test sends 1 Feature + 6 InitFC1 + 6 InitFC2 + 2 TLP = 15 flits (RC -> EP).
+//   For the old behaviour (33 flits) use 100 / 1.
+`define PCIe_FC_INIT_WAIT_NS            5000
+`define PCIe_FC_SEND_INITIAL_UPDATEFC   0
 `define PCIe_FC_HDR_WATERMARK        32     // send UpdateFC when >= this many hdr credits freed
 `define PCIe_FC_DATA_WATERMARK       256    // send UpdateFC when >= this many data credits freed
 // Rx_MPS_Limit expressed in data credits (256 B MPS => 16 credits)

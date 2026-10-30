@@ -4,7 +4,7 @@
 #set testname "PCIe_gen6_ltssm_electrical_idle_during_training_test"
 #set testname "PCIe_gen6_ltssm_detect_no_receiver_test"
 #set testname "PCIe_gen6_ltssm_basic_linkup_L0_test"
-#set testname "PCIe_gen6_3DW_Flit_MemWr_MinPayload_test"
+set testname "PCIe_gen6_3DW_Flit_MemWr_MinPayload_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MaxPayload_test"
 #set testname "PCIe_gen6_3DW_Flit_DefMemWr_MaxPayload_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_MaxPayload_test"

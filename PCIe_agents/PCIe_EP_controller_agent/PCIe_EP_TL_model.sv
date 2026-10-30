@@ -217,6 +217,9 @@ class PCIe_EP_TL_model extends uvm_component;
   int unsigned fc_n_upd_published;
   int unsigned fc_n_peer_upd;
   int unsigned fc_n_periodic;
+  // [FC_OPT] NEW : time of the last UpdateFC published for each class (0 = P, 1 = NP, 2 = CPL).
+  //               Used by fc_run_periodic() to send a refresh only when the spec needs one.
+  realtime     fc_last_upd_t [3];
   int unsigned fc_n_blocked;
 
   function string fc_pool_name(bit p);
@@ -410,17 +413,50 @@ class PCIe_EP_TL_model extends uvm_component;
     end
     it = fc_make_item(FC_ADV_UPDATE, reason, mask);
     fc_n_upd_published++;
+    // [FC_OPT] NEW : any UpdateFC (mandatory, watermark or refresh) restarts the 30 us timer of its class
+    for (int c = 0; c < 3; c++) if (mask[c]) fc_last_upd_t[c] = $realtime;
     fc_log($sformatf("[FC_UPDATE_SCHEDULED] reason=%s classes=%03b (P,NP,CPL=bit0,1,2) -> %s",
                      reason, mask, it.fc_values_str()));
     fc_dl_ap.write(it);
   endfunction
 
   // periodic refresh (spec: at most every 30 us; Flit Mode debug value 10 us)
+  // [FC_OPT] OLD : fixed timer from time 0, every PCIe_FC_UPDATE_PERIOD_NS, all classes
+  //   task fc_run_periodic();
+  //     forever begin
+  //       #(`PCIe_FC_UPDATE_PERIOD_NS * 1ns);
+  //       fc_n_periodic++;
+  //       fc_publish_update(3'b111, "PERIODIC_REFRESH");
+  //     end
+  //   endtask
+  //
+  // [FC_OPT] NEW : refresh only when the spec requires it (PCIe 6.1 Sec 2.6.1.2)
+  //   "In L0 an UpdateFC for each non-infinite FC credit type must be scheduled at least once every 30 us."
+  //   * The timer starts when flow control is initialised (peer InitFC credits known for P, NP, Cpl).
+  //   * A class is refreshed only when PCIe_FC_UPDATE_PERIOD_NS (30 us) has passed since the LAST
+  //     UpdateFC of that class. Any earlier UpdateFC (credits freed / watermark) restarts its timer
+  //     (see fc_publish_update), so no refresh is sent while normal UpdateFCs keep flowing.
+  //   * A short test that ends before 30 us sends no refresh at all.
   task fc_run_periodic();
+    bit [2:0] due;
+    realtime  next_due;
+    wait (fc_tx_limit_valid[0][0] && fc_tx_limit_valid[0][1] && fc_tx_limit_valid[0][2]);
+    for (int c = 0; c < 3; c++) fc_last_upd_t[c] = $realtime;     // 30 us timer starts here
+    fc_log("[FC_REFRESH] flow control initialised : 30 us UpdateFC refresh timer started");
     forever begin
-      #(`PCIe_FC_UPDATE_PERIOD_NS * 1ns);
+      // earliest time at which some class reaches 30 us without an UpdateFC
+      next_due = fc_last_upd_t[0];
+      for (int c = 1; c < 3; c++) if (fc_last_upd_t[c] < next_due) next_due = fc_last_upd_t[c];
+      next_due = next_due + `PCIe_FC_UPDATE_PERIOD_NS * 1ns;
+      if ($realtime < next_due) #(next_due - $realtime);
+      // refresh only the classes that really reached the limit
+      due = 3'b000;
+      for (int c = 0; c < 3; c++)
+        if (($realtime - fc_last_upd_t[c]) >= `PCIe_FC_UPDATE_PERIOD_NS * 1ns) due[c] = 1'b1;
+      if (due != 3'b000) begin
       fc_n_periodic++;
-      fc_publish_update(3'b111, "PERIODIC_REFRESH");
+        fc_publish_update(due, "PERIODIC_REFRESH");
+      end
     end
   endtask
 

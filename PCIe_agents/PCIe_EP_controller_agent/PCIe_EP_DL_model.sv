@@ -84,6 +84,20 @@ class PCIe_EP_DL_model extends uvm_component;
 
    // Simplified DLLP content encodings for DLCMSM simulation
     localparam bit [31:0] FEATURE_DLLP = 32'h0100_0000;
+
+    // [FLIT_CNT] flit summary counters (logic + report at the end of the class)
+  typedef enum int {FLTC_FEATURE, FLTC_INITFC1, FLTC_INITFC2, FLTC_UPDATEFC,
+                    FLTC_ACK, FLTC_NAK, FLTC_NOP, FLTC_OTHER_DLLP,
+                    FLTC_MWR, FLTC_MRD, FLTC_CFGRD, FLTC_CFGWR, FLTC_MSG, FLTC_MSGD,
+                    FLTC_CPL, FLTC_CPLD, FLTC_OTHER_TLP, FLTC_NUM} flit_cnt_e;
+
+  int unsigned flit_tx_cnt [FLTC_NUM];
+  int unsigned flit_rx_cnt [FLTC_NUM];
+  int unsigned flit_tx_total, flit_rx_total;
+  int unsigned flit_rx_bad;                          // RX flits with CRC / FEC error
+  int unsigned flit_tx_replay;                       // replayed TLP flits (also counted in their TLP type)
+  int unsigned flit_tx_nak_piggy, flit_rx_nak_piggy; // NAK carried on a DLLP / TLP flit
+
    // localparam bit [31:0] INITFC1_DLLP = 32'h0200_0000;
     //localparam bit [31:0] INITFC2_DLLP = 32'h0300_0000;
         // ---- DLCMSM additions ----
@@ -96,7 +110,7 @@ class PCIe_EP_DL_model extends uvm_component;
     bit                 link_enabled = 1'b1;
 
     // ---- DLCMSM FSM additions (dependency-driven, mirrors LTSSM style) ----
-    // Named, single-source-of-truth completion targets — no magic numbers
+    // Named, single-source-of-truth completion targets   no magic numbers
     // scattered in a bare while() loop, referenced by every debug print below.
     localparam int NUM_INITFC1_DLLP = 4;   // FC_INIT1 is "done" once this many INITFC1 DLLPs sent
     localparam int NUM_INITFC2_DLLP = 4;   // FC_INIT2 is "done" once this many INITFC2 DLLPs sent
@@ -177,7 +191,7 @@ class PCIe_EP_DL_model extends uvm_component;
   endfunction
 
   // =========================================================================
-  // DLCMSM FSM — ADDED / ACTIVATED BLOCK
+  // DLCMSM FSM   ADDED / ACTIVATED BLOCK
   // Mirrors PCIe_RC_DL_model's DLCMSM implementation exactly (EP side).
   // Dependency chain enforced:
   //   DL_INACTIVE  --(phy_linkup && link_enabled)-->  DL_FEATURE
@@ -260,6 +274,7 @@ class PCIe_EP_DL_model extends uvm_component;
      ctl_item = PCIe_sequence_item::type_id::create("ctl_item");
 //     ctl_item.pkt_mode = link_mode;
      form_dl_packet(ctl_item.tlp_data, 1'b0, ctl_item.dlp_flit_out);
+     flit_cnt_count(1'b1, ctl_item.dlp_flit_out);   // [FLIT_CNT] TX
      dl_ap.write(ctl_item);
   endtask
 
@@ -289,6 +304,8 @@ class PCIe_EP_DL_model extends uvm_component;
      r_item.seq_num  = tx_retry_buffer[idx].seq_num;
      //r_item.pkt_mode = link_mode;
      form_dl_packet(r_item.tlp_data, 1'b1, r_item.dlp_flit_out);
+     flit_cnt_count(1'b1, r_item.dlp_flit_out);   // [FLIT_CNT] TX
+     flit_tx_replay++;   // [FLIT_CNT] replayed flit
      dl_ap.write(r_item);
   endtask
 
@@ -368,7 +385,9 @@ class PCIe_EP_DL_model extends uvm_component;
     task dlcmsm_state_init_fc1();
       fc_send_init_round(`PCIe_FC_TYPE_INITFC1);
       fc1_sent_count++;      // counts complete rounds (6 DLLPs each)
-       for (int w = 0; w < 100 && !fi1_done(); w++) #1ns;
+       // [FC_OPT] OLD : for (int w = 0; w < 100 && !fi1_done(); w++) #1ns;
+       // [FC_OPT] NEW : wait (up to PCIe_FC_INIT_WAIT_NS) for the peer's six InitFC1 before deciding to resend
+       for (int w = 0; w < `PCIe_FC_INIT_WAIT_NS && !fi1_done(); w++) #1ns;
 
       `uvm_info("EP_DLCMSM",$sformatf(
          "[DL_INIT.FC_INIT1] ROUND_%0d_DONE :: FI1 dedicated P/NP/CPL=%0b%0b%0b shared P/NP/CPL=%0b%0b%0b",
@@ -394,6 +413,8 @@ class PCIe_EP_DL_model extends uvm_component;
     task dlcmsm_state_init_fc2();
       fc_send_init_round(`PCIe_FC_TYPE_INITFC2);
       fc2_sent_count++;
+      // [FC_OPT] NEW : wait (up to PCIe_FC_INIT_WAIT_NS) for FI2 (peer InitFC2 / UpdateFC / TLP) before deciding to resend
+      for (int w = 0; w < `PCIe_FC_INIT_WAIT_NS && !fi2_done(); w++) #1ns;
       `uvm_info("EP_DLCMSM",$sformatf("[DL_INIT.FC_INIT2] ROUND_%0d_DONE :: FI2=%0b",fc2_sent_count,fi2_done()),UVM_LOW)
       if (fi2_done()) begin
          `uvm_info("EP_DLCMSM","[DL_INIT.FC_INIT2] FI2_SET :: TRANSITION -> DL_ACTIVE",UVM_LOW)
@@ -433,6 +454,7 @@ class PCIe_EP_DL_model extends uvm_component;
        // TLP flit must stay 0, exactly as before the DLCMSM packets were driven).
        dllp_content = '0;
        dllp_tx_pending = 1'b1;
+       flit_cnt_count(1'b1, dcm_item.dlp_flit_out);   // [FLIT_CNT] TX
        dl_ap.write(dcm_item);
        `uvm_info("EP_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h :: WAITING_FOR_DRIVER_TO_DRIVE_IT_ON_PIPE",content),UVM_LOW)
        wait (dllp_tx_pending == 1'b0);
@@ -962,6 +984,7 @@ class PCIe_EP_DL_model extends uvm_component;
     `uvm_info("EP_DL_MODEL",$sformatf("DL -> PL: item from driver = %p",item.tlp_data),UVM_LOW)
     form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
 
+    flit_cnt_count(1'b1, item.dlp_flit_out);   // [FLIT_CNT] TX
     dl_ap.write(item);
   endfunction
 
@@ -1004,6 +1027,7 @@ class PCIe_EP_DL_model extends uvm_component;
     ep_rx_242b_flit_q.push_back(item.dlp_flit_out);
     ep_rx_flit_is_valid_q.push_back(item.is_valid);
     ep_rx_242b_flit_cnt++;
+    flit_cnt_count(1'b0, item.dlp_flit_out, item.is_valid);   // [FLIT_CNT] RX
 
     flit_242b_str = "";
 
@@ -1270,6 +1294,7 @@ endfunction
     dllp_content = content;
     form_dl_packet(fc_item_pkt.tlp_data, 1'b0, fc_item_pkt.dlp_flit_out);   // is_payload=0
     dllp_content = '0;          // belongs to this flit only
+    flit_cnt_count(1'b1, fc_item_pkt.dlp_flit_out);   // [FLIT_CNT] TX
     dl_ap.write(fc_item_pkt);
     `uvm_info("EP_DL_FC", $sformatf("[FC_DL_TX] DLLP flit handed to PL : %08h", content), UVM_LOW)
   endtask
@@ -1323,8 +1348,11 @@ endfunction
   // after DL_ACTIVE also satisfies the peer's FI2.
   task run_fc_update_loop();
     wait (dl_link_active);
-    pend_mask     = 3'b111;
-    pend_mask_shr = 3'b111;                                      // [FC SHARED]
+    // [FC_OPT] OLD : pend_mask     = 3'b111;
+    // [FC_OPT] OLD : pend_mask_shr = 3'b111;                                      // [FC SHARED]
+    // [FC_OPT] NEW : the 6 UpdateFC at DL_ACTIVE are optional : PCIe_FC_SEND_INITIAL_UPDATEFC = 0 skips them
+    pend_mask     = `PCIe_FC_SEND_INITIAL_UPDATEFC ? 3'b111 : 3'b000;
+    pend_mask_shr = `PCIe_FC_SEND_INITIAL_UPDATEFC ? 3'b111 : 3'b000;   // [FC SHARED]
     `uvm_info("EP_DL_FC", "[FC_DL] DL_ACTIVE :: INITIAL UpdateFC (dedicated + shared) FOR P/NP/CPL (completes FC_INIT2 at the peer)", UVM_LOW)
     forever begin
       if ((pend_mask != 3'b000 || pend_mask_shr != 3'b000) && fc_tx_allowed) fc_send_pending_updates();
@@ -1423,6 +1451,128 @@ endfunction
     fc_tl_ap.write(it);
   endfunction
 
+
+  // =========================================================================
+  // [FLIT_CNT] FLIT SUMMARY
+  //   TX : every flit this DL model hands to the PL model (counted at the
+  //        analysis-port write, so only flits really sent are counted)
+  //   RX : every flit received from the controller monitor (write_*_mon_242b)
+  //   Type is decoded from the flit itself :
+  //     payload flit (DLP0[7:6]=01)   -> TL flit, TLP type from byte 0
+  //     DLLP in DLP2-5 (non zero)      -> Feature / InitFC1 / InitFC2 / UpdateFC
+  //     no DLLP, replay_cmd 10/11      -> NAK flit
+  //     no DLLP, replay_cmd 01         -> ACK flit
+  //     no DLLP, replay_cmd 00         -> NOP / idle flit
+  //   The summary is printed in report_phase.
+  // =========================================================================
+  function void flit_cnt_count(bit is_tx,
+                               bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] f,
+                               bit is_good = 1'b1);
+    bit [7:0]  dlp0;
+    bit [1:0]  rcmd;
+    bit [31:0] v;
+    bit [7:0]  t;
+    flit_cnt_e k;
+    dlp0 = f[`PCIe_TLP_DATA_BYTE_W];
+    rcmd = dlp0[3:2];
+    v    = {f[`PCIe_TLP_DATA_BYTE_W+2], f[`PCIe_TLP_DATA_BYTE_W+3],
+            f[`PCIe_TLP_DATA_BYTE_W+4], f[`PCIe_TLP_DATA_BYTE_W+5]};
+    if (is_tx) flit_tx_total++; else flit_rx_total++;
+    if (!is_good) begin
+      flit_rx_bad++;
+      return;
+    end
+    if (dlp0[7:6] == 2'b01) begin                    // payload flit -> TLP
+      t = (f[0] == `PCIe_FLITTYPE_PREFIX) ? f[4] : f[0];
+      case (t)
+        8'h40, 8'h60                      : k = FLTC_MWR;
+        8'h00, 8'h01, 8'h03, 8'h20, 8'h21 : k = FLTC_MRD;
+        8'h04, 8'h05                      : k = FLTC_CFGRD;
+        8'h44, 8'h45                      : k = FLTC_CFGWR;
+        8'h0A, 8'h0B                      : k = FLTC_CPL;
+        8'h4A, 8'h4B                      : k = FLTC_CPLD;
+        default : begin
+          if      (t[7:3] == 5'b00110) k = FLTC_MSG;
+          else if (t[7:3] == 5'b01110) k = FLTC_MSGD;
+          else                         k = FLTC_OTHER_TLP;
+        end
+      endcase
+    end
+    else if (v != 32'h0) begin                       // DLLP flit
+      if (PCIe_sequence_item::fc_is_dllp(v)) begin
+        case (v[31:30])
+          `PCIe_FC_TYPE_INITFC1 : k = FLTC_INITFC1;
+          `PCIe_FC_TYPE_INITFC2 : k = FLTC_INITFC2;
+          default               : k = FLTC_UPDATEFC;
+        endcase
+      end
+      else if (v[31:24] == FEATURE_DLLP[31:24]) k = FLTC_FEATURE;
+      else                                       k = FLTC_OTHER_DLLP;
+    end
+    else if (rcmd[1])          k = FLTC_NAK;         // 10 = standard NAK, 11 = selective NAK
+    else if (rcmd == 2'b01)    k = FLTC_ACK;
+    else                       k = FLTC_NOP;
+    if (is_tx) flit_tx_cnt[k]++; else flit_rx_cnt[k]++;
+    if (rcmd[1] && (k != FLTC_NAK)) begin
+      if (is_tx) flit_tx_nak_piggy++; else flit_rx_nak_piggy++;
+    end
+  endfunction
+
+  function string flit_cnt_row(string name, string tx, string rx);
+    return $sformatf("  %-26s %-22s %s\n", name, tx, rx);
+  endfunction
+
+  // Row name for each TLP type
+  function string flit_tlp_name(flit_cnt_e k);
+    case (k)
+      FLTC_MWR   : return "MemWr TLP (TL)";
+      FLTC_MRD   : return "MemRd TLP (TL)";
+      FLTC_CFGRD : return "CfgRd TLP (TL)";
+      FLTC_CFGWR : return "CfgWr TLP (TL)";
+      FLTC_MSG   : return "Msg TLP (TL)";
+      FLTC_MSGD  : return "MsgD TLP (TL)";
+      default    : return "Other TLP (TL)";
+    endcase
+  endfunction
+
+  // Prints the flit table in the log at the end of the test
+  function void flit_cnt_report();
+    string s;
+    string tlp_rows;
+    int unsigned dl_tx, dl_rx, tl_tx, tl_rx;
+    dl_tx = 0; dl_rx = 0; tl_tx = 0; tl_rx = 0;
+    for (int i = 0; i < FLTC_NUM; i++) begin
+      if (i < FLTC_MWR) begin dl_tx += flit_tx_cnt[i]; dl_rx += flit_rx_cnt[i]; end
+      else              begin tl_tx += flit_tx_cnt[i]; tl_rx += flit_rx_cnt[i]; end
+    end
+    // TLP rows : one row for every TLP type seen in this test (TX or RX).
+    // Completion / CplD is always printed. Types not seen are not printed.
+    tlp_rows = "";
+    for (int i = FLTC_MWR; i < FLTC_NUM; i++) begin
+      if (i == FLTC_CPL || i == FLTC_CPLD) continue;
+      if (flit_tx_cnt[i] != 0 || flit_rx_cnt[i] != 0)
+        tlp_rows = {tlp_rows, flit_cnt_row(flit_tlp_name(flit_cnt_e'(i)),
+                                           $sformatf("%0d", flit_tx_cnt[i]), $sformatf("%0d", flit_rx_cnt[i]))};
+    end
+    tlp_rows = {tlp_rows, flit_cnt_row("Completion / CplD (TL)",
+                                       $sformatf("%0d", flit_tx_cnt[FLTC_CPL] + flit_tx_cnt[FLTC_CPLD]),
+                                       $sformatf("%0d", flit_rx_cnt[FLTC_CPL] + flit_rx_cnt[FLTC_CPLD]))};
+    s = {"\n  EP side\n",
+         flit_cnt_row("Flit type",              "Sent (TX)", "Received (RX)"),
+         "  -------------------------------------------------------------------\n",
+         flit_cnt_row("Feature (DL)",           $sformatf("%0d", flit_tx_cnt[FLTC_FEATURE]),  $sformatf("%0d", flit_rx_cnt[FLTC_FEATURE])),
+         flit_cnt_row("InitFC1 (DL)",           $sformatf("%0d", flit_tx_cnt[FLTC_INITFC1]),  $sformatf("%0d", flit_rx_cnt[FLTC_INITFC1])),
+         flit_cnt_row("InitFC2 (DL)",           $sformatf("%0d", flit_tx_cnt[FLTC_INITFC2]),  $sformatf("%0d", flit_rx_cnt[FLTC_INITFC2])),
+         flit_cnt_row("UpdateFC (DL)",          $sformatf("%0d", flit_tx_cnt[FLTC_UPDATEFC]), $sformatf("%0d", flit_rx_cnt[FLTC_UPDATEFC])),
+         flit_cnt_row("ACK (DL)",               $sformatf("%0d", flit_tx_cnt[FLTC_ACK]),      $sformatf("%0d", flit_rx_cnt[FLTC_ACK])),
+         flit_cnt_row("NAK (DL)",               $sformatf("%0d", flit_tx_cnt[FLTC_NAK]),      $sformatf("%0d", flit_rx_cnt[FLTC_NAK])),
+         tlp_rows,
+         "  -------------------------------------------------------------------\n",
+         flit_cnt_row("Total",                  $sformatf("%0d (%0d DL + %0d TL)", flit_tx_total, dl_tx, tl_tx),
+                                                $sformatf("%0d", flit_rx_total))};
+    `uvm_info("EP_FLIT_SUMMARY", s, UVM_LOW)
+  endfunction
+
   function void report_phase(uvm_phase phase);
     super.report_phase(phase);
     `uvm_info("EP_DL_FC", $sformatf({"\n  ========== EP DL FLOW CONTROL SUMMARY ==========\n",
@@ -1438,10 +1588,13 @@ endfunction
         n_initfc1_tx, n_initfc1_rx, n_initfc2_tx, n_initfc2_rx, n_updfc_tx, n_updfc_rx,
         n_updfc_tx_shr, n_updfc_rx_shr,
         fi1_done(), fi2_done()), UVM_LOW)
+    flit_cnt_report();   // [FLIT_CNT]
   endfunction
 
 
 endclass
 
 
+
+ 
 
