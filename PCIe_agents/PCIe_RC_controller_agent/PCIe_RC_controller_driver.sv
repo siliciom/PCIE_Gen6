@@ -268,27 +268,46 @@ end
    // mid-drive PL/DL update cannot corrupt it, then drive all 64 dwords.
    flit_local = rc_pl_model.dl_flit_out;
    flit_full_q = rc_pl_model.flit_with_crc_fec_body;
-  `uvm_info("RC_CONTROLLER",$sformatf("dl_flit_out is %p",rc_pl_model.dl_flit_out),UVM_LOW)
-   // FULL FLIT is 256 bytes = 242 DL + 8 CRC + 6 FEC, send 64 dwords
-        for(int i=0 ; i<`PCIe_FLIT_DWORDS+3; i++) begin
-            bit [`PCIe_MON_DATA_W-1:0] flit_dword;
-            flit_dword = {flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+3], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+2], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+1], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+0]};
-  `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_LOW)
-rc_pl_model.tx_process_executed = 1'b0;
-            if (pcie_seq_item != null) pcie_seq_item.print();
-	    rc_pl_model.tx_process(flit_dword, scr_data, pcie_seq_item);
-  `uvm_info("SCR_DATA",$sformatf("scr_data is %h :: %d",scr_data,scr_data),UVM_LOW)
-                  if (rc_pl_model.tx_process_executed) begin
-                     @(posedge rc_pipe_intf_tx.pclk);
-                     rc_pipe_intf_tx.tx_data <= scr_data;
-                     rc_pipe_intf_tx.tx_valid <= 1'b1;
-                     `uvm_info("RC_CONTROLLER",$sformatf("RC_CTRLR_DRV_INTF_PIPE_TX_DATA === %h",rc_pipe_intf_tx.tx_data),UVM_LOW)
-                  end
-              end
-                 @(posedge rc_pipe_intf_tx.pclk);
-                   rc_pl_model.pl_sent=0;
-                   rc_pipe_intf_tx.tx_valid <= 1'b0;
-      endtask
+   `uvm_info("RC_CONTROLLER",$sformatf("dl_flit_out is %p",rc_pl_model.dl_flit_out),UVM_LOW)
+     // FULL FLIT is 256 bytes = 64 dwords. Encode every logical dword, then
+     // let the RC PL model byte-stripe the flit across the lanes. The driver
+     // only clocks the resulting per-lane words onto the PIPE.
+     begin
+       int unsigned nlanes;
+       int unsigned rounds;
+       bit [31:0] enc_flit[$];
+       bit [`PCIE_LANE_BUS_W-1:0] lane_buses[$];
+
+       nlanes = `PCIE_NUM_LANES;
+       enc_flit.delete();
+       for (int unsigned i = 0; i < `PCIe_FLIT_TOTAL_DW; i++) begin
+          bit [`PCIe_MON_DATA_W-1:0] flit_dword;
+          flit_dword = {flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+3], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+2], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+1], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+0]};
+          `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_LOW)
+          rc_pl_model.tx_process_executed = 1'b0;
+          if (pcie_seq_item != null) pcie_seq_item.print();
+          rc_pl_model.tx_process(flit_dword, scr_data, pcie_seq_item);
+          `uvm_info("SCR_DATA",$sformatf("scr_data is %h :: %d",scr_data,scr_data),UVM_LOW)
+          enc_flit.push_back(scr_data);
+       end
+
+       // Byte striping is owned by the RC PL model (logs BYTE_STRIPE).
+       PCIe_RC_PL_model::stripe_flit("RC", this, enc_flit, lane_buses);
+       rounds = lane_buses.size();
+
+       for (int unsigned r = 0; r < rounds; r++) begin
+          @(posedge rc_pipe_intf_tx.pclk);
+          for (int unsigned l = 0; l < nlanes; l++)
+             rc_pipe_intf_tx.tx_data_striped[l] <= lane_buses[r][l*`PCIe_LANE_W +: `PCIe_LANE_W];
+          rc_pipe_intf_tx.tx_striped <= 1'b1;
+          rc_pipe_intf_tx.tx_valid   <= 1'b1;
+       end
+       @(posedge rc_pipe_intf_tx.pclk);
+       rc_pl_model.pl_sent = 0;
+       rc_pipe_intf_tx.tx_valid   <= 1'b0;
+       rc_pipe_intf_tx.tx_striped <= 1'b0;
+     end
+       endtask
  
   // Handles the replay things
   task handle_replay_request(bit[`PCIe_SEQ_NUM_W-1:0] N);

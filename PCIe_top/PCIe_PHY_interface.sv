@@ -16,14 +16,18 @@
 
 `timescale 1ns/1ps
 
+`ifndef PCIE_NUM_LANES
+  `define PCIE_NUM_LANES 4
+`endif
+
 interface PCIe_RC_PHY_interface();
 
     // TX Signals 
-    logic tx_plus;
-    logic tx_minus;
+    logic [`PCIE_NUM_LANES-1:0] tx_plus;
+    logic [`PCIE_NUM_LANES-1:0] tx_minus;
     // RX Signals
-    logic rx_plus;
-    logic rx_minus;
+    logic [`PCIE_NUM_LANES-1:0] rx_plus;
+    logic [`PCIE_NUM_LANES-1:0] rx_minus;
 
     // Driver Clocking Block
    /* clocking cb_phy_drv@(posedge clk);
@@ -53,11 +57,11 @@ endinterface
 interface PCIe_EP_PHY_interface();
    
     // TX Signals 
-    logic tx_plus;
-    logic tx_minus;
+    logic [`PCIE_NUM_LANES-1:0] tx_plus;
+    logic [`PCIE_NUM_LANES-1:0] tx_minus;
     // RX Signals
-    logic rx_plus;
-    logic rx_minus;
+    logic [`PCIE_NUM_LANES-1:0] rx_plus;
+    logic [`PCIE_NUM_LANES-1:0] rx_minus;
 
     // Driver Clocking Block
    /* clocking cb_phy_drv@(posedge clk);

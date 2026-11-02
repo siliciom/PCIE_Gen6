@@ -2285,6 +2285,42 @@ task rc_state_config_complete();
       `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_PRE_ENCODE_TASK"),UVM_LOW)
     endtask
 
+    //-------------------------------------------------------------------------
+    // Multi-lane byte striping (implementation lives ONLY in the RC PL model).
+    //   stripe_flit : 64 encoded/scrambled dwords -> per-lane PIPE words.
+    // Both RC and EP transmit paths call this after encode/scramble/precode.
+    // Stripe mapping (round r, lane l, byte b of the lane word):
+    //   global_byte = r*4*N + b*N + l
+    //   logical_dword = global_byte / 4,  byte_in_dword = global_byte % 4
+    //-------------------------------------------------------------------------
+    static function void stripe_flit(input string who,
+                                     uvm_report_object logger,
+                                     ref bit [31:0] enc[$],
+                                     ref bit [`PCIE_LANE_BUS_W-1:0] buses[$]);
+       int unsigned nlanes = `PCIE_NUM_LANES;
+       int unsigned rounds = (enc.size() * 4) / (4 * nlanes);
+
+       buses.delete();
+       for (int unsigned r = 0; r < rounds; r++) begin
+          bit [`PCIE_LANE_BUS_W-1:0] bus;
+          bus = '0;
+          for (int unsigned l = 0; l < nlanes; l++) begin
+             for (int unsigned b = 0; b < 4; b++) begin
+                int unsigned gb = r * 4 * nlanes + b * nlanes + l;
+                int unsigned di = gb / 4;
+                int unsigned bi = gb % 4;
+                bit [31:0] word;
+                word = enc[di];
+                bus[l*`PCIe_LANE_W + b*8 +: 8] = word[bi*8 +: 8];
+             end
+          end
+          buses.push_back(bus);
+       end
+       logger.uvm_report_info("BYTE_STRIPE", $sformatf(
+                 "%s byte-striping: %0d DWs -> %0d lanes, %0d stripes",
+                 who, enc.size(), nlanes, buses.size()), UVM_LOW);
+    endfunction
+
     task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out,input PCIe_sequence_item item);
       bit [31:0] scramble_data;
       bit [31:0] gray_data;

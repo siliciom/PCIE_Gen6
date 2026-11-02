@@ -163,21 +163,41 @@ task run_phase(uvm_phase phase);
      flit_full_q = ep_pl_model.ep_tx_flit_q.pop_front();   // take the OLDEST flit for completion
    else
      flit_full_q = ep_pl_model.ep_flit_with_crc_fec_body;   // for completion
-   // FULL FLIT is 256 bytes = 242 DL + 8 CRC + 6 FEC, send 64 dwords
-        for(int i=0 ; i<`PCIe_FLIT_DWORDS+3; i++) begin
-            bit [`PCIe_MON_DATA_W-1:0] flit_dword;
-            flit_dword = {flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+3], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+2], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+1], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+0]};
-	    ep_pl_model.tx_process_executed = 1'b0;
-	    ep_pl_model.tx_process(flit_dword, scr_data,pcie_seq_item);
-                  if (ep_pl_model.tx_process_executed) begin
-                     @(posedge ep_pipe_intf_tx.pclk);
-                     ep_pipe_intf_tx.tx_data <= scr_data;
-                     ep_pipe_intf_tx.tx_valid <= 1'b1;
-                  end
-              end
-                 @(posedge ep_pipe_intf_tx.pclk);
-            ep_pl_model.pl_sent = (ep_pl_model.ep_tx_flit_q.size() > 0);   // stay 1 if more flits are waiting  for completion
-                   ep_pipe_intf_tx.tx_valid <= 1'b0;
+    // FULL FLIT is 256 bytes = 64 dwords. Encode every logical dword, then
+    // let the EP PL model byte-stripe the flit across the lanes. The driver
+    // only clocks the resulting per-lane words onto the PIPE.
+    begin
+      int unsigned nlanes;
+      int unsigned rounds;
+      bit [31:0] enc_flit[$];
+      bit [`PCIE_LANE_BUS_W-1:0] lane_buses[$];
+
+      nlanes = `PCIE_NUM_LANES;
+      enc_flit.delete();
+      for (int unsigned i = 0; i < `PCIe_FLIT_TOTAL_DW; i++) begin
+         bit [`PCIe_MON_DATA_W-1:0] flit_dword;
+         flit_dword = {flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+3], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+2], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+1], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+0]};
+         ep_pl_model.tx_process_executed = 1'b0;
+         ep_pl_model.tx_process(flit_dword, scr_data, pcie_seq_item);
+         enc_flit.push_back(scr_data);
+      end
+
+      // Byte striping implementation lives in the RC PL model (logs BYTE_STRIPE).
+      PCIe_RC_PL_model::stripe_flit("EP", this, enc_flit, lane_buses);
+      rounds = lane_buses.size();
+
+      for (int unsigned r = 0; r < rounds; r++) begin
+         @(posedge ep_pipe_intf_tx.pclk);
+         for (int unsigned l = 0; l < nlanes; l++)
+            ep_pipe_intf_tx.tx_data_striped[l] <= lane_buses[r][l*`PCIe_LANE_W +: `PCIe_LANE_W];
+         ep_pipe_intf_tx.tx_striped <= 1'b1;
+         ep_pipe_intf_tx.tx_valid   <= 1'b1;
+      end
+      @(posedge ep_pipe_intf_tx.pclk);
+      ep_pl_model.pl_sent = (ep_pl_model.ep_tx_flit_q.size() > 0);   // stay 1 if more flits are waiting for completion
+      ep_pipe_intf_tx.tx_valid   <= 1'b0;
+      ep_pipe_intf_tx.tx_striped <= 1'b0;
+    end
             endtask
   // Handles the replay things
   task handle_replay_request(bit[`PCIe_SEQ_NUM_W-1:0] N);

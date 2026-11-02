@@ -74,7 +74,7 @@ task rx_sipo(virtual PCIe_EP_PHY_interface ep_phy_intf_rx);
           begin
               uvm_rc_to_ep_ev.wait_trigger();		  
               #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
-              rx_bit = ep_phy_intf_rx.rx_plus;
+              rx_bit = ep_phy_intf_rx.rx_plus[0];
               rx_data[i] = rx_bit;
               `uvm_info("EP_PHY_MONITOR",$sformatf("RX_BIT_IN_EP_MONITOR[%0d] = %0b TIME=%0.5f",i, rx_bit,$realtime), UVM_LOW);
           end
@@ -93,7 +93,7 @@ task rx_sipo(virtual PCIe_EP_PHY_interface ep_phy_intf_rx);
            begin
                uvm_ep_to_rc_ev.wait_trigger();		  
                #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
-               tx_bit = ep_phy_intf_tx.tx_plus;
+               tx_bit = ep_phy_intf_tx.tx_plus[0];
                tx_data[i] = tx_bit;
                `uvm_info("EP_PHY_MONITOR",$sformatf("TX_BIT_IN_EP_MONITOR[%0d] = %0b TIME=%0.5f",i, tx_bit,$realtime), UVM_LOW);
            end

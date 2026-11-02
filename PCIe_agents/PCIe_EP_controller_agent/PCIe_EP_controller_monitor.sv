@@ -174,6 +174,10 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
        int dword_in_os;
        int byte_idx;
        int symbol_idx;
+       int dw_idx;
+       bit [31:0] monitor_logical_dwords[$];
+       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus_q[$];
+       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
        `uvm_info("EP_CONTROLLER", "ENTERED_INTO_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
        wait(ep_pipe_intf_rx.rx_valid);
@@ -188,7 +192,24 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
          pcie_seq_item.phy_status   = ep_pipe_intf_rx.phy_status;
 
          if (pcie_seq_item.rx_valid) begin
-            rx_data = ep_pipe_intf_rx.rx_data;
+            // [MULTI-LANE] Ordered Sets are broadcast on every lane. After the
+            // training stream, each PIPE clock carries PCIE_NUM_LANES logical
+            // FLIT dwords byte-striped across the lanes. De-stripe back to the
+            // original logical dword order before decoding.
+            if (rx_os_dword_count >= rx_training_dwords()) begin
+               monitor_lane_bus = '0;
+               for (int l = 0; l < `PCIE_NUM_LANES; l++)
+                  monitor_lane_bus[l*`PCIe_LANE_W +: `PCIe_LANE_W] = ep_pipe_intf_rx.rx_data_lane[l];
+               monitor_lane_bus_q.delete();
+               monitor_lane_bus_q.push_back(monitor_lane_bus);
+               PCIe_EP_PL_model::destripe_flit("EP", this, monitor_lane_bus_q, monitor_logical_dwords);
+            end
+            else begin
+               monitor_logical_dwords.delete();
+               monitor_logical_dwords.push_back(ep_pipe_intf_rx.rx_data);
+            end
+            foreach (monitor_logical_dwords[dw_idx]) begin
+            rx_data = monitor_logical_dwords[dw_idx];
             // [FIX] Skip the leading all-zero valid dwords that appear on the PIPE
             // (DETECT/POLLING) before the first TS1. They are not part of the 232-dword
             // training stream; counting them shifted the OS phase, the exit-from-OS
@@ -283,6 +304,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                   "[RX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h — full descramble from now on",
                   rx_os_dword_count, rx_lfsr), UVM_LOW)
             end
+            end // foreach (monitor_logical_dwords)
          end
  //   (Packet collected sent by RC here :: Expected Packet)
    if(ep_pl_model.link_up == 1 && pcie_seq_item.data_q_ep_mon_con_rx.size() > (rx_training_dwords() + 60) ) begin  
@@ -308,6 +330,10 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
       int dword_in_os;
       int byte_idx;
       int symbol_idx;
+      int dw_idx;
+      bit [31:0] monitor_logical_dwords[$];
+      bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus_q[$];
+      bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
       `uvm_info("EP_CONTROLLER", "ENTERED_INTO_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_LOW)
       wait(ep_pipe_intf_tx.tx_valid);
@@ -329,7 +355,24 @@ if (tx_os_dword_count > (1500 + tx_training_dwords() - `PCIe_LINKUP_TRAINING_DWO
 if (!pcie_seq_item.tx_valid) continue;
 
 if (pcie_seq_item.tx_valid) begin
-            tx_data = ep_pipe_intf_tx.tx_data;
+            // [MULTI-LANE] Ordered Sets are broadcast on every lane. After the
+            // training stream, each PIPE clock carries PCIE_NUM_LANES logical
+            // FLIT dwords byte-striped across the lanes. De-stripe back to the
+            // original logical dword order before decoding.
+            if (tx_os_dword_count >= tx_training_dwords()) begin
+               monitor_lane_bus = '0;
+               for (int l = 0; l < `PCIE_NUM_LANES; l++)
+                  monitor_lane_bus[l*`PCIe_LANE_W +: `PCIe_LANE_W] = ep_pipe_intf_tx.tx_data_lane[l];
+               monitor_lane_bus_q.delete();
+               monitor_lane_bus_q.push_back(monitor_lane_bus);
+               PCIe_EP_PL_model::destripe_flit("EP", this, monitor_lane_bus_q, monitor_logical_dwords);
+            end
+            else begin
+               monitor_logical_dwords.delete();
+               monitor_logical_dwords.push_back(ep_pipe_intf_tx.tx_data);
+            end
+            foreach (monitor_logical_dwords[dw_idx]) begin
+            tx_data = monitor_logical_dwords[dw_idx];
             // [FIX] Skip the leading all-zero valid dwords that appear on the PIPE
             // (DETECT/POLLING) before the first TS1. They are not part of the 232-dword
             // training stream; counting them shifted the OS phase, the exit-from-OS
@@ -412,6 +455,7 @@ if (pcie_seq_item.tx_valid) begin
                   "[TX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h — full descramble from now on",
                   tx_os_dword_count, tx_lfsr), UVM_LOW)
             end
+            end // foreach (monitor_logical_dwords)
          end
        //(when EP sends the packet to RC :: Actual Packet)
       if(ep_pl_model.link_up ==1 && pcie_seq_item.data_q_ep_mon_con_tx.size() > (tx_training_dwords() + 60))begin

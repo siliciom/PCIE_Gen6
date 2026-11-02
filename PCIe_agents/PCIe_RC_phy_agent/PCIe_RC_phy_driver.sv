@@ -23,8 +23,8 @@ class PCIe_RC_phy_driver extends uvm_driver #(PCIe_sequence_item);
     virtual PCIe_RC_interface        rc_pipe_intf_tx, rc_pipe_intf_rx;	
     virtual PCIe_RC_PHY_interface    rc_phy_intf_tx, rc_phy_intf_rx;	
   
-    bit [31:0] rc_data_q[$];
-    bit [31:0] ep_data_q[$];
+    bit [`PCIE_LANE_BUS_W-1:0] rc_data_q[$];
+    bit [`PCIE_LANE_BUS_W-1:0] ep_data_q[$];
     uvm_event  uvm_rc_to_ep_ev;
     uvm_event  uvm_ep_to_rc_ev;
     bit   receiver_present = 1;
@@ -110,7 +110,7 @@ class PCIe_RC_phy_driver extends uvm_driver #(PCIe_sequence_item);
     endtask
 
     task receiving_data_rc(virtual PCIe_RC_interface rc_pipe_intf_tx);
-       bit [31:0] tx_data;
+       bit [`PCIE_LANE_BUS_W-1:0] tx_bus;
        bit        tx_valid;
        bit        tx_elec_idle;
        bit        tx_detect_rx;
@@ -139,9 +139,10 @@ class PCIe_RC_phy_driver extends uvm_driver #(PCIe_sequence_item);
           powerdown     = rc_pipe_intf_tx.powerdown;
           rate          = rc_pipe_intf_tx.rate;
           if(tx_valid)begin
-           tx_data = rc_pipe_intf_tx.tx_data;
-           rc_data_q.push_back(tx_data);
-           `uvm_info("RC_PHY_DRIVER",$sformatf("Received_Data = %08h Queue_Size = %0d",tx_data,rc_data_q.size()),UVM_LOW)
+           for (int l = 0; l < `PCIE_NUM_LANES; l++)
+              tx_bus[l*`PCIe_LANE_W +: `PCIe_LANE_W] = rc_pipe_intf_tx.tx_data_lane[l];
+           rc_data_q.push_back(tx_bus);
+           `uvm_info("RC_PHY_DRIVER",$sformatf("Received_Lane0 = %08h Queue_Size = %0d",tx_bus[31:0],rc_data_q.size()),UVM_LOW)
           end
        end
      endtask
@@ -152,33 +153,37 @@ class PCIe_RC_phy_driver extends uvm_driver #(PCIe_sequence_item);
    //   tx_piso() is the only thing that drives the PHY TX pins.
    //-------------------------------------------------------------------------
    task serializing_data_rc();
-      bit [`PCIe_MON_DATA_W-1:0] serial_word;
+      bit [`PCIE_LANE_BUS_W-1:0] serial_bus;
       forever begin
          wait (rc_data_q.size() > 0);
-         serial_word = rc_data_q.pop_front();
-         tx_piso(serial_word);
+         serial_bus = rc_data_q.pop_front();
+         tx_piso(serial_bus);
       end
    endtask
 
-task tx_piso(input bit [`PCIe_MON_DATA_W-1:0] data_in);
+ task tx_piso(input bit [`PCIE_LANE_BUS_W-1:0] data_in);
         bit piso_data_out;
         `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_PISO_TASK",  UVM_LOW)
-          // Serialize_each_32-bit_word
+          // Serialize all lanes in lockstep, one bit per lane per event.
            for (int i = 0; i < `PCIe_MON_DATA_W; i++) begin
-              piso_data_out = data_in[i];
-              rc_phy_intf_tx.tx_plus  <= piso_data_out;
-              rc_phy_intf_tx.tx_minus <= ~piso_data_out;
-             `uvm_info("RC_PHY_DRIVER", $sformatf("PISO_DATA_IN_PHY_BIT_BY_BIT[%0d] = %0b TIME=%0t ",i, piso_data_out, $time), UVM_LOW)
+              for (int l = 0; l < `PCIE_NUM_LANES; l++) begin
+                 piso_data_out = data_in[l*`PCIe_LANE_W + i];
+                 rc_phy_intf_tx.tx_plus[l]  <= piso_data_out;
+                 rc_phy_intf_tx.tx_minus[l] <= ~piso_data_out;
+              end
+             `uvm_info("RC_PHY_DRIVER", $sformatf("PISO_BIT[%0d] LANE0=%0b TIME=%0t ",i, data_in[i], $time), UVM_LOW)
 	      uvm_rc_to_ep_ev.trigger();
               #`PCIe_PHY_TX_BIT_DELAY;
            end
-            rc_phy_intf_tx.tx_plus  <= 1'b0;
-            rc_phy_intf_tx.tx_minus <= 1'b1;
+            for (int l = 0; l < `PCIE_NUM_LANES; l++) begin
+               rc_phy_intf_tx.tx_plus[l]  <= 1'b0;
+               rc_phy_intf_tx.tx_minus[l] <= 1'b1;
+            end
            `uvm_info("RC_PHY_DRIVER","EXIT_FROM_PISO_TASK_COMPLETED",UVM_LOW)
     endtask
 
 task rx_sipo(virtual PCIe_RC_PHY_interface rc_phy_intf_rx);
-        bit [`PCIe_MON_DATA_W-1:0] rx_data;
+        bit [`PCIE_LANE_BUS_W-1:0] rx_bus;
         bit        rx_bit;
         `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_RX_SIPO_RC_PHY_DRIVER", UVM_LOW)
          forever
@@ -187,18 +192,20 @@ task rx_sipo(virtual PCIe_RC_PHY_interface rc_phy_intf_rx);
             begin
                 uvm_ep_to_rc_ev.wait_trigger();		
                 #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
-                rx_bit = rc_phy_intf_rx.rx_plus;
-                rx_data[i] = rx_bit;
-                `uvm_info("EP_PHY_DRIVER",$sformatf("RC_PHY_DRIVER_RX_BIT[%0d] = %0b TIME=%0.5f",i, rx_bit,$realtime), UVM_LOW);
+                for (int l = 0; l < `PCIE_NUM_LANES; l++) begin
+                   rx_bit = rc_phy_intf_rx.rx_plus[l];
+                   rx_bus[l*`PCIe_LANE_W + i] = rx_bit;
+                end
+                `uvm_info("EP_PHY_DRIVER",$sformatf("RC_PHY_DRIVER_RX_BIT[%0d] LANE0=%0b TIME=%0.5f",i, rx_bus[i],$realtime), UVM_LOW);
             end
-             ep_data_q.push_back(rx_data);
-            `uvm_info("RC_PHY_DRIVER",$sformatf("RC_PHY_DRIVER_RX_32_BIT_PARALLEL_DATA = %08h QUEUE_SIZE=%d", rx_data,ep_data_q.size()),UVM_LOW);
+             ep_data_q.push_back(rx_bus);
+            `uvm_info("RC_PHY_DRIVER",$sformatf("RC_PHY_DRIVER_RX_BUS_LANE0 = %08h QUEUE_SIZE=%d", rx_bus[31:0],ep_data_q.size()),UVM_LOW);
         end
         `uvm_info("RC_PHY_DRIVER","RC_PHY_DRIVER_EXIT_FROM_RX_SIPO", UVM_LOW)
     endtask
 
    task sending_pipe_rx(virtual PCIe_RC_interface rc_pipe_intf_rx);
-      bit [31:0] rx_parallel_data;
+      bit [`PCIE_LANE_BUS_W-1:0] rx_parallel_bus;
 
       `uvm_info("RC_PHY_DRIVER","ENTERED_INTO_SENDING_PARALLEL_DATA_TO_PIPE_RX_RC_PHY_DRIVER", UVM_LOW)
 	   rc_pipe_intf_rx.phy_status   <= 1'b0;
@@ -221,10 +228,11 @@ task rx_sipo(virtual PCIe_RC_PHY_interface rc_phy_intf_rx);
          //     gaps inside Ordered Sets, which desynchronised the descrambler.
          // The de-precoder side in the PL model re-arms itself instead.
 	      if(ep_data_q.size() > 0)begin
-             rx_parallel_data = ep_data_q.pop_front();
-             rc_pipe_intf_rx.rx_data  <= rx_parallel_data;
+             rx_parallel_bus = ep_data_q.pop_front();
+             for (int l = 0; l < `PCIE_NUM_LANES; l++)
+                rc_pipe_intf_rx.rx_data_lane[l] <= rx_parallel_bus[l*`PCIe_LANE_W +: `PCIe_LANE_W];
              rc_pipe_intf_rx.rx_valid <= 1'b1;
-            `uvm_info("RC_PHY_DRIVER",$sformatf("DRIVING_RC_PIPE_RX_DATA = %08h", rx_parallel_data),UVM_LOW);
+            `uvm_info("RC_PHY_DRIVER",$sformatf("DRIVING_RC_PIPE_RX_LANE0 = %08h", rx_parallel_bus[31:0]),UVM_LOW);
 	     end
 	     else begin
              rc_pipe_intf_rx.rx_valid <= 1'b0;

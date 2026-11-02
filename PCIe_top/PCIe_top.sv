@@ -17,6 +17,10 @@
 `include "uvm_macros.svh"
 `timescale 1ns/1ps
 
+`ifndef PCIE_NUM_LANES
+  `define PCIE_NUM_LANES 4
+`endif
+
 module PCIe_top;
 
 //`include "PCIe_PHY_interface.sv"
@@ -33,12 +37,17 @@ module PCIe_top;
    PCIe_EP_interface    ep_pipe_intf(pclk);
    PCIe_RC_PHY_interface   pcie_rc_phy_intf();
    PCIe_EP_PHY_interface   pcie_ep_phy_intf();
-    // RC TX--->EP RX
-    assign pcie_ep_phy_intf.rx_plus  = pcie_rc_phy_intf.tx_plus;
-    assign pcie_ep_phy_intf.rx_minus = pcie_rc_phy_intf.tx_minus;
-    // EP TX--->RC RX
-    assign pcie_rc_phy_intf.rx_plus  = pcie_ep_phy_intf.tx_plus;
-    assign pcie_rc_phy_intf.rx_minus = pcie_ep_phy_intf.tx_minus;
+    // RC TX--->EP RX : one serial differential pair per lane
+    // EP TX--->RC RX : one serial differential pair per lane
+    genvar gl;
+    generate
+      for (gl = 0; gl < `PCIE_NUM_LANES; gl++) begin : g_phy_lane
+        assign pcie_ep_phy_intf.rx_plus[gl]  = pcie_rc_phy_intf.tx_plus[gl];
+        assign pcie_ep_phy_intf.rx_minus[gl] = pcie_rc_phy_intf.tx_minus[gl];
+        assign pcie_rc_phy_intf.rx_plus[gl]  = pcie_ep_phy_intf.tx_plus[gl];
+        assign pcie_rc_phy_intf.rx_minus[gl] = pcie_ep_phy_intf.tx_minus[gl];
+      end
+    endgenerate
   
 
   initial begin

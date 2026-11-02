@@ -14,6 +14,10 @@
 * All other rights reserved.
 ***********************************************************************************************************************/
 
+`ifndef PCIE_NUM_LANES
+  `define PCIE_NUM_LANES 4
+`endif
+
 interface PCIe_RC_interface(input logic pclk);
 
    //----------------------------------------
@@ -24,6 +28,9 @@ interface PCIe_RC_interface(input logic pclk);
    // MAC -> PHY (Transmit)
    //----------------------------------------
    logic [31:0] tx_data;
+   logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_lane;
+   logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_striped = '0;
+   logic        tx_striped = 1'b0;
    logic        tx_valid;
    logic        tx_elec_idle;
    logic        tx_detect_rx;
@@ -33,10 +40,22 @@ interface PCIe_RC_interface(input logic pclk);
    // PHY -> MAC (Receive)
    //----------------------------------------
    logic [31:0] rx_data;
+   logic [`PCIE_NUM_LANES-1:0][31:0] rx_data_lane;
    logic        rx_valid;
    logic        phy_status;
    logic        rx_elec_idle;
    logic [2:0]  rx_status;
+
+   // Ordered Sets / LTSSM traffic : scalar tx_data is broadcast on every lane.
+   // FLIT data : the PL/controller drives tx_data_striped and raises tx_striped.
+   always_comb begin
+      for (int l = 0; l < `PCIE_NUM_LANES; l++)
+         tx_data_lane[l] = tx_striped ? tx_data_striped[l] : tx_data;
+   end
+
+   // The scalar receive bus is lane 0. Ordered Sets are broadcast, so this is
+   // also the logical word while the link is in training.
+   assign rx_data = rx_data_lane[0];
    //----------------------------------------
    // Driver Clocking Block
    //----------------------------------------
@@ -95,6 +114,9 @@ interface PCIe_EP_interface(input logic pclk);
    // MAC -> PHY (Transmit)
    //----------------------------------------
    logic [31:0] tx_data;
+   logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_lane;
+   logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_striped = '0;
+   logic        tx_striped = 1'b0;
    logic        tx_valid;
    logic        tx_elec_idle;
    logic        tx_detect_rx;
@@ -105,10 +127,22 @@ interface PCIe_EP_interface(input logic pclk);
    // PHY -> MAC (Receive)
    //----------------------------------------
    logic [31:0] rx_data;
+   logic [`PCIE_NUM_LANES-1:0][31:0] rx_data_lane;
    logic        rx_valid;
    logic        phy_status;
    logic        rx_elec_idle;
    logic [2:0]  rx_status;
+
+   // Ordered Sets / LTSSM traffic : scalar tx_data is broadcast on every lane.
+   // FLIT data : the PL/controller drives tx_data_striped and raises tx_striped.
+   always_comb begin
+      for (int l = 0; l < `PCIE_NUM_LANES; l++)
+         tx_data_lane[l] = tx_striped ? tx_data_striped[l] : tx_data;
+   end
+
+   // The scalar receive bus is lane 0. Ordered Sets are broadcast, so this is
+   // also the logical word while the link is in training.
+   assign rx_data = rx_data_lane[0];
 
    //----------------------------------------
    // Driver Clocking Block

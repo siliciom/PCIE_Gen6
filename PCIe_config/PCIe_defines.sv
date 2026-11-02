@@ -12,6 +12,21 @@
 `ifndef PCIe_DEFINES_SVH
 `define PCIe_DEFINES_SVH
 //==============================================================================
+// Multi-lane byte-striping configuration
+//   PCIE_NUM_LANES : number of PIPE lanes (1, 2, 4, 8, 16 or 32).
+//   Every lane carries one 32-bit PIPE word per clock. Ordered Sets are
+//   broadcast on all lanes; FLIT data is byte-striped across the lanes.
+//   The number of FLIT dwords (64) is divisible by every supported lane
+//   count, so a FLIT always occupies exactly 64/PCIE_NUM_LANES clocks.
+//==============================================================================
+`ifndef PCIE_NUM_LANES
+  `define PCIE_NUM_LANES 4
+`endif
+`define PCIe_LANE_W          32
+`define PCIE_LANE_BUS_W      (`PCIE_NUM_LANES * `PCIe_LANE_W)
+`define PCIe_FLIT_TOTAL_DW   64
+`define PCIe_LANES_PER_FLIT  (`PCIe_FLIT_TOTAL_DW / `PCIE_NUM_LANES)
+//==============================================================================
 // Force 4DW header for all memory transactions (non-standard, for debug)
 //==============================================================================
 `ifdef FORCE_4DW

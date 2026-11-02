@@ -2132,6 +2132,43 @@ task ep_state_config_complete();
       `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_PRE_ENCODE_TASK"),UVM_LOW)
     endtask
 
+    //-------------------------------------------------------------------------
+    // Multi-lane byte de-striping (implementation lives ONLY in the EP PL model).
+    //   destripe_flit : per-lane PIPE words -> 64 logical dwords.
+    // Both RC and EP receive monitors call this before descramble/decode.
+    // Stripe mapping (round r, lane l, byte b of the lane word):
+    //   global_byte = r*4*N + b*N + l
+    //   logical_dword = global_byte / 4,  byte_in_dword = global_byte % 4
+    //-------------------------------------------------------------------------
+    static function void destripe_flit(input string who,
+                                       uvm_report_object logger,
+                                       ref bit [`PCIE_LANE_BUS_W-1:0] buses[$],
+                                       ref bit [31:0] enc[$]);
+       int unsigned nlanes = `PCIE_NUM_LANES;
+       int unsigned nwords = buses.size() * nlanes;
+
+       enc.delete();
+       for (int unsigned i = 0; i < nwords; i++)
+          enc.push_back(32'h0);
+
+       for (int unsigned r = 0; r < buses.size(); r++) begin
+          for (int unsigned l = 0; l < nlanes; l++) begin
+             for (int unsigned b = 0; b < 4; b++) begin
+                int unsigned gb = r * 4 * nlanes + b * nlanes + l;
+                int unsigned di = gb / 4;
+                int unsigned bi = gb % 4;
+                bit [31:0] word;
+                word = enc[di];
+                word[bi*8 +: 8] = buses[r][l*`PCIe_LANE_W + b*8 +: 8];
+                enc[di] = word;
+             end
+          end
+       end
+       logger.uvm_report_info("DEBYTE_STRIPE", $sformatf(
+                 "%s byte-unstriping: %0d lanes -> %0d DWs, %0d stripes",
+                 who, nlanes, enc.size(), buses.size()), UVM_LOW);
+    endfunction
+
     task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out,input PCIe_sequence_item item);
       bit [31:0] scramble_data;
       bit [31:0] gray_data;
