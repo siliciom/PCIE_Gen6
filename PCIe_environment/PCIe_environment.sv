@@ -24,6 +24,8 @@ class PCIe_environment extends uvm_env;
    PCIe_subscriber              pcie_subscriber;
    // [ORDERING] checks that TLPs leave the RC TL in an order allowed by Table 2-42
    PCIe_ordering_checker        pcie_ordering_checker;
+   // [TC_VC] one TX queue per VC + Strict Priority arbitration 
+   PCIe_VC_Arbiter              vc_arb;
 
    PCIe_env_config              pcie_ecfg;
    uvm_event                    rc_to_ep_bit_event;
@@ -52,6 +54,9 @@ class PCIe_environment extends uvm_env;
          `uvm_fatal("PCIe_ENV","Cannot_get_ENV_CONFIG")
       end
 
+      // [TC_VC] TC -> VC table into every sequence item / model  
+      pcie_ecfg.apply_tc2vc_map();
+
       if(pcie_ecfg.has_rc_top_agent)
       begin
          rc_top_agent = PCIe_RC_top_agent::type_id::create("rc_top_agent", this);
@@ -76,6 +81,9 @@ class PCIe_environment extends uvm_env;
       if(pcie_ecfg.has_rc_top_agent)
       begin
          pcie_ordering_checker = PCIe_ordering_checker::type_id::create("pcie_ordering_checker", this);
+         // [TC_VC] VC arbiter 
+         vc_arb = PCIe_VC_Arbiter::type_id::create("vc_arb", this);
+         uvm_config_db#(PCIe_VC_Arbiter)::set(this, "*", "vc_arb", vc_arb);
       end
       `uvm_info(get_type_name(),"EXIT_BUILD_PHASE",  UVM_LOW)
    endfunction
@@ -89,6 +97,9 @@ class PCIe_environment extends uvm_env;
            rc_top_agent.rc_controller_agent.rc_controller_driver.rc_tl_model = rc_top_agent.rc_controller_agent.rc_tl_model;
            rc_top_agent.rc_controller_agent.rc_controller_driver.rc_dl_model = rc_top_agent.rc_controller_agent.rc_dl_model;
            rc_top_agent.rc_controller_agent.rc_controller_driver.rc_pl_model = rc_top_agent.rc_controller_agent.rc_pl_model;
+           // [TC_VC] arbiter : asks the RC TL FC gate of each VC; driver feeds / drains it
+           vc_arb.rc_tl_model = rc_top_agent.rc_controller_agent.rc_tl_model;
+           rc_top_agent.rc_controller_agent.rc_controller_driver.vc_arb = vc_arb;
     	  // rc monitor to dl model handle sharing
            rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_dl_model = rc_top_agent.rc_controller_agent.rc_dl_model;
            rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_pl_model = rc_top_agent.rc_controller_agent.rc_pl_model;

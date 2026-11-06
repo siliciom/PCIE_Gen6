@@ -39,14 +39,27 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
     // Watchdog: consecutive 1ns polls with no DLLP flit to drive before the
     // DLCMSM is declared stalled (only reached if DLCMSM stops producing flits).
     localparam int unsigned DLCMSM_IDLE_TIMEOUT_POLLS = 100000;
+
+    PCIe_VC_Arbiter   vc_arb;            // set by PCIe_environment::connect_phase
+   vc_id_e           won_vc;
+   bit               vc_arb_en;
+   bit               vc_arb_obj_raised;
+   uvm_phase         vc_arb_phase;
    function new(string name="PCIe_RC_controller_driver", uvm_component parent);
      super.new(name,parent);
      tx_tl_ap=new("tx_tl_ap",this);
    endfunction
  
    function void build_phase(uvm_phase phase);
+    int unsigned arb;
     `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_BUILD_PHASE",UVM_LOW)
      super.build_phase(phase);
+      // [TC_VC] VC arbitration on when the Link has more than one VC
+      vc_arb_en = (PCIe_sequence_item::num_vc > 1);
+      if ($value$plusargs("VC_ARB_EN=%d", arb)) vc_arb_en = (arb != 0);
+      `uvm_info("RC_VC_ARB", $sformatf("VC_ARBITRATION %s : %s",
+                vc_arb_en ? "ENABLED (Strict Priority, VC7 highest / VC0 lowest)" : "DISABLED (one request at a time, as before)",
+                PCIe_sequence_item::tc_vc_map_str()), UVM_LOW)
       pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
       replayed_item = PCIe_sequence_item::type_id::create("replayed_item");
       nak_item = PCIe_sequence_item::type_id::create("nak_item");
@@ -61,6 +74,7 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
   	endfunction
  
 task run_phase(uvm_phase phase);
+      vc_arb_phase = phase;   // [TC_VC] objection while TLPs wait in the VC queues
       `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
       `uvm_info("RC_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",rc_dl_model.DL_STATE.name()),UVM_LOW)
       forever begin
@@ -116,6 +130,11 @@ end
           drive_flit(pcie_seq_item);
           rc_dl_model.dllp_tx_pending = 1'b0;
         end
+        else if (vc_arb_en && rc_dl_model.dl_link_active) begin
+          // [TC_VC] feeder : requests -> VC queues, sender : strict-priority winner -> link
+          rc_feeder();
+          rc_sender();
+        end
         else begin
           // [ENUM] LINK IS UP : send every further item from the sequence
           // (the 2nd, 3rd ... configuration request of the enumeration).
@@ -142,6 +161,65 @@ end
       end
      end
    endtask
+
+  //--------------------------------------------------------------------------
+  // [TC_VC] rc_feeder (Gen3 rc_feeder) : take every request the sequencer has,
+  //   without blocking, and push it in the queue of its VC. After the first
+  //   one, keep looking for `PCIe_VC_ARB_COLLECT_NS ns of "nothing new" so all
+  //   requests a test issues together are queued before the arbiter picks.
+  //--------------------------------------------------------------------------
+  task rc_feeder();
+    int unsigned n, idle_ns;
+    n       = 0;
+    idle_ns = 0;
+    forever begin
+      seq_item_port.try_next_item(pcie_seq_item);
+      if (pcie_seq_item != null) begin
+        if (!vc_arb.any_pending() && !vc_arb_obj_raised) begin
+          vc_arb_phase.raise_objection(this, "TLPs waiting in the VC queues");
+          vc_arb_obj_raised = 1'b1;
+        end
+        vc_arb.push(pcie_seq_item);       // vc = tc2vc_table[tc] inside push()
+        seq_item_port.item_done();
+        n++;
+        idle_ns = 0;
+      end
+      else begin
+        if (n == 0 || idle_ns >= `PCIe_VC_ARB_COLLECT_NS) return;
+        #1ns;
+        idle_ns++;
+      end
+    end
+  endtask
+
+  //--------------------------------------------------------------------------
+  // [TC_VC] rc_sender ( rc_sender) : one strict-priority winner per call.
+  //   No VC can send (empty, or head TLP without FC credits) -> let the DL put
+  //   its UpdateFC flits out (the peer's UpdateFC opens the gates) and return.
+  //--------------------------------------------------------------------------
+  task rc_sender();
+    PCIe_sequence_item req;
+    if (!vc_arb.any_pending()) begin
+      #1ns;
+      return;
+    end
+    if (!vc_arb.try_get_next(req, won_vc)) begin
+      rc_dl_model.fc_tx_allowed = 1'b1;
+      #1ns;
+      return;
+    end
+    // The RC PL model holds ONE flit : pause DL UpdateFC flits, drive the queued
+    // ones, then send the TLP (same handshake as the one-at-a-time path).
+    rc_dl_model.fc_tx_allowed = 1'b0;
+    drain_dl_dllp_flits();
+    `uvm_info("RC_VC_ARB", $sformatf("SENDING %s (TC%0d) : %s", won_vc.name(), req.tc, req.convert2string()), UVM_LOW)
+    send_request(req);                     // FC gate of won_vc + [FLIT_SEG]
+    rc_dl_model.fc_tx_allowed = 1'b1;
+    if (!vc_arb.any_pending() && vc_arb_obj_raised) begin
+      vc_arb_phase.drop_objection(this, "VC queues empty");
+      vc_arb_obj_raised = 1'b0;
+    end
+  endtask
 
   //--------------------------------------------------------------------------
   // [FLIT_SEG] send_request : TL -> DL -> PL -> PIPE for one sequence item.

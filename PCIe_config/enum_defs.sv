@@ -337,6 +337,12 @@ typedef struct {
   typedef enum int unsigned { PCIE_FC_P = 0, PCIE_FC_NP = 1, PCIE_FC_CPL = 2 } pcie_fc_cls_e;
   typedef enum int unsigned { FC_ADV_INIT, FC_ADV_UPDATE, FC_STATUS, FC_PEER_INIT, FC_PEER_UPDATE } pcie_fc_kind_e;
 
+  //--------------------------------------------------------------------------
+  // [TC_VC] vc_id_e - Virtual Channel ID (PCIe Base 6.0 Sec 2.5.1)
+  //   VC0 = default VC (lowest priority), VC7 = highest priority (Sec 6.3.3.2)
+  //--------------------------------------------------------------------------
+  typedef enum bit [2:0] { VC0, VC1, VC2, VC3, VC4, VC5, VC6, VC7 } vc_id_e;
+
 
 endpackage
 
