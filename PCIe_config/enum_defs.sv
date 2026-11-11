@@ -38,11 +38,11 @@ package typedef_enums;
   // pcie_tl_txn_type_e - top-level TLP category
   //--------------------------------------------------------------------------
   typedef enum bit [3:0] {
-    PCIe_TL_MEM = 3'd0,   // Memory Read / Write
-    PCIe_TL_IO  = 3'd1,   // I/O Read / Write
-    PCIe_TL_CFG = 3'd2,   // Configuration Read / Write (Type 0 / Type 1)
-    PCIe_TL_MSG = 3'd3,   // Message (with or without data)
-    PCIe_TL_CPL = 3'd4    // Completion / Completion with Data
+    PCIe_TL_MEM = 4'd0,   // Memory Read / Write
+    PCIe_TL_IO  = 4'd1,   // I/O Read / Write
+    PCIe_TL_CFG = 4'd2,   // Configuration Read / Write (Type 0 / Type 1)
+    PCIe_TL_MSG = 4'd3,   // Message (with or without data)
+    PCIe_TL_CPL = 4'd4    // Completion / Completion with Data
   } pcie_tl_txn_type_e;
 
   //--------------------------------------------------------------------------
