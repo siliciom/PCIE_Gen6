@@ -1819,7 +1819,7 @@ class PCIe_RC_TL_model extends uvm_component;
       PCIe_TL_MEM: begin
         if (tr.is_4dw()) begin
           // 4DW Memory Request
-          dw2 = tr.address[63:32];
+          dw2 = 32'(64'(tr.address) >> 32);  // [WARN_FIX] safe when PCIe_TL_ADDR_W = 32
           dw3 = {tr.address[31:2], 2'b00};
           hdr = new[4];
           hdr[0] = dw0;
@@ -2009,7 +2009,7 @@ class PCIe_RC_TL_model extends uvm_component;
 
       if (tr.is_64bit_addr()) begin
         // 64-bit address
-        dw2 = tr.address[63:32];
+        dw2 = 32'(64'(tr.address) >> 32);  // [WARN_FIX] safe when PCIe_TL_ADDR_W = 32
 
         dw3 = '0;
         dw3[31:2] = tr.address[31:2];
@@ -2579,3 +2579,4 @@ class PCIe_RC_TL_model extends uvm_component;
 
 
 endclass
+

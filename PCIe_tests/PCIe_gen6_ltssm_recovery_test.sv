@@ -53,6 +53,9 @@ class PCIe_gen6_ltssm_recovery_test extends PCIe_base_test;
   endfunction
 
   function void build_phase(uvm_phase phase);
+    // [ENUM_FIRST] LTSSM testcase : keep the old flow (this test's own first item
+    // drives the LTSSM), so no link-up-first and no enumeration before it.
+    run_enum_first = 1'b0;
     super.build_phase(phase);
     `uvm_info("RECOVERY_TEST","PCIe_gen6_ltssm_recovery_test_built target_gen=6",UVM_LOW)
   endfunction

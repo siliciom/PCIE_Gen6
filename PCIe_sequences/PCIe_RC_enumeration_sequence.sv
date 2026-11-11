@@ -3,7 +3,8 @@
 // Project      : PCIE_Gen6
 // Description  : PCIe_sequences\PCIe_RC_enumeration_sequence.sv
 //                RC (Root Complex) side enumeration of the device below the
-//                Root Port, Flit mode, Configuration Type 0 requests only.
+//                Root Port, Flit mode. Configuration Space is reached through
+//                the host bridge with ECAM (default) or CAM.
 //=========================================================================================
 
 /**********************************************************************************************************************
@@ -26,22 +27,39 @@
 //                               read back -> size = ~(read & mask) + 1
 //   STEP 4  Assign addresses  : give each implemented BAR an aligned address
 //                               from the RC memory / IO pools, write it, read it back
-//   STEP 5  Capabilities      : if Status[4] = 1, walk the list from 034h,
-//                               find the PCI Express Capability (ID 10h),
-//                               read Device/Link Cap + Link Status, program MPS/MRRS.
-//                               Then walk the Extended Capabilities from 100h.
-//   STEP 6  Interrupt line    : CfgRd 03Ch, write Interrupt Line if Int Pin != 0
-//   STEP 7  Enable the device : Command register = Memory Space / IO Space /
+//   STEP 5  Interrupt line    : CfgRd 03Ch, write Interrupt Line if Int Pin != 0
+//   STEP 6  Enable the device : Command register = Memory Space / IO Space /
 //                               Bus Master Enable, read back and check
-//   STEP 8  Print a summary
+//   STEP 7  Print a summary
 //
-// HOW SOFTWARE REACHES CONFIGURATION SPACE (PCIe Base 6.2, Section 7.2.1 - CAM)
-//   The CPU cannot send a Configuration Request by itself. It talks to the
-//   host bridge registers (PCIe_RC_config_access) and the host bridge turns
-//   that into a CfgRd/CfgWr TLP :
+// HOW SOFTWARE REACHES CONFIGURATION SPACE
+//   The CPU cannot send a Configuration Request by itself. It accesses the
+//   host bridge, and the host bridge turns that access into a CfgRd/CfgWr TLP.
+//   The registers of both mechanisms live in this sequence (cfg_mech selects) :
+//
+//   ECAM (PCIe Base 6.2, Section 7.2.2) - default, reaches offset 000h-FFFh
+//     One memory read / write inside the ECAM window. The memory address
+//     itself says which register (Table 7-1) :
+//       A[(20+n-1):20] Bus Number      (1 <= n <= 8, unmapped bus bits = 0)
+//       A[19:15]       Device Number
+//       A[14:12]       Function Number
+//       A[11:8]        Extended Register Number
+//       A[7:2]         Register Number
+//       A[1:0]         with the access size -> Byte Enables
+//     The window is 2^(n+20) bytes, base aligned to that size. Accesses that
+//     cross a DW boundary are not translated. A write does not return until
+//     its CfgWr completion is back, so software knows the write has landed
+//     before it carries on (Section 7.2.2 ordering requirement).
+//
+//   CAM (PCIe Base 6.2, Section 7.2.1) - reaches offset 000h-0FFh only
 //     step 1 : I/O write 0CF8h (CONFIG_ADDRESS) = which Bus/Dev/Fn/register
 //     step 2 : I/O read/write 0CFCh (CONFIG_DATA) = the data -> TLP goes out
-//   CAM only reaches offset 000h-0FFh (CONFIG_ADDRESS has room for 000h-0FCh).
+//     Extended Register Number is always 0.
+//
+//   Type 0 or Type 1 ? (Section 7.3, routing through the Root Port bridge)
+//     target bus == Root Port Secondary Bus           -> Type 0 (CfgRd0/CfgWr0)
+//     Secondary Bus < target bus <= Subordinate Bus   -> Type 1 (CfgRd1/CfgWr1)
+//     anything else                                   -> not forwarded (reads FFFFFFFFh)
 //
 // HOW A CONFIG REQUEST IS SENT AND HOW ITS COMPLETION COMES BACK
 //
@@ -55,6 +73,8 @@
 //   `PCIe_EP_BUS_NUMBER, `PCIe_EP_DEVICE_NUMBER, `PCIe_EP_FUNCTION_NUMBER
 // The other functions (0..7) of the same device are scanned only when the
 // Header Type multi-function bit is 1.
+//
+// Offsets, CAM ports and the ECAM window come from PCIe_RC_enumeration_params.sv
 //////////////////////////////////////////////////////////////////////////////////////////
 
 class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
@@ -71,46 +91,51 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
   bit [15:0]   rc_requester_id = 16'h0000;             // Bus 0 / Dev 0 / Fn 0 = Root Port
   int unsigned cpl_timeout_ns  = 20000;                // wait for each completion
 
+  // Configuration access mechanism : CFG_MECH_ECAM or CFG_MECH_CAM
+  bit          cfg_mech        = CFG_MECH_ECAM;
+  bit [63:0]   ecam_base       = ECAM_BASE_ADDRESS;    // aligned to 2^(n+20)
+  int          ecam_bus_bits   = ECAM_BUS_BITS;        // n, 1..8(it can tell how many buses it supports)
+
+  // Root Port bridge bus numbers (who is below the link)
+  bit [7:0]    secondary_bus   = `PCIe_EP_BUS_NUMBER;  // bus right below the Root Port
+  bit [7:0]    subordinate_bus = `PCIe_EP_BUS_NUMBER;  // highest bus below the Root Port
+
   // Address pools handed out to the BARs
   bit [31:0]   mem32_base      = 32'h8000_0000;        // non-prefetchable / 32-bit memory
   bit [63:0]   mem64_base      = 64'h0000_0010_0000_0000; // 64-bit prefetchable memory
   bit [31:0]   io_base         = 32'h0000_1000;        // I/O space
 
-  // What the RC supports (used to program the device)
-  bit [2:0]    rc_mps          = 3'b001;               // Max Payload Size  : 001b = 256 B
-  bit [2:0]    rc_mrrs         = 3'b010;               // Max Read Request  : 010b = 512 B
   bit [7:0]    int_line_value  = 8'h0B;                // Interrupt Line given to the device
+
+  //------------------------------------------------------------------------
+  // Host bridge registers
+  //------------------------------------------------------------------------
+  // CAM (I/O ports)
+  bit [31:0]   config_address_reg;   // 0CF8h : CONFIG_ADDRESS
+  bit [31:0]   config_data_reg;      // 0CFCh : CONFIG_DATA
+  // ECAM (last memory access decoded by the host bridge)
+  bit [63:0]   ecam_address_reg;     // memory address inside the ECAM window---  Helper variables to  remember last address 
+  bit [31:0]   ecam_data_reg;        // write data / read completion data
 
   //------------------------------------------------------------------------
   // Internal
   //------------------------------------------------------------------------
   PCIe_RC_TL_model          rc_tl;
-  PCIe_RC_config_access     host_bridge;   // CF8 / CFC registers of the Root Complex host bridge
   bit [`PCIe_TL_TAG_W-1:0]  next_tag = 'h40;
-  bit                       first_request = 1'b1;   // first item also brings the link up
+  bit                       first_request = 1'b1;   // first configuration request of the test
+  bit                       link_up_first = 1'b0;   // [LINK_FIRST] 1 = driver brought the link up before enumeration
 
-  int unsigned n_cfg_rd, n_cfg_wr, n_timeout, n_ur, n_func_found;
-  string       summary_q[$];
+  int unsigned n_cfg_rd, n_cfg_wr, n_timeout, n_ur, n_func_found;    // counters 
+  string       summary_q[$];   // Summary for printing
 
   // Per-BAR result (filled for the function being enumerated)
-  bit          bar_impl  [6];
-  bit          bar_is_io [6];
-  bit          bar_is_64 [6];
-  bit          bar_pref  [6];
-  bit [63:0]   bar_size  [6];
-  bit [63:0]   bar_addr  [6];
-  string       bar_note  [6];
-
-  // Config space offsets used below
-  localparam bit [11:0] CFG_ID        = 12'h000;
-  localparam bit [11:0] CFG_CMD_STS   = 12'h004;
-  localparam bit [11:0] CFG_CLASS     = 12'h008;
-  localparam bit [11:0] CFG_HDR       = 12'h00C;
-  localparam bit [11:0] CFG_BAR0      = 12'h010;
-  localparam bit [11:0] CFG_SUBSYS    = 12'h02C;
-  localparam bit [11:0] CFG_CAP_PTR   = 12'h034;
-  localparam bit [11:0] CFG_INT       = 12'h03C;
-  localparam bit [11:0] CFG_EXT_START = 12'h100;
+  bit          bar_impl  [6];   // is the bar exists
+  bit          bar_is_io [6];   // is the bar io or memory
+  bit          bar_is_64 [6];   // is it a 64 bit address or 32-bit address
+  bit          bar_pref  [6];   // about prefetchability
+  bit [63:0]   bar_size  [6];   // how much space the bar needs
+  bit [63:0]   bar_addr  [6];   // address given to the bar
+  string       bar_note  [6];  // printing purpose
 
   function new(string name="PCIe_RC_enumeration_sequence");
     super.new(name);
@@ -131,10 +156,26 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
     if (!uvm_config_db#(PCIe_RC_TL_model)::get(m_sequencer, "", "rc_tl_model", rc_tl))
       `uvm_fatal("RC_ENUM","rc_tl_model handle not found in uvm_config_db (set in PCIe_RC_controller_agent::connect_phase)")
 
-    // Host bridge registers : CONFIG_ADDRESS (CF8), CONFIG_DATA (CFC)
-    host_bridge = PCIe_RC_config_access::type_id::create("host_bridge");
-    `uvm_info("RC_ENUM", $sformatf("CONFIG ACCESS MECHANISM : CAM (I/O 0CF8h CONFIG_ADDRESS / 0CFCh CONFIG_DATA) | Root Port secondary bus=%0d subordinate bus=%0d",
-              host_bridge.secondary_bus, host_bridge.subordinate_bus), UVM_LOW)
+    // [LINK_FIRST] Enumeration runs only AFTER link training : wait until the
+    // RC driver reports LTSSM L0 + DL_ACTIVE (global event "rc_link_ready").
+    void'(uvm_config_db#(bit)::get(m_sequencer, "", "link_up_before_traffic", link_up_first));
+    if (link_up_first) begin
+      uvm_event link_ready_ev;
+      link_ready_ev = uvm_event_pool::get_global("rc_link_ready");
+      `uvm_info("RC_ENUM","WAITING_FOR_LINK_UP : LTSSM -> L0 and DLCMSM -> DL_ACTIVE (done by the RC driver)",UVM_LOW)
+      link_ready_ev.wait_on();
+      `uvm_info("RC_ENUM","LINK_READY (L0 + DL_ACTIVE) :: ENUMERATION STARTS NOW",UVM_LOW)
+    end
+
+    if (cfg_mech == CFG_MECH_ECAM) begin
+      check_ecam_window();
+      `uvm_info("RC_ENUM", $sformatf("CONFIG ACCESS MECHANISM : ECAM base=%016h n=%0d (buses 0..%0d, window %0d MB) | Root Port secondary bus=%0d subordinate bus=%0d",
+                ecam_base, ecam_bus_bits, (1 << ecam_bus_bits) - 1, 1 << ecam_bus_bits, secondary_bus, subordinate_bus), UVM_LOW)
+    end
+    else begin
+      `uvm_info("RC_ENUM", $sformatf("CONFIG ACCESS MECHANISM : CAM (I/O 0CF8h CONFIG_ADDRESS / 0CFCh CONFIG_DATA) | Root Port secondary bus=%0d subordinate bus=%0d",
+                secondary_bus, subordinate_bus), UVM_LOW)
+    end
 
     `uvm_info("RC_ENUM", $sformatf("TARGET EP (from PCIe_defines.sv) : Bus=%0d Device=%0d Function=%0d",
               bus_num, dev_num, fn_num), UVM_LOW)
@@ -171,7 +212,7 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
   endtask
 
   //========================================================================
-  // enumerate_function : STEP 2 .. STEP 7 for one function
+  // enumerate_function : STEP 2 .. STEP 6 for one function
   //========================================================================
   task enumerate_function(bit [4:0] dev, bit [2:0] fn, bit [31:0] id_dw);
     bit [31:0] class_dw, hdr_dw, subsys_dw, cmd_dw, int_dw, rd;
@@ -180,7 +221,6 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
     bit [7:0]  header_type;
     bit [15:0] cmd;
     bit        any_mem, any_io;
-    bit [11:0] pcie_cap;
     string     s;
 
     `uvm_info("RC_ENUM", $sformatf("---------- FUNCTION %0d:%0d.%0d FOUND : VID=%04h DID=%04h ----------",
@@ -216,18 +256,7 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
     // ---------------- STEP 3 + 4 : BARs ----------------
     size_and_assign_bars(dev, fn);
 
-    // ---------------- STEP 5 : capabilities ----------------
-    pcie_cap = 12'h000;
-    if (cmd_dw[20]) begin                     // Status[4] = Capabilities List
-      walk_capabilities(dev, fn, pcie_cap);
-      if (pcie_cap != 12'h000)
-        walk_ext_capabilities(dev, fn);
-    end
-    else begin
-      `uvm_info("RC_ENUM", "  STATUS[4] (Capabilities List) = 0 : device has no capability list - STEP 5 skipped", UVM_LOW)
-    end
-
-    // ---------------- STEP 6 : interrupt line ----------------
+    // ---------------- STEP 5 : interrupt line ----------------
     cfg_read(dev, fn, CFG_INT, int_dw, st, ok);
     if (ok && int_dw[15:8] != 8'h00) begin
       cfg_write(dev, fn, CFG_INT, {24'h0, int_line_value}, 4'b0001, st, ok);
@@ -235,7 +264,7 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
                 string'(8'h40 + int_dw[15:8]), int_line_value), UVM_LOW)
     end
 
-    // ---------------- STEP 7 : enable ----------------
+    // ---------------- STEP 6 : enable ----------------
     any_mem = 0; any_io = 0;
     for (int i = 0; i < 6; i++) if (bar_impl[i] && bar_note[i] == "") begin
       if (bar_is_io[i]) any_io = 1; else any_mem = 1;
@@ -304,15 +333,15 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
           i++;
           continue;
         end
-        mask = {32'h0, rd_lo & 32'hFFFF_FFFC};
-        if (mask[31:16] == 16'h0) mask[31:16] = 16'hFFFF;    // 16-bit IO decoder
+        mask = {32'h0, rd_lo & 32'hFFFF_FFFC};   // clears the last 2 bits (bit 0 and bit 1), which are type bits, not size
+        if (mask[31:16] == 16'h0) mask[31:16] = 16'hFFFF;//Some I/O BARs only use the lower 16 bits, so their upper half reads back 0 (e.g. 0000_FF01). That would make the size calculation wrong, so the code fills the upper half with F’s.
         size = (~mask + 1) & 64'h0000_0000_FFFF_FFFF;
         addr = align_up({32'h0, io_base}, size);
-        io_base = addr[31:0] + size[31:0];
+        io_base = addr[31:0] + size[31:0];  // next available io address starts from here
         bar_impl[i] = 1; bar_is_io[i] = 1; bar_size[i] = size; bar_addr[i] = addr;
-        cfg_write(dev, fn, off, addr[31:0] | 32'h1, 4'hF, st, ok);
+        cfg_write(dev, fn, off, addr[31:0] | 32'h1, 4'hF, st, ok); // write the address into bar1 and ( "| 1") keeps bit0 1
         cfg_read (dev, fn, off, rd, st, ok);
-        check_bar_readback(i, {32'h0, rd & 32'hFFFF_FFFC}, addr);
+        check_bar_readback(i, {32'h0, rd & 32'hFFFF_FFFC}, addr); 
         i++;
         continue;
       end
@@ -336,7 +365,7 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
           break;
         end
         cfg_read (dev, fn, off + 12'h4, orig_hi, st, ok);
-        cfg_write(dev, fn, off + 12'h4, 32'hFFFF_FFFF, 4'hF, st, ok);
+        cfg_write(dev, fn, off + 12'h4, 32'hFFFF_FFFF, 4'hF, st, ok);  // off + 4 for next bar
         cfg_read (dev, fn, off + 12'h4, rd_hi, st, ok);
         mask = {rd_hi, rd_lo & 32'hFFFF_FFF0};
         size = ~mask + 1;
@@ -375,95 +404,24 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
   // Round 'a' up to a multiple of 'size' (size is a power of 2)
   function bit [63:0] align_up(bit [63:0] a, bit [63:0] size);
     if (size == 0) return a;
-    return (a + size - 1) & ~(size - 1);
+    return (a + size - 1) & ~(size - 1);//take the next free address and round it UP to a multiple of the BAR size because in pcie BAR's address should be multiple of it's size
   endfunction
 
   //========================================================================
-  // STEP 5a : standard capability list (starts at 034h)
-  //========================================================================
-  task walk_capabilities(bit [4:0] dev, bit [2:0] fn, output bit [11:0] pcie_cap);
-    bit [31:0] rd, devcap, devctl, linkcap, linksts;
-    bit [2:0]  st;
-    bit        ok;
-    bit [7:0]  ptr;
-    bit [2:0]  mps;
-    int        guard;
-
-    pcie_cap = 12'h000;
-    cfg_read(dev, fn, CFG_CAP_PTR, rd, st, ok);
-    ptr   = rd[7:0] & 8'hFC;
-    guard = 0;
-
-    while (ok && ptr != 8'h00 && guard < 48) begin
-      guard++;
-      cfg_read(dev, fn, {4'h0, ptr}, rd, st, ok);
-      if (!ok) break;
-      `uvm_info("RC_ENUM", $sformatf("  CAPABILITY @%03h : ID=%02h (%s) NEXT=%02h",
-                ptr, rd[7:0], cap_name(rd[7:0]), rd[15:8]), UVM_LOW)
-
-      if (rd[7:0] == 8'h10) begin                // PCI Express Capability
-        pcie_cap = {4'h0, ptr};
-        `uvm_info("RC_ENUM", $sformatf("    PCIe CAP : version=%0d device/port type=%0h (%s)",
-                  rd[19:16], rd[23:20], port_type_name(rd[23:20])), UVM_LOW)
-        cfg_read(dev, fn, pcie_cap + 12'h04, devcap,  st, ok);   // Device Capabilities
-        cfg_read(dev, fn, pcie_cap + 12'h08, devctl,  st, ok);   // Device Control / Status
-        cfg_read(dev, fn, pcie_cap + 12'h0C, linkcap, st, ok);   // Link Capabilities
-        cfg_read(dev, fn, pcie_cap + 12'h10, linksts, st, ok);   // Link Control / Status
-        `uvm_info("RC_ENUM", $sformatf("    DEVICE : MPS supported=%0d B | LINK : max speed=%s max width=x%0d | now speed=%s width=x%0d",
-                  128 << devcap[2:0], speed_name(linkcap[3:0]), linkcap[9:4],
-                  speed_name(linksts[19:16]), linksts[25:20]), UVM_LOW)
-
-        // Max Payload Size = smaller of (device supports, RC supports)
-        mps = (devcap[2:0] < rc_mps) ? devcap[2:0] : rc_mps;
-        devctl[7:5]   = mps;
-        devctl[14:12] = rc_mrrs;
-        cfg_write(dev, fn, pcie_cap + 12'h08, {16'h0, devctl[15:0]}, 4'b0011, st, ok);  // keep Device Status
-        `uvm_info("RC_ENUM", $sformatf("    DEVICE CONTROL programmed : MPS=%0d B MRRS=%0d B",
-                  128 << mps, 128 << rc_mrrs), UVM_LOW)
-        summary_q.push_back($sformatf("    PCIe CAP @%03h : link %s x%0d, MPS=%0d B, MRRS=%0d B",
-                            pcie_cap, speed_name(linksts[19:16]), linksts[25:20], 128 << mps, 128 << rc_mrrs));
-      end
-      ptr = rd[15:8] & 8'hFC;
-    end
-  endtask
-
-  //========================================================================
-  // STEP 5b : extended capability list (starts at 100h, PCIe devices only)
-  //========================================================================
-  task walk_ext_capabilities(bit [4:0] dev, bit [2:0] fn);
-    bit [31:0] rd;
-    bit [2:0]  st;
-    bit        ok;
-    bit [11:0] ptr;
-    int        guard;
-
-    ptr   = CFG_EXT_START;
-    guard = 0;
-    while (ptr >= CFG_EXT_START && guard < 64) begin
-      guard++;
-      cfg_read(dev, fn, ptr, rd, st, ok);
-      if (!ok || rd == 32'h0 || rd == 32'hFFFF_FFFF) begin
-        if (ptr == CFG_EXT_START)
-          `uvm_info("RC_ENUM", "  EXTENDED CAPABILITIES : none (100h reads 0 / FFFFFFFFh / UR)", UVM_LOW)
-        break;
-      end
-      `uvm_info("RC_ENUM", $sformatf("  EXT CAPABILITY @%03h : ID=%04h VER=%0d NEXT=%03h",
-                ptr, rd[15:0], rd[19:16], rd[31:20]), UVM_LOW)
-      summary_q.push_back($sformatf("    EXT CAP @%03h : ID=%04h", ptr, rd[15:0]));
-      ptr = rd[31:20] & 12'hFFC;
-    end
-  endtask
-
-  //========================================================================
   // cfg_read / cfg_write : what every enumeration step calls.
-  //   They act like software : they go through the host bridge registers
-  //     step 1 : write CONFIG_ADDRESS (0CF8h) = which Bus/Dev/Fn/register
-  //     step 2 : read / write CONFIG_DATA (0CFCh) -> CfgRd / CfgWr TLP
+  //   They act like software and go through the host bridge :
+  //     ECAM : one memory read / write inside the ECAM window
+  //     CAM  : write CONFIG_ADDRESS (0CF8h), then read / write CONFIG_DATA (0CFCh)
   //   The host bridge part then calls cfg_request(), which sends the TLP.
+  //   wdata / rdata are DW lane aligned (byte k on bits [8k+7:8k]).
   //   ok = 1 only when the completion came back with status SC
   //========================================================================
   task cfg_read(input bit [4:0] dev, input bit [2:0] fn, input bit [11:0] off,
                 output bit [31:0] rdata, output bit [2:0] status, output bit ok);
+    if (cfg_mech == CFG_MECH_ECAM) begin
+      ecam_mem_read(make_ecam_address(bus_num, dev, fn, {off[11:2], 2'b00}), 4, rdata, status, ok);
+      return;
+    end
     if (off >= 12'h100) begin
       // CONFIG_ADDRESS has room only for offset 000h-0FCh
       `uvm_info("RC_CAM", $sformatf("  offset %03h is above 0FFh : not reachable with CF8/CFC -> FFFFFFFFh", off), UVM_LOW)
@@ -473,13 +431,27 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
       return;
     end
     // step 1 = say WHICH register (CF8), step 2 = read the DATA (CFC)
-    io_write(PCIe_RC_config_access::PORT_CONFIG_ADDRESS, host_bridge.make_config_address(bus_num, dev, fn, off), 4'hF, status, ok);
-    io_read (PCIe_RC_config_access::PORT_CONFIG_DATA, rdata, status, ok);
+    io_write(PORT_CONFIG_ADDRESS, make_config_address(bus_num, dev, fn, off), 4'hF, status, ok);
+    io_read (PORT_CONFIG_DATA, rdata, status, ok);
   endtask
 
   task cfg_write(input bit [4:0] dev, input bit [2:0] fn, input bit [11:0] off,
                  input bit [31:0] wdata, input bit [3:0] be,
                  output bit [2:0] status, output bit ok);
+    bit [1:0] byte_off;
+    int       size;
+
+    if (cfg_mech == CFG_MECH_ECAM) begin
+      // A CPU store is (address, size) : turn the byte enables back into that
+      if (!be_to_access(be, byte_off, size)) begin
+        `uvm_error("RC_ECAM", $sformatf("  BE=%04b is not one CPU access (1, 2 or 4 contiguous bytes) - write dropped", be))
+        status = `PCIe_CPL_STATUS_SC;
+        ok     = 1'b0;
+        return;
+      end
+      ecam_mem_write(make_ecam_address(bus_num, dev, fn, {off[11:2], byte_off}), wdata, size, status, ok);
+      return;
+    end
     if (off >= 12'h100) begin
       `uvm_info("RC_CAM", $sformatf("  offset %03h is above 0FFh : not reachable with CF8/CFC -> write dropped", off), UVM_LOW)
       status = `PCIe_CPL_STATUS_SC;
@@ -487,9 +459,190 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
       return;
     end
     // step 1 = say WHICH register (CF8), step 2 = write the DATA (CFC)
-    io_write(PCIe_RC_config_access::PORT_CONFIG_ADDRESS, host_bridge.make_config_address(bus_num, dev, fn, off), 4'hF, status, ok);
-    io_write(PCIe_RC_config_access::PORT_CONFIG_DATA, wdata, be, status, ok);
+    io_write(PORT_CONFIG_ADDRESS, make_config_address(bus_num, dev, fn, off), 4'hF, status, ok);
+    io_write(PORT_CONFIG_DATA, wdata, be, status, ok);
   endtask
+
+  //========================================================================
+  // Routing through the Root Port : 0 = Type 0, 1 = Type 1, 2 = not below
+  //========================================================================
+  function int route(bit [7:0] bus);
+    if (bus == secondary_bus)                                return 0;
+    if ((bus > secondary_bus) && (bus <= subordinate_bus))   return 1;
+    return 2;
+  endfunction
+
+  //========================================================================
+  // ECAM (Section 7.2.2) : memory window -> Configuration Request
+  //========================================================================
+  function bit [63:0] ecam_window_size();
+    return 64'h1 << (ecam_bus_bits + 20);  // it calculates the size of ECAM area: each bus needs 1 MB (2²⁰), and there are 2ⁿ buses, so the ECAM area = 2ⁿ × 2²⁰ = 1 << (n + 20)
+  endfunction
+
+  // Window rules from Section 7.2.2 : 1 <= n <= 8, base aligned to 2^(n+20),
+  // every bus this sequence may target must fit in n bits.
+  function void check_ecam_window();
+    if (ecam_bus_bits < 1 || ecam_bus_bits > 8)   // ECAM can use 1 to 8 bits for the bus number
+      `uvm_fatal("RC_ECAM", $sformatf("ecam_bus_bits=%0d : n must be 1..8", ecam_bus_bits))
+    if ((ecam_base & (ecam_window_size() - 1)) != 0)  // The start address must be a multiple of the window size which is 256MB multiples means lasts 7 bits must be zero
+      `uvm_fatal("RC_ECAM", $sformatf("ecam_base=%016h is not aligned to the 2^(n+20) = 0x%0h byte window",
+                 ecam_base, ecam_window_size()))
+    if (subordinate_bus > (1 << ecam_bus_bits) - 1 || bus_num > (1 << ecam_bus_bits) - 1) // Checks buses within the limit
+      `uvm_fatal("RC_ECAM", $sformatf("bus %0d / subordinate bus %0d cannot be reached with n=%0d (buses 0..%0d)",
+                 bus_num, subordinate_bus, ecam_bus_bits, (1 << ecam_bus_bits) - 1))
+  endfunction
+
+  // Table 7-1 : build the memory address software uses for one register.
+  // off carries the byte address, so off[1:0] is A[1:0].
+  function bit [63:0] make_ecam_address(bit [7:0] bus, bit [4:0] dev, bit [2:0] fn, bit [11:0] off);
+    bit [63:0] bus_mask;
+    bus_mask = (64'h1 << ecam_bus_bits) - 1;
+    return ecam_base
+         | ((bus & bus_mask) << 20)
+         | (64'(dev) << 15)
+         | (64'(fn)  << 12)
+         | 64'(off);
+  endfunction
+
+  // Table 7-1 in the other direction : what the host bridge decodes.
+  // hit = 0 when the address is outside the ECAM window.
+  function void split_ecam_address(bit [63:0] a, output bit hit,
+                                   output bit [7:0] bus, output bit [4:0] dev,
+                                   output bit [2:0] fn, output bit [11:0] off);
+    bit [63:0] rel;
+    hit = (a >= ecam_base) && (a < ecam_base + ecam_window_size());    // It cheks address inside the ECAM area
+    rel = a - ecam_base;    // It removes base address
+    bus = 8'(rel >> 20) & 8'((1 << ecam_bus_bits) - 1);   // take out the bus 
+    dev = rel[19:15];
+    fn  = rel[14:12];
+    off = rel[11:0];                                       // [11:8] Ext Reg, [7:2] Reg, [1:0] byte
+  endfunction
+
+  // A[1:0] + access size -> First DW Byte Enables. 0 = crosses a DW boundary.
+  function bit [3:0] ecam_byte_enables(bit [1:0] a10, int size);
+    if (!(size inside {1, 2, 4}) || (int'(a10) + size > 4)) return 4'b0000;
+    return 4'(((1 << size) - 1) << a10);  // Build the byte enable
+  endfunction
+
+  // BE pattern of a single CPU access -> (A[1:0], size). 0 = not one access.
+  function bit be_to_access(bit [3:0] be, output bit [1:0] a10, output int size);
+    case (be)
+      4'b0001: begin a10 = 2'd0; size = 1; end
+      4'b0010: begin a10 = 2'd1; size = 1; end
+      4'b0100: begin a10 = 2'd2; size = 1; end
+      4'b1000: begin a10 = 2'd3; size = 1; end
+      4'b0011: begin a10 = 2'd0; size = 2; end
+      4'b0110: begin a10 = 2'd1; size = 2; end
+      4'b1100: begin a10 = 2'd2; size = 2; end
+      4'b1111: begin a10 = 2'd0; size = 4; end
+      default: begin a10 = 2'd0; size = 0; return 1'b0; end
+    endcase
+    return 1'b1;
+  endfunction
+
+  // MEMORY READ inside the ECAM window -> CfgRd, completion data -> ecam_data_reg
+  task ecam_mem_read(input bit [63:0] addr, input int size,
+                     output bit [31:0] data, output bit [2:0] status, output bit ok);
+    bit        hit;
+    bit [7:0]  bus;
+    bit [4:0]  dev;
+    bit [2:0]  fn;
+    bit [11:0] off;
+    bit [3:0]  be;
+    int        r;
+
+    status = `PCIe_CPL_STATUS_SC;
+    ok     = 1'b0;
+    data   = 32'hFFFF_FFFF;
+
+    ecam_address_reg = addr;
+    split_ecam_address(addr, hit, bus, dev, fn, off);
+    be = ecam_byte_enables(off[1:0], size);
+    `uvm_info("RC_ECAM", $sformatf("  MEM_RD %016h size=%0d : Bus=%0d Dev=%0d Fn=%0d ExtReg=%0h Reg=%02h BE=%04b",
+              addr, size, bus, dev, fn, off[11:8], off[7:2], be), UVM_LOW)
+
+    if (!hit) begin
+      `uvm_error("RC_ECAM", $sformatf("  MEM_RD %016h is outside the ECAM window", addr))
+      return;
+    end
+    if (be == 4'b0000) begin
+      `uvm_warning("RC_ECAM", $sformatf("  MEM_RD %016h size=%0d crosses a DW boundary - not translated", addr, size))
+      return;
+    end
+    r = route(bus);
+    if (r == 2) begin
+      `uvm_info("RC_ECAM", $sformatf("  Bus %0d is not below the Root Port -> FFFFFFFFh (Master Abort)", bus), UVM_LOW)
+      return;
+    end
+    cfg_request(1'b0, bus, dev, fn, {off[11:2], 2'b00}, (r == 1), 32'h0, be, ecam_data_reg, status, ok);
+    data = ecam_data_reg;
+    `uvm_info("RC_ECAM", $sformatf("  MEM_RD %016h => %08h", addr, data), UVM_LOW)
+  endtask
+
+  // MEMORY WRITE inside the ECAM window -> CfgWr. Returns only after the
+  // CfgWr completion, so the write is done before software continues.
+  task ecam_mem_write(input bit [63:0] addr, input bit [31:0] data, input int size,
+                      output bit [2:0] status, output bit ok);
+    bit        hit;
+    bit [7:0]  bus;
+    bit [4:0]  dev;
+    bit [2:0]  fn;
+    bit [11:0] off;
+    bit [3:0]  be;
+    bit [31:0] unused;
+    int        r;
+
+    status = `PCIe_CPL_STATUS_SC;
+    ok     = 1'b0;
+
+    ecam_address_reg = addr;
+    ecam_data_reg    = data;
+    split_ecam_address(addr, hit, bus, dev, fn, off);
+    be = ecam_byte_enables(off[1:0], size);
+    `uvm_info("RC_ECAM", $sformatf("  MEM_WR %016h size=%0d <= %08h : Bus=%0d Dev=%0d Fn=%0d ExtReg=%0h Reg=%02h BE=%04b",
+              addr, size, data, bus, dev, fn, off[11:8], off[7:2], be), UVM_LOW)
+
+    if (!hit) begin
+      `uvm_error("RC_ECAM", $sformatf("  MEM_WR %016h is outside the ECAM window", addr))
+      return;
+    end
+    if (be == 4'b0000) begin
+      `uvm_warning("RC_ECAM", $sformatf("  MEM_WR %016h size=%0d crosses a DW boundary - not translated", addr, size))
+      return;
+    end
+    r = route(bus);
+    if (r == 2) begin
+      `uvm_info("RC_ECAM", $sformatf("  Bus %0d is not below the Root Port : write dropped", bus), UVM_LOW)
+      return;
+    end
+    cfg_request(1'b1, bus, dev, fn, {off[11:2], 2'b00}, (r == 1), data, be, unused, status, ok);
+  endtask
+
+  //========================================================================
+  // CAM (Section 7.2.1) : CONFIG_ADDRESS (CF8) value
+  //========================================================================
+  function bit [31:0] make_config_address(bit [7:0] bus, bit [4:0] dev, bit [2:0] fn, bit [11:0] off);
+    bit [31:0] v;
+    v        = '0;
+    v[31]    = 1'b1;          // Enable
+    v[23:16] = bus;
+    v[15:11] = dev;
+    v[10:8]  = fn;
+    v[7:2]   = off[7:2];      // only 000h..0FCh fit here
+    v[1:0]   = 2'b00;
+    return v;
+  endfunction
+
+  function void split_config_address(bit [31:0] v,
+                                     output bit enable, output bit [7:0] bus,
+                                     output bit [4:0] dev, output bit [2:0] fn,
+                                     output bit [11:0] off);
+    enable = v[31];
+    bus    = v[23:16];
+    dev    = v[15:11];
+    fn     = v[10:8];
+    off    = {4'h0, v[7:2], 2'b00};
+  endfunction
 
   //========================================================================
   // CAM : CPU I/O access to the host bridge ports 0CF8h / 0CFCh
@@ -510,23 +663,23 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
     status = `PCIe_CPL_STATUS_SC;
     ok     = 1'b1;
 
-    if (port == PCIe_RC_config_access::PORT_CONFIG_ADDRESS) begin
-      host_bridge.config_address_reg = data;
-      host_bridge.split_config_address(data, en, bus, dev, fn, off);
+    if (port == PORT_CONFIG_ADDRESS) begin
+      config_address_reg = data;
+      split_config_address(data, en, bus, dev, fn, off);
       `uvm_info("RC_CAM", $sformatf("  IO_WR 0CF8h (CONFIG_ADDRESS) <= %08h : Enable=%0b Bus=%0d Dev=%0d Fn=%0d Reg=%03h",
                 data, en, bus, dev, fn, off), UVM_LOW)
       return;
     end
 
-    if (port == PCIe_RC_config_access::PORT_CONFIG_DATA) begin
-      host_bridge.config_data_reg = data;
-      host_bridge.split_config_address(host_bridge.config_address_reg, en, bus, dev, fn, off);
+    if (port == PORT_CONFIG_DATA) begin
+      config_data_reg = data;
+      split_config_address(config_address_reg, en, bus, dev, fn, off);
       `uvm_info("RC_CAM", $sformatf("  IO_WR 0CFCh (CONFIG_DATA)    <= %08h BE=%04b", data, be), UVM_LOW)
       if (!en) begin
         `uvm_info("RC_CAM", "  CONFIG_ADDRESS Enable=0 : no Configuration Request (normal I/O write)", UVM_LOW)
         return;
       end
-      r = host_bridge.route(bus);
+      r = route(bus);
       if (r == 2) begin
         `uvm_info("RC_CAM", $sformatf("  Bus %0d is not below the Root Port : write dropped", bus), UVM_LOW)
         ok = 1'b0;
@@ -555,28 +708,28 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
     status = `PCIe_CPL_STATUS_SC;
     ok     = 1'b1;
 
-    if (port == PCIe_RC_config_access::PORT_CONFIG_ADDRESS) begin
-      data = host_bridge.config_address_reg;
+    if (port == PORT_CONFIG_ADDRESS) begin
+      data = config_address_reg;
       return;
     end
 
-    if (port == PCIe_RC_config_access::PORT_CONFIG_DATA) begin
-      host_bridge.split_config_address(host_bridge.config_address_reg, en, bus, dev, fn, off);
+    if (port == PORT_CONFIG_DATA) begin
+      split_config_address(config_address_reg, en, bus, dev, fn, off);
       if (!en) begin
         `uvm_info("RC_CAM", "  IO_RD 0CFCh with Enable=0 : no Configuration Request -> FFFFFFFFh", UVM_LOW)
         data = 32'hFFFF_FFFF;
         ok   = 1'b0;
         return;
       end
-      r = host_bridge.route(bus);
+      r = route(bus);
       if (r == 2) begin
         `uvm_info("RC_CAM", $sformatf("  Bus %0d is not below the Root Port -> FFFFFFFFh (Master Abort)", bus), UVM_LOW)
         data = 32'hFFFF_FFFF;
         ok   = 1'b0;
         return;
       end
-      cfg_request(1'b0, bus, dev, fn, off, (r == 1), 32'h0, 4'hF, host_bridge.config_data_reg, status, ok);
-      data = host_bridge.config_data_reg;
+      cfg_request(1'b0, bus, dev, fn, off, (r == 1), 32'h0, 4'hF, config_data_reg, status, ok);
+      data = config_data_reg;
       `uvm_info("RC_CAM", $sformatf("  IO_RD 0CFCh (CONFIG_DATA)    => %08h", data), UVM_LOW)
       return;
     end
@@ -588,7 +741,8 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
 
   //========================================================================
   // cfg_request : HOST BRIDGE -> one Configuration Request TLP + wait for
-  //   its completion. tgt_bus / type1 come from CONFIG_ADDRESS (CF8).
+  //   its completion. tgt_bus / type1 come from the decoded ECAM address
+  //   or from CONFIG_ADDRESS (CAM).
   //========================================================================
   task cfg_request(input  bit        is_write,
                    input  bit [7:0]  tgt_bus,
@@ -663,7 +817,10 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
     if (is_write) n_cfg_wr++; else n_cfg_rd++;
     if (first_request) begin
       first_request = 1'b0;
-      `uvm_info("RC_ENUM", "  (first request : link training + DL init were done by the driver with this item)", UVM_LOW)
+      if (link_up_first)
+        `uvm_info("RC_ENUM", "  (first request : link was already up - LTSSM L0 + DL_ACTIVE done by the driver before enumeration)", UVM_LOW)
+      else
+        `uvm_info("RC_ENUM", "  (first request : link training + DL init were done by the driver with this item)", UVM_LOW)
     end
 
     // ---- wait for the completion with the same tag ----
@@ -701,7 +858,7 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
   endtask
 
   //========================================================================
-  // STEP 8 : summary
+  // STEP 7 : summary
   //========================================================================
   function void print_summary();
     string s;
@@ -714,45 +871,5 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
     `uvm_info("RC_ENUM", s, UVM_NONE)
   endfunction
 
-  //========================================================================
-  // small name helpers (for the log only)
-  //========================================================================
-  function string cap_name(bit [7:0] id);
-    case (id)
-      8'h01: return "Power Management";
-      8'h05: return "MSI";
-      8'h09: return "Vendor Specific";
-      8'h10: return "PCI Express";
-      8'h11: return "MSI-X";
-      default: return "other";
-    endcase
-  endfunction
-
-  function string speed_name(bit [3:0] s);
-    case (s)
-      4'h1: return "2.5GT/s";
-      4'h2: return "5GT/s";
-      4'h3: return "8GT/s";
-      4'h4: return "16GT/s";
-      4'h5: return "32GT/s";
-      4'h6: return "64GT/s";
-      default: return $sformatf("?(%0h)", s);
-    endcase
-  endfunction
-
-  function string port_type_name(bit [3:0] t);
-    case (t)
-      4'h0: return "PCIe Endpoint";
-      4'h1: return "Legacy Endpoint";
-      4'h4: return "Root Port";
-      4'h5: return "Upstream Switch Port";
-      4'h6: return "Downstream Switch Port";
-      4'h9: return "RCiEP";
-      default: return "other";
-    endcase
-  endfunction
-
 endclass
-
-
 

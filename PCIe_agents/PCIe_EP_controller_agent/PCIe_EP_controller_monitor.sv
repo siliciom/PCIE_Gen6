@@ -601,7 +601,7 @@ if (pcie_seq_item.tx_valid) begin
 
     // remove first 232 elements in queue.
    do begin
-	   item.data_q_ep_mon_con_tx.pop_front();
+	   void'(item.data_q_ep_mon_con_tx.pop_front());
    end
    while(item.data_q_ep_mon_con_tx.size() > 61 );
 
@@ -629,7 +629,7 @@ if (pcie_seq_item.tx_valid) begin
     
     // remove first 232 elements in queue.
    do begin
-	   item.data_q_ep_mon_con_rx.pop_front();
+	   void'(item.data_q_ep_mon_con_rx.pop_front());
    end
    while(item.data_q_ep_mon_con_rx.size() > 61 );
    

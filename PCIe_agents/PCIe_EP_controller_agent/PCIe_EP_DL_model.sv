@@ -269,14 +269,14 @@ class PCIe_EP_DL_model extends uvm_component;
 
   // Builds a control flit (ACK or NAK, is_payload=0) using the currently
   // scheduled state, and pushes it to the PL model.
-  task send_dl_control_flit();
+  function void send_dl_control_flit();
      PCIe_sequence_item ctl_item;
      ctl_item = PCIe_sequence_item::type_id::create("ctl_item");
 //     ctl_item.pkt_mode = link_mode;
      form_dl_packet(ctl_item.tlp_data, 1'b0, ctl_item.dlp_flit_out);
      flit_cnt_count(1'b1, ctl_item.dlp_flit_out);   // [FLIT_CNT] TX
      dl_ap.write(ctl_item);
-  endtask
+  endfunction
 
   // Re-sends flits from the TX retry buffer that the peer has NAKed.
   // Standard replay: all flits with seq_num >= the replay start point.
@@ -465,7 +465,7 @@ class PCIe_EP_DL_model extends uvm_component;
   // =========================================================================
 
   // Standard NAK implementation
-  task standard_nak_procedure();
+  function void standard_nak_procedure();
     if (duplicate_sequence_number()) begin
       if (NAK_SCHEDULED) discard_flit(0);
       else execute_nak_schedule(2);
@@ -477,10 +477,10 @@ class PCIe_EP_DL_model extends uvm_component;
       if (NAK_SCHEDULED) discard_flit(0);
       else execute_nak_schedule(2);
     end
-  endtask
+  endfunction
 
   // Selective NAK implementation
-  task selective_nak_procedure();
+  function void selective_nak_procedure();
     if (duplicate_sequence_number()) discard_flit(0);
     else if (received_explicit_seq && (IMPLICIT_RX_FLIT_SEQ_NUM == NEXT_EXPECTED_RX_FLIT_SEQ_NUM)) begin
       if (RX_RETRY_BUFFER_OVERFLOW) execute_nak_schedule(5);
@@ -491,7 +491,7 @@ class PCIe_EP_DL_model extends uvm_component;
       else execute_nak_schedule(3);
     end
     else execute_nak_schedule(2);
-  endtask
+  endfunction
 
   // Retry buffer manipulation
   task store_flit_in_rx_retry_buffer();
@@ -501,7 +501,7 @@ class PCIe_EP_DL_model extends uvm_component;
   endtask
 
   // Handle payload with failure
-  task handle_payload_withdrawal_failure(bit is_nop);
+  function void handle_payload_withdrawal_failure(bit is_nop);
     NAK_WITHDRAWAL_ALLOWED = 1'b0;
     if (is_nop) begin
       NAK_SCHEDULED = 1'b1;
@@ -516,7 +516,7 @@ class PCIe_EP_DL_model extends uvm_component;
         selective_nak_procedure();
       end
     end
-  endtask
+  endfunction
 
   function bit bad_sequence_number();
     `uvm_info("EP_DL_MODEL",$sformatf("BAD_SEQUENCE_NUMBER :: NEXT_EXPECTED_RX_FLIT_SEQ_NUM = %d :: IMPLICIT_RX_FLIT_SEQ_NUM = %d",NEXT_EXPECTED_RX_FLIT_SEQ_NUM,IMPLICIT_RX_FLIT_SEQ_NUM),UVM_LOW);
@@ -533,7 +533,7 @@ class PCIe_EP_DL_model extends uvm_component;
   endfunction
 
   // FLIT MODE PACKET CREATION DLP
-  task form_dl_packet(
+  function void form_dl_packet(
     input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,
     input bit is_payload,
     output bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out
@@ -600,10 +600,10 @@ class PCIe_EP_DL_model extends uvm_component;
     `uvm_info("EP_DL_MODEL",$sformatf("replay_cmd = %d :: is_payload = %d :: dllp_sequence_number = %0h :: dlp = %p",replay_cmd,is_payload,{dlp[0][1:0],dlp[1]},dl_flit_out),UVM_LOW);
 
     store_tx_retry_buffer(tlp_data, seq_num_to_send);
-  endtask
+  endfunction
 
   // Discard the flit
-  task discard_flit(int discard_type);
+  function void discard_flit(int discard_type);
     `uvm_info("EP_DL_MODEL","Entered the discard flit task 0",UVM_LOW);
     NAK_WITHDRAWAL_ALLOWED = 1'b0;
 
@@ -621,15 +621,15 @@ class PCIe_EP_DL_model extends uvm_component;
         `uvm_info("EP_DL_MODEL","VIP FATAL: Flit Discard 2 - Protocol Violation detected.",UVM_LOW);
       end
     endcase
-  endtask
+  endfunction
 
   // Log the receiver error in register
-  task log_data_link_protocol_error();
+  function void log_data_link_protocol_error();
     `uvm_info("EP_DL_MODEL","ERROR: Data Link Protocol Error Logged",UVM_LOW);
-  endtask
+  endfunction
 
   // NAK Schedule Implementation
-  task execute_nak_schedule(int id);
+  function void execute_nak_schedule(int id);
     `uvm_info("EP_DL_MODEL","Entered nak schedule task",UVM_LOW);
 
     case (id)
@@ -697,10 +697,10 @@ class PCIe_EP_DL_model extends uvm_component;
         NAK_SCHEDULED_TYPE = STANDARD_NAK;
       end
     endcase
-  endtask
+  endfunction
 
   // ACK Schedule Implementation
-  task execute_ack_schedule(int id);
+  function void execute_ack_schedule(int id);
     `uvm_info("EP_DL_MODEL","Entered execute ack schedule",UVM_LOW);
 
     case (id)
@@ -735,11 +735,11 @@ class PCIe_EP_DL_model extends uvm_component;
         NEXT_EXPECTED_RX_FLIT_SEQ_NUM = mod1023_add(IMPLICIT_RX_FLIT_SEQ_NUM, 10'h1);
       end
     endcase
-  endtask
+  endfunction
 
   // RX_EP
   // Handling the incoming flit and passing info to EP
-  task handle_incoming_flit(bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp, bit is_valid);
+  function void handle_incoming_flit(bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp, bit is_valid);
     bit [`PCIe_FLIT_USAGE_W-1:0] is_nop;
     bit prior_was_payload;
     bit [`PCIe_SEQ_NUM_W-1:0] sequence_number;
@@ -828,11 +828,11 @@ class PCIe_EP_DL_model extends uvm_component;
         end
       end
     end
-  endtask
+  endfunction
 
   // RC_TX logic
   // TX logic handling
-  task process_received_ack_nak(bit [`PCIe_SEQ_NUM_W-1:0] N, bit [`PCIe_REPLAY_CMD_W-1:0] replay_cmd);
+  function void process_received_ack_nak(bit [`PCIe_SEQ_NUM_W-1:0] N, bit [`PCIe_REPLAY_CMD_W-1:0] replay_cmd);
     bit guard_future;
     bit guard_past;
     bit is_ack;
@@ -889,14 +889,14 @@ class PCIe_EP_DL_model extends uvm_component;
 
       schedule_replay(N + 10'h1);
     end
-  endtask
+  endfunction
 
   // Modulo 1023 check: Is sequence S "older than or including" N?
   function automatic bit is_older_than_or_including(bit [`PCIe_SEQ_NUM_W-1:0] S, bit [`PCIe_SEQ_NUM_W-1:0] N);
     return (mod1023_sub(N,S) <= MAX_UNACKNOWLEDGED_FLITS);
   endfunction
 
-  task purge_tx_retry_buffer(bit [`PCIe_SEQ_NUM_W-1:0] N);
+  function void purge_tx_retry_buffer(bit [`PCIe_SEQ_NUM_W-1:0] N);
     `uvm_info("EP_DL_MODEL",$sformatf("PURGING: Entry size of buffer :: %d",tx_retry_buffer.size()),UVM_LOW);
 
     while (tx_retry_buffer.size() > 0) begin
@@ -905,30 +905,30 @@ class PCIe_EP_DL_model extends uvm_component;
       `uvm_info("EP_DL_MODEL",$sformatf("Sequence number flit deleted from the buffer is :: S = %d",S),UVM_LOW);
 
       if (is_older_than_or_including(S,N)) begin
-        tx_retry_buffer.pop_front();
+        void'(tx_retry_buffer.pop_front());
       end
       else begin
         break;
       end
     end
-  endtask
+  endfunction
 
-  task schedule_replay(bit [`PCIe_SEQ_NUM_W-1:0] start_seq);
+  function void schedule_replay(bit [`PCIe_SEQ_NUM_W-1:0] start_seq);
     `uvm_info("EP_DL_MODEL","Entered the replay schedule task_",UVM_LOW);
     REPLAY_SCHEDULED = 1'b1;
     EP_REPLAY_IN_PROGRESS = 1'b1;
     TX_REPLAY_FLIT_SEQ_NUM = start_seq;
-  endtask
+  endfunction
 
   // Storing the tx_retry_buffer
-  task store_tx_retry_buffer(
+  function void store_tx_retry_buffer(
     input bit [`PCIe_TLP_DATA_BYTE_W-1:0][`PCIe_BYTE_W-1:0] tlp_data,
     input bit [`PCIe_SEQ_NUM_W-1:0] seq_num
   );
     tx_retry_buffer.push_back('{tlp_data:tlp_data,seq_num:seq_num});
-  endtask
+  endfunction
 
-  task update_implicit_rx_sequence_number(
+  function void update_implicit_rx_sequence_number(
     input bit [`PCIe_SEQ_NUM_W-1:0] N,
     input bit is_valid,
     input bit is_nop,
@@ -977,7 +977,7 @@ class PCIe_EP_DL_model extends uvm_component;
       IMPLICIT_RX_FLIT_SEQ_NUM = mod1023_sub(IMPLICIT_RX_FLIT_SEQ_NUM,10'h1);
       `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_DECREMENTED",UVM_LOW);
     end
-  endtask
+  endfunction
 
   // DL model consumes TL output, creates the DLP, then publishes to PL.
   function void write(PCIe_sequence_item item);

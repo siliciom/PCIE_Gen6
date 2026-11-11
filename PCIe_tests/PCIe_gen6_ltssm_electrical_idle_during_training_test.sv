@@ -30,6 +30,9 @@ class PCIe_gen6_ltssm_electrical_idle_during_training_test extends PCIe_base_tes
   endfunction
 
   function void build_phase(uvm_phase phase);
+    // [ENUM_FIRST] LTSSM testcase : keep the old flow (this test's own first item
+    // drives the LTSSM), so no link-up-first and no enumeration before it.
+    run_enum_first = 1'b0;
     super.build_phase(phase);
     `uvm_info("ELECTRICAL_IDLE_TEST","Entered_electrical_idle_test_build_phase",UVM_LOW)
   endfunction

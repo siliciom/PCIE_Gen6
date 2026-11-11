@@ -39,6 +39,20 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
     // Watchdog: consecutive 1ns polls with no DLLP flit to drive before the
     // DLCMSM is declared stalled (only reached if DLCMSM stops producing flits).
     localparam int unsigned DLCMSM_IDLE_TIMEOUT_POLLS = 100000;
+
+    // [LINK_FIRST] Bring the link up BEFORE taking any item from the sequence.
+    //   link_up_first = 1 : run_phase first runs LTSSM (-> L0) and the DLCMSM
+    //                       (-> DL_ACTIVE) with the driver's own ltssm_item,
+    //                       then triggers "rc_link_ready". Only after that the
+    //                       sequence items (e.g. the enumeration requests) are
+    //                       taken, all through the normal "link is up" path.
+    //   link_up_first = 0 : old behaviour - the FIRST sequence item starts the
+    //                       LTSSM and is then sent as the first TLP (default, so
+    //                       the LTSSM tests that use the first item still work).
+    //   Set from a test : uvm_config_db#(bit)::set(this, "*", "link_up_before_traffic", 1'b1);
+    bit                link_up_first = 1'b0;
+    PCIe_sequence_item ltssm_item;               // driver-owned item used only for link training
+    uvm_event          link_ready_event;         // global "rc_link_ready" : L0 + DL_ACTIVE reached
    function new(string name="PCIe_RC_controller_driver", uvm_component parent);
      super.new(name,parent);
      tx_tl_ap=new("tx_tl_ap",this);
@@ -52,6 +66,12 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
       nak_item = PCIe_sequence_item::type_id::create("nak_item");
       ack_item=PCIe_sequence_item::type_id::create("ack_item");
     dl_active_event = uvm_event_pool::get_global("dl_active_event");
+    // [LINK_FIRST] option + "link ready" event (the enumeration sequence waits on it)
+    void'(uvm_config_db#(bit)::get(this, "", "link_up_before_traffic", link_up_first));
+    link_ready_event = uvm_event_pool::get_global("rc_link_ready");
+    `uvm_info("RC_CONTROLLER", $sformatf("LINK_UP_BEFORE_TRAFFIC = %0b (%s)", link_up_first,
+              link_up_first ? "driver brings the link up first, then takes sequence items"
+                            : "first sequence item starts the LTSSM"), UVM_LOW)
       if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf_tx))
        `uvm_fatal("NO_VIF", "RC_PIPE_INTERFACE_not_found")
  
@@ -63,6 +83,13 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
 task run_phase(uvm_phase phase);
       `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
       `uvm_info("RC_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",rc_dl_model.DL_STATE.name()),UVM_LOW)
+
+      // [LINK_FIRST] LTSSM (L0) + DLCMSM (DL_ACTIVE) first, no sequence item used.
+      // After this, rc_pl_model.link_up = 1, so the loop below goes straight to the
+      // "link is up" branch and sends EVERY sequence item (the 1st one included)
+      // as a normal TLP.
+      if (link_up_first) bring_link_up();
+
       forever begin
       if (!rc_pl_model.link_up) begin
          seq_item_port.try_next_item(pcie_seq_item);
@@ -142,6 +169,57 @@ end
       end
      end
    endtask
+
+  //--------------------------------------------------------------------------
+  // [LINK_FIRST] bring_link_up : link training BEFORE any sequence item.
+  //   STEP 1 : build the driver's own LTSSM item (Flit mode, normal link-up :
+  //            no electrical-idle / no-receiver test, TxElecIdle = 1)
+  //   STEP 2 : LTSSM  -> rc_pl_model.rc_ltssm()        until L0  (link_up = 1)
+  //   STEP 3 : DLCMSM -> drive_dlcmsm_packets()          until DL_ACTIVE
+  //            (FEATURE, InitFC1, InitFC2 DLLP flits)
+  //   STEP 4 : allow UpdateFC flits and trigger "rc_link_ready"
+  //            -> the enumeration sequence starts sending requests only now.
+  //--------------------------------------------------------------------------
+  task bring_link_up();
+    `uvm_info("RC_LINK_FIRST","==================== LINK UP BEFORE TRAFFIC : START ====================",UVM_LOW)
+
+    // STEP 1 : link-training item (not from the sequence)
+    ltssm_item = PCIe_sequence_item::type_id::create("rc_ltssm_item");
+    if (!ltssm_item.randomize() with {
+          pkt_mode             == FLIT;
+          electrical_idle_test == 1'b0;
+          no_receiver_test     == 1'b0;
+          tx_elec_idle         == 1'b1;
+          txn_type             == PCIe_TL_CFG;
+          dir                  == PCIe_TL_READ;
+          cfg_type1            == 1'b0;
+        })
+      `uvm_fatal("RC_LINK_FIRST","randomize failed for the driver LTSSM item")
+
+    // STEP 2 : LTSSM -> L0
+    `uvm_info("RC_LINK_FIRST","STEP 1 : LTSSM_INITIATED (driver-owned item, no sequence item consumed)",UVM_LOW)
+    rc_pl_model.rc_ltssm(ltssm_item);
+    rc_dl_model.phy_linkup = rc_pl_model.link_up;
+    if (!rc_pl_model.link_up) begin
+      `uvm_error("RC_LINK_FIRST","LTSSM_DID_NOT_REACH_L0 :: link_up=0 - sequence items will start the LTSSM again")
+      return;
+    end
+    `uvm_info("RC_LINK_FIRST","STEP 2 : LTSSM_REACHED_L0 :: LINK_UP=1 :: STARTING_DLCMSM_PACKET_DRIVE",UVM_LOW)
+
+    // STEP 3 : DLCMSM -> DL_ACTIVE
+    drive_dlcmsm_packets(ltssm_item);
+    tl_link_active = rc_dl_model.dl_link_active;
+    if (!rc_dl_model.dl_link_active) begin
+      `uvm_error("RC_LINK_FIRST","DL_ACTIVE_NOT_REACHED :: link is up but the Data Link Layer is not active")
+      return;
+    end
+
+    // STEP 4 : traffic may start
+    rc_dl_model.fc_tx_allowed = 1'b1;          // UpdateFC flits allowed from now on
+    `uvm_info("RC_LINK_FIRST","STEP 3 : DL_ACTIVE=1 :: LINK READY (LTSSM L0 + DL_ACTIVE) -> sequence items (enumeration) can start",UVM_LOW)
+    link_ready_event.trigger();
+    `uvm_info("RC_LINK_FIRST","==================== LINK UP BEFORE TRAFFIC : DONE =====================",UVM_LOW)
+  endtask
 
   //--------------------------------------------------------------------------
   // [FLIT_SEG] send_request : TL -> DL -> PL -> PIPE for one sequence item.

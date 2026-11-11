@@ -573,7 +573,7 @@ endfunction
 
 
   // FLIT MODE PACKET CREATION DLP
-  task form_dl_packet(input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,input bit is_payload,output bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out);
+  function void form_dl_packet(input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,input bit is_payload,output bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out);
 
     bit [`PCIe_SEQ_NUM_W-1:0] seq_num_to_send;
     bit [`PCIe_REPLAY_CMD_W-1:0] replay_command;
@@ -634,7 +634,7 @@ endfunction
     `uvm_info("RC_DL_MODEL",$sformatf("replay_cmd=%d :: is_payload=%d :: dllp_sequence_number=%0h :: dlp=%p",replay_command,is_payload,{dlp[0][1:0],dlp[1]},dl_flit_out),UVM_LOW);
 
     store_tx_retry_buffer(tlp_data,seq_num_to_send);
-  endtask
+  endfunction
 
   
   //--------------------------------------------------------------------------
@@ -1242,7 +1242,7 @@ endfunction
       `uvm_info("RC_DL_MODEL",$sformatf("Sequence number flit deleted from the buffer is ::S=%d, tx_retry_buffer=%p",S,tx_retry_buffer),UVM_LOW);
 
       if(is_older_than_or_including(S,N))
-        tx_retry_buffer.pop_front();
+        void'(tx_retry_buffer.pop_front());
       else
         break;
     end
@@ -1261,10 +1261,10 @@ endfunction
 
 
   // Storing the tx_retry_buffer
-  task store_tx_retry_buffer(input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,input bit [`PCIe_SEQ_NUM_W-1:0] seq_num);
+  function void store_tx_retry_buffer(input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,input bit [`PCIe_SEQ_NUM_W-1:0] seq_num);
     tx_retry_buffer.push_back('{tlp_data:tlp_data,seq_num:seq_num});
   //  `uvm_info("RC_DL_MODEL",$sformatf("The Retry Buffer Content is %p",tx_retry_buffer),UVM_LOW);
-  endtask
+  endfunction
 
 
   task update_implicit_rx_sequence_number(input bit [`PCIe_SEQ_NUM_W-1:0] N,input bit is_valid,input bit is_nop,input bit is_payload,input bit is_explicit,input bit is_idle,input bit prior_was_payload);

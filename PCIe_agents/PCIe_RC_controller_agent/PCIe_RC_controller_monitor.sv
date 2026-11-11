@@ -277,7 +277,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             // [ADDED] keep only the trailing 64 tx dwords = current 256B flit (RC->EP)
             rc_tx_256b_flit_dword_q.push_back(descrambled_data);
             if (rc_tx_256b_flit_dword_q.size() > 64)
-               rc_tx_256b_flit_dword_q.pop_front();
+               void'(rc_tx_256b_flit_dword_q.pop_front());
 
             // [ADDED] once per 64-dword flit boundary (after the 232 training
             // dwords), rebuild the full 256B flit sent by RC on tx.data after
@@ -616,7 +616,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
    bit [31:0] word;
    // remove first 232 elements in queue.
    do begin
-	   item.data_q_rc_mon_con_tx.pop_front();
+	   void'(item.data_q_rc_mon_con_tx.pop_front());
    end
    while(item.data_q_rc_mon_con_tx.size() > 61 );
   

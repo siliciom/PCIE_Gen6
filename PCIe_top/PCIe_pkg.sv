@@ -27,7 +27,7 @@ package PCIe_pkg;
 `include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_TL_model.sv"
 	// [ORDERING] PCIe 6.1 Table 2-42 ordering rules (used by PCIe_ordering_checker)
 	`include "../PCIe_agents/PCIe_ordering_rules.sv"
-	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_config_access.sv"   // [CAM] CF8 / CFC registers
+	
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_PL_model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_TL_model.sv"
@@ -82,6 +82,7 @@ package PCIe_pkg;
 
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd0_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd0_sequence.sv"
+	`include "../PCIe_config/PCIe_RC_enumeration_params.sv"     // [ENUM] offsets, CAM ports, ECAM window
 	`include "../PCIe_sequences/PCIe_RC_enumeration_sequence.sv"   // [ENUM]
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd1_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd1_sequence.sv"

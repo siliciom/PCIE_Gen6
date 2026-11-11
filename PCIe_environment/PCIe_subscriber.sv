@@ -303,8 +303,8 @@ function void build_phase(uvm_phase phase);
          pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item") ;
       if (!uvm_config_db#(PCIe_env_config)::get(this, "", "PCIe_env_config", pcie_ecfg))
          `uvm_fatal("PCIe_SUBSCRIBER","Cannot_get_PCIe_env_config")
-      uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf);
-      uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf);
+      void'(uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf));
+      void'(uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf));
      `uvm_info("PCIe_SUBSCRIBER","EXIT_FROM_SUB_BUILD_PHASE",UVM_LOW)
     endfunction
 

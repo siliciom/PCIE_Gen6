@@ -1735,12 +1735,12 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       unsupported = 1'b1;
       `uvm_warning("EP_TL_CFG",
         $sformatf("CFG_%s_OUT_OF_RANGE : byte_offset=0x%03h (DW idx=%0d) is beyond the %0d byte modelled header - completing UR",
-                   (op == PCIe_TL_MEM_OP_WRITE) ? "WRITE" : "READ",
+                   (op == PCIe_TL_CFG_WRITE) ? "WRITE" : "READ",
                    byte_offset, idx, `PCIe_TL_CFG_HDR_BYTES))
       return;
     end
 
-    if (op == PCIe_TL_MEM_OP_READ) begin
+    if (op == PCIe_TL_CFG_READ) begin
       rdata = space[idx];
       `uvm_info("EP_TL_CFG",
         $sformatf("CFG_READ  : byte_offset=0x%03h (DW idx=%0d) => %08h", byte_offset, idx, rdata), UVM_LOW)
