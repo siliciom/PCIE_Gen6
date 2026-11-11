@@ -58,7 +58,7 @@ class PCIe_RC_3DW_Flit_MemRd_MinPayload_sequence extends PCIe_RC_controller_base
          tag          == 14'h0010;
          requester_id == 16'h0100;
 
-         tc   == 3'h0;
+         tc   == 3'b110;
          ts   == 3'b000;
          attr == 3'b000;
 

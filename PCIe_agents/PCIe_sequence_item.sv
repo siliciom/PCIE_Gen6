@@ -47,6 +47,11 @@ class PCIe_sequence_item extends uvm_sequence_item;
        bit [`PCIe_TL_CPL_ID_W-1:0] completer_id;  // Completer ID (for CPL/CFG)
   rand bit [`PCIe_TL_TAG_W-1:0]    tag;           // Transaction tag
   rand bit [`PCIe_TL_TC_W-1:0]     tc;            // Traffic Class
+         vc_id_e                     vc;            // resolved by map_tc_to_vc()
+  static vc_id_e      tc2vc_table [8] = '{VC0, VC1, VC2, VC3, VC4, VC5, VC6, VC7};
+  static int unsigned num_vc     = `PCIe_NUM_VC_DEFAULT;
+  static bit [7:0]    vc_en_mask = 8'h01;
+  static bit [7:0]    tc_en_mask = 8'h01;
   rand bit [`PCIe_TL_ATTR_W-1:0]   attr;          // Attributes {IDO, relaxed, no-snoop}
   rand bit        td;                // TLP Digest present
   rand bit        ep;                // Poisoned / Error present
@@ -383,6 +388,7 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_int  (completer_id,   UVM_ALL_ON | UVM_HEX)
     `uvm_field_int  (tag,            UVM_ALL_ON | UVM_HEX)
     `uvm_field_int  (tc,             UVM_ALL_ON)
+    `uvm_field_enum (vc_id_e, vc,    UVM_ALL_ON)                 // [TC_VC]
     `uvm_field_int  (attr,           UVM_ALL_ON)
     `uvm_field_int  (td,             UVM_ALL_ON)
     `uvm_field_int  (ep,             UVM_ALL_ON)
@@ -505,10 +511,20 @@ class PCIe_sequence_item extends uvm_sequence_item;
     }
   }
 
- constraint c_mem_tc { if(txn_type == PCIe_TL_MEM) {
-	 tc == 3'b000;
-	 }
-	 }
+ // [TC_VC] OLD : MEM was always TC0
+ //   constraint c_mem_tc { if(txn_type == PCIe_TL_MEM) { tc == 3'b000; } }
+ // [TC_VC] NEW : TC / VC rules (PCIe Base 6.0 Sec 2.5.3, 2.2.7, 6.5)
+ //   * TC must be mapped to an ENABLED VC, otherwise the TLP is Malformed at
+ //     the receiver (Sec 2.5.3). Default tc_en_mask = 8'h01 -> only TC0, i.e.
+ //     exactly the old behaviour for every existing sequence.
+ //   * TC1..TC7 : only Memory Read / Memory Write / Deferrable Memory Write.
+ //     IO / CFG must be TC0 (also c_io_cfg_rules), MRdLk is limited to TC0
+ //     (Sec 6.5), messages are kept on TC0 in this bench.
+ constraint c_mem_tc {
+   ((tc_en_mask >> tc) & 8'h01) == 8'h01;
+   if (txn_type != PCIe_TL_MEM) tc == 3'b000;//if (txn_type inside {PCIe_TL_IO, PCIe_TL_CFG, PCIe_TL_MSG}) tc == 3'b000;
+   if (mem_locked)              tc == 3'b000;
+ }
 constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)); }
 	 
 
@@ -815,6 +831,7 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   //   All the static helpers below are shared by the TL and DL models.
   //==========================================================================
   pcie_fc_kind_e fc_kind;
+  bit [2:0]      fc_vc;                  // [TC_VC] VC these FC values belong to (DLLP VC ID)
   string         fc_origin;              // "RC_TL", "EP_DL", ...
   string         fc_reason;              // MANDATORY / WATERMARK / PERIODIC ...
   bit [2:0]      fc_cls_mask = 3'b000;   // classes this transaction applies to
@@ -851,8 +868,8 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   endfunction
 
   function string fc_convert2string();
-    return $sformatf("%s from %s mask=%03b mask_shr=%03b reason=%s :: %s",
-                     fc_kind.name(), fc_origin, fc_cls_mask, fc_cls_mask_shr, fc_reason, fc_values_str());
+    return $sformatf("%s from %s VC%0d mask=%03b mask_shr=%03b reason=%s :: %s",
+                     fc_kind.name(), fc_origin, fc_vc, fc_cls_mask, fc_cls_mask_shr, fc_reason, fc_values_str());
   endfunction
 
   // (a - b) mod 2^bits
@@ -990,6 +1007,70 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
                      ds, dfc, (ds == 2'b00 && dfc == 0) ? "(INF)" : "");
   endfunction
 
+  //==========================================================================
+  // [TC_VC] TRAFFIC CLASS -> VIRTUAL CHANNEL MAPPING  (PCIe Base 6.0 Sec 2.5)
+  //==========================================================================
+  // Gen3 style : vc is resolved from tc right after randomize()
+  function void post_randomize();
+    void'(map_tc_to_vc());
+  endfunction
+
+  // VC of this TLP from its TC (also used for items built without randomize()).
+  // Mirrors the TC/VC Map field of the VC Resource Control Register (Sec 7.9.1.7).
+  function vc_id_e map_tc_to_vc();
+    vc = tc2vc_table[tc];
+    return vc;
+  endfunction
+
+  static function vc_id_e vc_of_tc(bit [2:0] t);
+    return tc2vc_table[t];
+  endfunction
+
+  static function bit vc_enabled(int unsigned v);
+    return (v < `PCIe_NUM_VC_MAX) && vc_en_mask[v];
+  endfunction
+
+  static function bit tc_enabled(bit [2:0] t);
+    return tc_en_mask[t];
+  endfunction
+
+  // Load the Link's VC set-up (called by PCIe_env_config::apply_tc2vc_map()).
+  //   n_vc  : 1..8 VCs enabled, VC0 .. VC(n_vc-1)
+  //   tbl   : tbl[t] = VC of TCt. TC0 -> VC0 is fixed (Sec 2.5.2). A table
+  //           entry holds one VC, so "one TC must not be mapped to multiple VCs"
+  //           always holds. A TC whose VC is not enabled cannot be used.
+  static function void set_tc2vc_table(int unsigned n_vc, vc_id_e tbl [8]);
+    if (n_vc < 1)                 n_vc = 1;
+    if (n_vc > `PCIe_NUM_VC_MAX)  n_vc = `PCIe_NUM_VC_MAX;
+    num_vc     = n_vc;
+    vc_en_mask = 8'h00;
+    for (int v = 0; v < n_vc; v++) vc_en_mask[v] = 1'b1;
+    tc2vc_table = tbl;
+    if (tc2vc_table[0] != VC0) begin
+      // static function : no report object -> global UVM report function
+      uvm_pkg::uvm_report_error("TC_VC_MAP", $sformatf("TC0 must map to VC0 (Sec 2.5.2, fixed) - table had TC0 -> %s, forced to VC0",
+                                tc2vc_table[0].name()), uvm_pkg::UVM_NONE, `uvm_file, `uvm_line);
+      tc2vc_table[0] = VC0;
+    end
+    tc_en_mask = 8'h00;
+    for (int t = 0; t < 8; t++) tc_en_mask[t] = vc_en_mask[tc2vc_table[t]];
+  endfunction
+
+  // 1 when this transaction type may use TC 't' in this bench
+  //   TC0    : MEM (MRd / MWr / MRdLk / DMWr), IO, CFG0/1, MSG, CPL
+  //   TC1..7 : MEM (MRd / MWr / DMWr) only, completions keep the request TC
+  static function bit tc_txn_allowed(pcie_tl_txn_type_e t_type, bit locked, bit [2:0] t);
+    if (t == 3'd0)             return 1'b1;
+    if (t_type == PCIe_TL_CPL) return 1'b1;
+    return (t_type == PCIe_TL_MEM) && !locked;
+  endfunction
+
+  static function string tc_vc_map_str();
+    string s;
+    s = $sformatf("num_vc=%0d vc_en_mask=%08b tc_en_mask=%08b :", num_vc, vc_en_mask, tc_en_mask);
+    for (int t = 0; t < 8; t++)
+      s = {s, $sformatf(" TC%0d->%s", t, tc_en_mask[t] ? tc2vc_table[t].name() : "--")};
+    return s;
+  endfunction
+
 endclass
-
-

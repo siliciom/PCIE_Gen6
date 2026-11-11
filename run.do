@@ -9,8 +9,6 @@ set testname "PCIe_gen6_3DW_Flit_MemWr_MinPayload_test"
 #set testname "PCIe_gen6_3DW_Flit_DefMemWr_MaxPayload_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_MaxPayload_test"
 # [FLIT_SEG] 4DW tests : compile with +define+FORCE_4DW+CONFIG_4DW (see the commented vlog block below)
-#set testname "PCIe_gen6_4DW_Flit_MemWr_MaxPayload_test"
-#set testname "PCIe_gen6_4DW_Flit_DefMemWr_MaxPayload_test"
 #set testname "PCIe_gen6_3DW_Flit_IOWr_test"
 #set testname "PCIe_gen6_3DW_Flit_IORd_test"
 #set testname "PCIe_gen6_3DW_Flit_CFGWr0_test"
@@ -51,7 +49,14 @@ set testname "PCIe_gen6_3DW_Flit_MemWr_MinPayload_test"
 #set testname "PCIe_gen6_4DW_Flit_DefMemWr_Random_test"
 #set testname "PCIe_gen6_4DW_Flit_MemRd_MinPayload_test"
 #set testname "PCIe_gen6_4DW_Flit_MemRd_MaxPayload_test"
- 
+#set testname "PCIe_gen6_4DW_Flit_MemRd_Random_test"
+#set testname "PCIe_gen6_4DW_Flit_MemRdlock_MinPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_MemRdlock_MaxPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_MemRdlock_Random_test"
+#set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_MinPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_MaxPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_Random_test"
+#set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
  
 vlib work
 vmap work work

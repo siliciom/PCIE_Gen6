@@ -415,7 +415,7 @@ class PCIe_RC_PL_model extends uvm_component;
        time start_time;
        start_time = $time;
        while (($time - start_time) < timeout_ns) begin
-          @(posedge rc_pipe_intf_rx.pclk);
+          @(posedge rc_pipe_intf_tx.pclk);
        end
     endtask
 
