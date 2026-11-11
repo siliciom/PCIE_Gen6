@@ -39,6 +39,11 @@ class PCIe_RC_TL_model extends uvm_component;
   // [ADDED] Input from RC DL model : 236B TLP region of every good payload flit
   // (connected in PCIe_RC_controller_agent : rc_dl_model.rc_dl_tl_ap -> rc_tl_model.dl_tl_imp)
   uvm_analysis_imp_dl_rx #(PCIe_sequence_item, PCIe_RC_TL_model) dl_tl_imp;
+
+  // [TL_COV] Output toward PCIe_subscriber : every received Completion AFTER
+  // it is decoded in write_dl_rx() (connected in PCIe_environment.sv to
+  // pcie_subscriber.rc_rx_tl_imp). One write per CplD part.
+  uvm_analysis_port #(PCIe_sequence_item) rx_decoded_ap;
   int unsigned n_tlp_rcvd;   // TLPs received from the DL model
   int unsigned n_cpl_rcvd;   // of which Cpl / CplD
 
@@ -840,6 +845,7 @@ class PCIe_RC_TL_model extends uvm_component;
      fc_dl_ap  = new("fc_dl_ap",  this);
      fc_dl_imp = new("fc_dl_imp", this);
      dl_tl_imp = new("dl_tl_imp", this);   // [ADDED] DL -> TL received TLP path
+     rx_decoded_ap = new("rx_decoded_ap", this);   // [TL_COV] decoded Completion -> subscriber
      n_tlp_rcvd = 0;
      n_cpl_rcvd = 0;
      n_seg_txn      = 0;   // [FLIT_SEG]
@@ -1015,6 +1021,17 @@ class PCIe_RC_TL_model extends uvm_component;
     cpl_it.cpl_data      = new[payload_dw];
     for (int i = 0; i < payload_dw; i++)
       cpl_it.cpl_data[i] = rc_rx_get_dw(item, hdr_dw + i);
+
+    // [TL_COV] header fields used by the TL coverage (rc_rx_tl_cg)
+    //   Lower Address = {DW1[14], DW2[15:12], OHC-A5 [4:3]} (OHC-A5 absent -> [1:0] = 00)
+    cpl_it.tc            = tc;
+    cpl_it.attr          = attr;
+    cpl_it.ts            = ts;
+    cpl_it.ep            = ep_bit;
+    cpl_it.ohc           = ohc;
+    cpl_it.lower_address = {dw1[14], la_hi,
+                            ohc[0] ? dw3[`PCIe_TL_OHCA5_LA_HI : `PCIe_TL_OHCA5_LA_LO] : 2'b00};
+    rx_decoded_ap.write(cpl_it);   // [TL_COV] -> PCIe_subscriber::write_rc_rx_tl()
 
     if (outstanding.exists(cpl_it.tag) && !cpl_req_of.exists(cpl_it.tag))
       cpl_req_of[cpl_it.tag] = outstanding[cpl_it.tag];

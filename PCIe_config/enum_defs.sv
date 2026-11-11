@@ -159,6 +159,17 @@ package typedef_enums;
   } pkt_mode_e;
 
   //--------------------------------------------------------------------------
+  // [PL_COV] pcie_cov_dir_e - coverage routing tag : which control-signal
+  //          section (PL TX / PL RX) a monitor-sourced coverage transaction
+  //          belongs to. Set by the RC / EP controller monitors, used by
+  //          write_rc() / write_ep() in PCIe_subscriber.
+  //--------------------------------------------------------------------------
+  typedef enum logic {
+    PCIE_COV_TX = 1'b0,
+    PCIE_COV_RX = 1'b1
+  } pcie_cov_dir_e;
+
+  //--------------------------------------------------------------------------
   // ohc_a_type_e - Orthogonal Header Content, category A sub-type
   //--------------------------------------------------------------------------
   typedef enum {

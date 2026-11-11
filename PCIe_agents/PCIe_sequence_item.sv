@@ -93,7 +93,32 @@ class PCIe_sequence_item extends uvm_sequence_item;
   // Data-Link layer fields (stamped by the DL model)
   //--------------------------------------------------------------------------
   bit [`PCIe_DL_SEQNUM_W-1:0] dl_seq_num;   // TLP sequence number
+                                            // [DL_COV] also used for the 10-bit flit seq num {dlp[0][1:0], dlp[1]}
   pcie_dllp_type_e            dllp_type = PCIe_DLLP_NONE; // ACK/NAK when a DLLP
+
+  //--------------------------------------------------------------------------
+  // [DL_COV] Decoded DLP fields of a RECEIVED flit
+  //   Filled by the RC / EP DL model (write_*_mon_242b) and sent to the
+  //   subscriber on rc_dl_cov_ap / ep_dl_cov_ap (same style as TL coverage).
+  //   dl_seq_num above carries the flit sequence number.
+  //--------------------------------------------------------------------------
+  bit [1:0] dl_flit_usage;   // dlp[0][7:6] : 00 = NOP/idle, 01 = payload
+  bit       dl_prior_pay;    // dlp[0][5]   : prior flit was payload
+  bit [1:0] dl_replay_cmd;   // dlp[0][3:2] : 00 seq num, 01 ACK, 10 std NAK, 11 sel NAK
+  bit [7:0] dl_dllp_type;    // dlp[2]      : first DLLP byte
+
+  // [DL_COV] DLP0[4] + DLP2..DLP5 decoded fields (spec Table 4-17, Figure 3-9 / 3-10)
+  //   32-bit DLLP = {dlp[2], dlp[3], dlp[4], dlp[5]}, decoded with fc_decode()
+  bit        dl_dllp_pay_type; // dlp[0][4]  : 0 = DLLP, 1 = Optimized_Update_FC / Flit_Marker
+  bit        dl_is_fc;         // 1 = InitFC1 / InitFC2 / UpdateFC (fc_is_dllp)
+  bit [1:0]  dl_fc_type;       // [31:30]    : 01 InitFC1, 11 InitFC2, 10 UpdateFC
+  bit [1:0]  dl_fc_cls;        // [29:28]    : 00 P, 01 NP, 10 Cpl
+  bit        dl_fc_shared;     // [27]       : 1 = shared, 0 = dedicated (wire bit is inverted)
+  bit [2:0]  dl_fc_vc;         // [26:24]    : VC
+  bit [1:0]  dl_fc_hscale;     // [23:22]    : HdrScale
+  bit [7:0]  dl_fc_hdr;        // [21:14]    : HdrFC
+  bit [1:0]  dl_fc_dscale;     // [13:12]    : DataScale
+  bit [11:0] dl_fc_data;       // [11:0]     : DataFC
 
   //--------------------------------------------------------------------------
   // Physical layer fields (stamped by the PL model)
@@ -230,6 +255,15 @@ class PCIe_sequence_item extends uvm_sequence_item;
   // Which of the three flit types this item represents (Table 4-16)
   //--------------------------------------------------------------------------
   PCIe_flit_type_e flit_type = PCIe_PAYLOAD_flit;
+
+  //--------------------------------------------------------------------------
+  // [PL_COV] Coverage routing tag : set by the RC / EP controller monitors on
+  //          the coverage transaction (rc_cov_ap / ep_cov_ap) and used by
+  //          write_rc() / write_ep() in PCIe_subscriber.
+  //            PCIE_COV_TX : PIPE TX pins  (tx_valid, tx_elec_idle, tx_detect_rx, powerdown, rate)
+  //            PCIE_COV_RX : PIPE RX pins  (rx_valid, rx_elec_idle, rx_status, phy_status)
+  //--------------------------------------------------------------------------
+  pcie_cov_dir_e cov_dir = PCIE_COV_TX;
 
   //--------------------------------------------------------------------------
   // ECRC  (Section 2.7.1)

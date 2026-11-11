@@ -43,6 +43,10 @@ class PCIe_EP_TL_model extends uvm_component;
   uvm_analysis_imp_mon  #(PCIe_sequence_item, PCIe_EP_TL_model) tl_mon_imp;
   // Output toward the EP DL model (TLPs and generated Completions).
   uvm_analysis_port     #(PCIe_sequence_item) tl_ap;
+  // [TL_COV] Output toward PCIe_subscriber : every received request AFTER
+  // decode_tlp() fills its fields (connected in PCIe_environment.sv to
+  // pcie_subscriber.ep_rx_tl_imp).
+  uvm_analysis_port     #(PCIe_sequence_item) rx_decoded_ap;
 
   PCIe_sequence_item item;
 
@@ -943,6 +947,7 @@ class PCIe_EP_TL_model extends uvm_component;
     tl_imp     = new("tl_imp",     this);
     tl_mon_imp = new("tl_mon_imp", this);
     tl_ap      = new("tl_ap",      this);
+    rx_decoded_ap = new("rx_decoded_ap", this);   // [TL_COV] decoded request -> subscriber
     fc_dl_ap   = new("fc_dl_ap",   this);
     fc_dl_imp  = new("fc_dl_imp",  this);
     fc_init();
@@ -1361,6 +1366,17 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     end
 
     print_decoded_tlp(item);
+
+    // [TL_COV] Message fields (decode_tlp() does not copy them) : Message Code = DW1[7:0]
+    begin
+      bit [`PCIe_TL_DATA_DW_W-1:0] cov_dw1;
+      cov_dw1 = get_dw(item, 1);
+      if (d_txn_type == PCIe_TL_MSG) begin
+        item.msg_code     = cov_dw1[7:0];
+        item.msg_has_data = d_has_data;
+      end
+    end
+    rx_decoded_ap.write(item);   // [TL_COV] -> PCIe_subscriber::write_ep_rx_tl()
 
     // ---- receive side ECRC recalculation (Section 2.7.1) -------------------
     check_ecrc_rx(item);

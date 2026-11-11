@@ -60,11 +60,16 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
    uvm_analysis_port #(PCIe_sequence_item) ep_con_rx_mon_ap;	
    uvm_analysis_port #(PCIe_sequence_item) ep_con_tx_mon_ap;	
  
-   // [ADDED] EP controller monitor -> scoreboard : 256B RC->EP flit (rx.data)
-   // Full 256B flit received at EP after full reverse process (de-precode /
-   // gray-decode / descramble) of the EP rx_data stream. Written once per flit
-   // so the scoreboard compares all 256 received bytes vs RC tx.data.
-   uvm_analysis_port #(PCIe_sequence_item) ep_con_rx_256b_mon_ap;	
+    // [ADDED] EP controller monitor -> scoreboard : 256B RC->EP flit (rx.data)
+    // Full 256B flit received at EP after full reverse process (de-precode /
+    // gray-decode / descramble) of the EP rx_data stream. Written once per flit
+    // so the scoreboard compares all 256 received bytes vs RC tx.data.
+    uvm_analysis_port #(PCIe_sequence_item) ep_con_rx_256b_mon_ap;	
+
+    // [PL_COV] Dedicated EP coverage port. This is intentionally separate
+    // from all scoreboard/DL analysis ports. It sends the same transaction the
+    // monitor already stamps with the RX/TX control fields.
+    uvm_analysis_port #(PCIe_sequence_item) ep_cov_ap;
     
    bit [1:0]  rx_previous_symbol;
    bit [`PCIe_PL_SCRAMBLER_LFSR_W-1:0] rx_lfsr;
@@ -101,6 +106,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
  	  ep_con_rx_mon_ap =new("ep_con_rx_mon_ap",this);
  	  ep_con_tx_mon_ap =new("ep_con_tx_mon_ap",this);
  	  ep_con_rx_256b_mon_ap =new("ep_con_rx_256b_mon_ap",this);
+ 	  ep_cov_ap =new("ep_cov_ap",this);   // [PL_COV]
       // [RECOVERY] ep_pl_model is intentionally NOT created here. PCIe_environment's
       // connect_phase shares the controller agent's single PL model with this
       // monitor. Creating a second instance here spawned a second, orphaned
@@ -162,6 +168,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
        `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
     endtask
   
+
     task receiving_pipe_rx(virtual PCIe_EP_interface ep_pipe_intf_rx);
        bit [`PCIe_MON_DATA_W-1:0] rx_data;
        bit [`PCIe_MON_DATA_W-1:0] deprecoded_data;
@@ -180,16 +187,24 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
        bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
        `uvm_info("EP_CONTROLLER", "ENTERED_INTO_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
-       wait(ep_pipe_intf_rx.rx_valid);
 
        dword_in_os = 0;
 
-       while (ep_pipe_intf_rx.rx_valid) begin
+       // Keep sampling across rx_valid gaps so every received burst and every
+       // idle / Detect clock is seen by the coverage subscriber.
+       while (1) begin
          @(negedge ep_pipe_intf_rx.pclk);
          pcie_seq_item.rx_valid     = ep_pipe_intf_rx.rx_valid;
          pcie_seq_item.rx_elec_idle = ep_pipe_intf_rx.rx_elec_idle;
          pcie_seq_item.rx_status    = ep_pipe_intf_rx.rx_status;
          pcie_seq_item.phy_status   = ep_pipe_intf_rx.phy_status;
+
+         // [PL_COV] Send the RX control fields from this task every pclk,
+         // including the idle / Detect periods where rx_valid is low.
+         pcie_seq_item.cov_dir = PCIE_COV_RX;
+         ep_cov_ap.write(pcie_seq_item);
+
+         if (!pcie_seq_item.rx_valid) continue;
 
          if (pcie_seq_item.rx_valid) begin
             // [MULTI-LANE] Ordered Sets are broadcast on every lane. After the
@@ -336,7 +351,6 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
       `uvm_info("EP_CONTROLLER", "ENTERED_INTO_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_LOW)
-      wait(ep_pipe_intf_tx.tx_valid);
 
       dword_in_os = 0;
 
@@ -349,6 +363,11 @@ pcie_seq_item.tx_elec_idle  = ep_pipe_intf_tx.tx_elec_idle;
 pcie_seq_item.tx_detect_rx  = ep_pipe_intf_tx.tx_detect_rx;
 pcie_seq_item.powerdown     = ep_pipe_intf_tx.powerdown;
 pcie_seq_item.rate          = ep_pipe_intf_tx.rate;
+
+// [PL_COV] Send the TX control fields from this task every pclk,
+// including the idle / Detect / electrical-idle clocks where tx_valid is low.
+pcie_seq_item.cov_dir = PCIE_COV_TX;
+ep_cov_ap.write(pcie_seq_item);
 
 // [RECOVERY] extended by the extra training dwords of a directed Recovery walk
 if (tx_os_dword_count > (1500 + tx_training_dwords() - `PCIe_LINKUP_TRAINING_DWORDS)) break;
@@ -1375,6 +1394,3 @@ if (pcie_seq_item.tx_valid) begin
    `endif
 
 endclass
-
-
-

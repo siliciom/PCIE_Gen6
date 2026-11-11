@@ -32,6 +32,9 @@ class PCIe_EP_DL_model extends uvm_component;
 
   uvm_analysis_port #(PCIe_sequence_item) ep_dl_tl_ap;//dl -> tl
 
+  // [DL_COV] EP DL -> Subscriber : decoded DLP fields of every received flit
+  uvm_analysis_port #(PCIe_sequence_item) ep_dl_cov_ap;
+
     pkt_mode_e dl_rx_pkt_mode = FLIT;
   bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] ep_rx_242b_flit_q[$];   // collected 242B flits (in arrival order)
   bit                                                ep_rx_flit_is_valid_q[$]; // is_valid of each collected flit (same index)
@@ -169,6 +172,7 @@ class PCIe_EP_DL_model extends uvm_component;
     dl_ap = new("dl_ap", this);
     dl_mon_242b_imp = new("dl_mon_242b_imp", this);   // [ADDED]
     ep_dl_tl_ap=new("ep_dl_tl_ap",this);
+    ep_dl_cov_ap = new("ep_dl_cov_ap", this);   // [DL_COV]
     ep_dl_active_event = uvm_event_pool::get_global("ep_dl_active_event");
     uvm_ep_l0_to_dl_ev = uvm_event_pool::get_global("ep_l0_to_dl_event");
     fc_tl_imp = new("fc_tl_imp", this);
@@ -1019,6 +1023,7 @@ class PCIe_EP_DL_model extends uvm_component;
     bit [7:0] fmt_type;
 
     PCIe_sequence_item tl_item;
+    PCIe_sequence_item cov_item;   // [DL_COV] decoded DLP -> subscriber
 
     bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp_copy;
     bit good_copy;
@@ -1091,6 +1096,32 @@ class PCIe_EP_DL_model extends uvm_component;
                 item.is_valid,
                 rx_flit_good),
               UVM_LOW);
+
+
+    // ============================================================
+    // [DL_COV] 4a. Decode the 6 DLP bytes and send to the subscriber
+    //   Same style as TL : the model decodes, the subscriber only samples
+    //   Sent for GOOD and BAD flits (coverage needs both)
+    // ============================================================
+
+    cov_item = PCIe_sequence_item::type_id::create("ep_dl_cov_item");
+    cov_item.dl_flit_usage = received_dlp[0][7:6];                 // 00 = NOP/idle, 01 = payload
+    cov_item.dl_prior_pay  = received_dlp[0][5];                   // prior flit was payload
+    cov_item.dl_replay_cmd = received_dlp[0][3:2];                 // replay command
+    cov_item.dl_seq_num    = {received_dlp[0][1:0], received_dlp[1]};  // 10-bit sequence number
+    cov_item.dl_dllp_type  = received_dlp[2];                      // first DLLP byte
+    // [DL_COV] DLP0[4] + DLP2..DLP5 : 32-bit DLLP decoded with the FC helpers
+    cov_item.dl_dllp_pay_type = received_dlp[0][4];                // 0 = DLLP, 1 = Opt_Update_FC / Flit_Marker
+    cov_item.dl_is_fc         = PCIe_sequence_item::fc_is_dllp(
+                                  {received_dlp[2], received_dlp[3], received_dlp[4], received_dlp[5]});
+    PCIe_sequence_item::fc_decode({received_dlp[2], received_dlp[3], received_dlp[4], received_dlp[5]},
+                                  cov_item.dl_fc_type,   cov_item.dl_fc_cls,
+                                  cov_item.dl_fc_shared, cov_item.dl_fc_vc,
+                                  cov_item.dl_fc_hscale, cov_item.dl_fc_hdr,
+                                  cov_item.dl_fc_dscale, cov_item.dl_fc_data);
+    cov_item.is_valid      = rx_flit_good;                         // 1 = good, 0 = bad flit
+    cov_item.pkt_mode      = dl_rx_pkt_mode;
+    ep_dl_cov_ap.write(cov_item);
 
 
     // ============================================================
