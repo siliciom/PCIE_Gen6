@@ -2171,6 +2171,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
           n_cfg_rd++;
         end
+        if (d_cfg_type1) cfg_ur = 1'b1;
 
         if (cfg_ur) begin
           n_cfg_ur++;
