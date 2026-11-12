@@ -1,0 +1,53 @@
+#==============================================================================
+# File    : regression/testlist_4dw.txt
+# Build   : work_4dw  : +define+PCIE_GEN6_FEC_CRC+FORCE_4DW+CONFIG_4DW
+# Used by : regression/regression.do  (BUILD 4dw or all)
+#
+# Format  : <test_name> [num_seeds] [seed]
+#             num_seeds  default 1
+#             seed       default random (or the SEED knob); give a number to fix it
+#           Lines starting with # are ignored - comment a test out to skip it.
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# 4DW FLIT mode
+#------------------------------------------------------------------------------
+PCIe_gen6_4DW_Flit_DefMemWr_MaxPayload_test
+PCIe_gen6_4DW_Flit_DefMemWr_MinPayload_test
+PCIe_gen6_4DW_Flit_DefMemWr_Random_test
+PCIe_gen6_4DW_Flit_MemRd_MaxPayload_test
+PCIe_gen6_4DW_Flit_MemRd_MinPayload_test
+PCIe_gen6_4DW_Flit_MemRd_Random_test
+PCIe_gen6_4DW_Flit_MemRdlock_MaxPayload_test
+PCIe_gen6_4DW_Flit_MemRdlock_MinPayload_test
+PCIe_gen6_4DW_Flit_MemRdlock_Random_test
+PCIe_gen6_4DW_Flit_MemWr_MaxPayload_test
+PCIe_gen6_4DW_Flit_MemWr_MinPayload_test
+PCIe_gen6_4DW_Flit_MemWr_Random_test
+PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_MaxPayload_test
+PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_MinPayload_test
+PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_Random_test
+PCIe_gen6_4DW_Flit_MsgWr_withdata_test
+PCIe_gen6_4DW_Flit_MsgWr_withoutdata_test
+
+#------------------------------------------------------------------------------
+# 4DW NON-FLIT mode - remove the # to include them
+#------------------------------------------------------------------------------
+#PCIe_gen6_4DW_NonFlit_DefMemWr_MaxPayload_test
+#PCIe_gen6_4DW_NonFlit_DefMemWr_MinPayload_test
+#PCIe_gen6_4DW_NonFlit_DefMemWr_Random_test
+#PCIe_gen6_4DW_NonFlit_MemRd_MaxPayload_test
+#PCIe_gen6_4DW_NonFlit_MemRd_MinPayload_test
+#PCIe_gen6_4DW_NonFlit_MemRd_Random_test
+#PCIe_gen6_4DW_NonFlit_MemRdlock_MaxPayload_test
+#PCIe_gen6_4DW_NonFlit_MemRdlock_MinPayload_test
+#PCIe_gen6_4DW_NonFlit_MemRdlock_Random_test
+#PCIe_gen6_4DW_NonFlit_MemWr_MaxPayload_test
+#PCIe_gen6_4DW_NonFlit_MemWr_MinPayload_test
+#PCIe_gen6_4DW_NonFlit_MemWr_Random_test
+#PCIe_gen6_4DW_NonFlit_MemWr_followed_MemRd_MaxPayload_test
+#PCIe_gen6_4DW_NonFlit_MemWr_followed_MemRd_MinPayload_test
+#PCIe_gen6_4DW_NonFlit_MemWr_followed_MemRd_Random_test
+#PCIe_gen6_4DW_NonFlit_MsgWr_withdata_test
+#PCIe_gen6_4DW_NonFlit_MsgWr_withoutdata_test
+

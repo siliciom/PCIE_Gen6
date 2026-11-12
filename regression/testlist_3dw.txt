@@ -1,0 +1,99 @@
+# File    : regression/testlist_3dw.txt
+# Build   : work_3dw  : +define+PCIE_GEN6_FEC_CRC
+# Used by : regression/regression.do  (BUILD 3dw or all)
+#
+# Format  : <test_name> [num_seeds] [seed]
+#             num_seeds  default 1
+#             seed       default random (or the SEED knob); give a number to fix it
+#           Lines starting with # are ignored - comment a test out to skip it.
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# LTSSM / enumeration (3DW build)
+#------------------------------------------------------------------------------
+PCIe_gen6_enumeration_test
+PCIe_gen6_ltssm_basic_linkup_L0_test
+PCIe_gen6_ltssm_detect_no_receiver_test
+PCIe_gen6_ltssm_disabled_test
+PCIe_gen6_ltssm_electrical_idle_during_training_test
+PCIe_gen6_ltssm_hot_reset_test
+PCIe_gen6_ltssm_loopback_test
+PCIe_gen6_ltssm_recovery_test
+
+#------------------------------------------------------------------------------
+# 3DW FLIT mode
+#------------------------------------------------------------------------------
+PCIe_gen6_3DW_Flit_CFGRd0_Random_test
+PCIe_gen6_3DW_Flit_CFGRd0_test
+PCIe_gen6_3DW_Flit_CFGRd1_Random_test
+PCIe_gen6_3DW_Flit_CFGRd1_test
+PCIe_gen6_3DW_Flit_CFGWr0_Random_test
+PCIe_gen6_3DW_Flit_CFGWr0_followed_CFGRd0_Random_test
+PCIe_gen6_3DW_Flit_CFGWr0_followed_CFGRd0_test
+PCIe_gen6_3DW_Flit_CFGWr0_test
+PCIe_gen6_3DW_Flit_CFGWr1_Random_test
+PCIe_gen6_3DW_Flit_CFGWr1_followed_CFGRd1_Random_test
+PCIe_gen6_3DW_Flit_CFGWr1_followed_CFGRd1_test
+PCIe_gen6_3DW_Flit_CFGWr1_test
+PCIe_gen6_3DW_Flit_DefMemWr_MaxPayload_test
+PCIe_gen6_3DW_Flit_DefMemWr_MinPayload_test
+PCIe_gen6_3DW_Flit_DefMemWr_Random_test
+PCIe_gen6_3DW_Flit_IORd_Random_test
+PCIe_gen6_3DW_Flit_IORd_test
+PCIe_gen6_3DW_Flit_IOWr_Random_test
+PCIe_gen6_3DW_Flit_IOWr_followed_IORd_Random_test
+PCIe_gen6_3DW_Flit_IOWr_followed_IORd_test
+PCIe_gen6_3DW_Flit_IOWr_test
+PCIe_gen6_3DW_Flit_MemRd_MaxPayload_test
+PCIe_gen6_3DW_Flit_MemRd_MinPayload_test
+PCIe_gen6_3DW_Flit_MemRd_Random_test
+PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test
+PCIe_gen6_3DW_Flit_MemRdlock_MaxPayload_test
+PCIe_gen6_3DW_Flit_MemRdlock_MinPayload_test
+PCIe_gen6_3DW_Flit_MemRdlock_Random_test
+PCIe_gen6_3DW_Flit_MemWr_MaxPayload_test
+PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test
+PCIe_gen6_3DW_Flit_MemWr_MinPayload_test
+PCIe_gen6_3DW_Flit_MemWr_Random_test
+PCIe_gen6_3DW_Flit_MemWr_followed_IOWr_test
+PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_MaxPayload_test
+PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_MinPayload_test
+PCIe_gen6_3DW_Flit_MemWr_followed_MemRd_Random_test
+PCIe_gen6_3DW_Flit_MsgWr_withdata_test
+PCIe_gen6_3DW_Flit_MsgWr_withoutdata_test
+
+#------------------------------------------------------------------------------
+# 3DW NON-FLIT mode - remove the # to include them
+#------------------------------------------------------------------------------
+#PCIe_gen6_3DW_NonFlit_CFGRd0_Random_test
+#PCIe_gen6_3DW_NonFlit_CFGRd0_test
+#PCIe_gen6_3DW_NonFlit_CFGRd1_Random_test
+#PCIe_gen6_3DW_NonFlit_CFGRd1_test
+#PCIe_gen6_3DW_NonFlit_CFGWr0_Random_test
+#PCIe_gen6_3DW_NonFlit_CFGWr0_followed_CFGRd0_Random_test
+#PCIe_gen6_3DW_NonFlit_CFGWr0_followed_CFGRd0_test
+#PCIe_gen6_3DW_NonFlit_CFGWr0_test
+#PCIe_gen6_3DW_NonFlit_CFGWr1_Random_test
+#PCIe_gen6_3DW_NonFlit_CFGWr1_followed_CFGRd1_Random_test
+#PCIe_gen6_3DW_NonFlit_CFGWr1_followed_CFGRd1_test
+#PCIe_gen6_3DW_NonFlit_CFGWr1_test
+#PCIe_gen6_3DW_NonFlit_DefMemWr_MaxPayload_test
+#PCIe_gen6_3DW_NonFlit_DefMemWr_MinPayload_test
+#PCIe_gen6_3DW_NonFlit_DefMemWr_Random_test
+#PCIe_gen6_3DW_NonFlit_IORd_Random_test
+#PCIe_gen6_3DW_NonFlit_IORd_test
+#PCIe_gen6_3DW_NonFlit_IOWr_Random_test
+#PCIe_gen6_3DW_NonFlit_IOWr_followed_IORd_Random_test
+#PCIe_gen6_3DW_NonFlit_IOWr_followed_IORd_test
+#PCIe_gen6_3DW_NonFlit_IOWr_test
+#PCIe_gen6_3DW_NonFlit_MemRd_MaxPayload_test
+#PCIe_gen6_3DW_NonFlit_MemRd_MinPayload_test
+#PCIe_gen6_3DW_NonFlit_MemRd_Random_test
+#PCIe_gen6_3DW_NonFlit_MemWr_MaxPayload_test
+#PCIe_gen6_3DW_NonFlit_MemWr_MinPayload_test
+#PCIe_gen6_3DW_NonFlit_MemWr_Random_test
+#PCIe_gen6_3DW_NonFlit_MemWr_followed_MemRd_MaxPayload_test
+#PCIe_gen6_3DW_NonFlit_MemWr_followed_MemRd_MinPayload_test
+#PCIe_gen6_3DW_NonFlit_MemWr_followed_MemRd_Random_test
+#PCIe_gen6_3DW_NonFlit_MsgWr_withdata_test
+#PCIe_gen6_3DW_NonFlit_MsgWr_wothoutdata_test
