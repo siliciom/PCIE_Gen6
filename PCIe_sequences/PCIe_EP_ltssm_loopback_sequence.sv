@@ -19,7 +19,7 @@ class PCIe_EP_ltssm_loopback_sequence extends PCIe_EP_controller_base_sequence;
 
   `uvm_object_utils(PCIe_EP_ltssm_loopback_sequence)
 
-  localparam time LOOPBACK_EXIT_DELAY = 3ms;
+  localparam time LOOPBACK_EXIT_DELAY = 10us;
 
   function new(string name = "PCIe_EP_ltssm_loopback_sequence");
     super.new(name);
