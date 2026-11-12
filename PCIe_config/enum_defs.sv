@@ -38,11 +38,11 @@ package typedef_enums;
   // pcie_tl_txn_type_e - top-level TLP category
   //--------------------------------------------------------------------------
   typedef enum bit [3:0] {
-    PCIe_TL_MEM = 3'd0,   // Memory Read / Write
-    PCIe_TL_IO  = 3'd1,   // I/O Read / Write
-    PCIe_TL_CFG = 3'd2,   // Configuration Read / Write (Type 0 / Type 1)
-    PCIe_TL_MSG = 3'd3,   // Message (with or without data)
-    PCIe_TL_CPL = 3'd4    // Completion / Completion with Data
+    PCIe_TL_MEM = 4'd0,   // Memory Read / Write
+    PCIe_TL_IO  = 4'd1,   // I/O Read / Write
+    PCIe_TL_CFG = 4'd2,   // Configuration Read / Write (Type 0 / Type 1)
+    PCIe_TL_MSG = 4'd3,   // Message (with or without data)
+    PCIe_TL_CPL = 4'd4    // Completion / Completion with Data
   } pcie_tl_txn_type_e;
 
   //--------------------------------------------------------------------------
@@ -157,6 +157,17 @@ package typedef_enums;
     NON_FLIT = 1'b0,
     FLIT     = 1'b1
   } pkt_mode_e;
+
+  //--------------------------------------------------------------------------
+  // [PL_COV] pcie_cov_dir_e - coverage routing tag : which control-signal
+  //          section (PL TX / PL RX) a monitor-sourced coverage transaction
+  //          belongs to. Set by the RC / EP controller monitors, used by
+  //          write_rc() / write_ep() in PCIe_subscriber.
+  //--------------------------------------------------------------------------
+  typedef enum logic {
+    PCIE_COV_TX = 1'b0,
+    PCIE_COV_RX = 1'b1
+  } pcie_cov_dir_e;
 
   //--------------------------------------------------------------------------
   // ohc_a_type_e - Orthogonal Header Content, category A sub-type
@@ -341,6 +352,12 @@ typedef struct {
   //--------------------------------------------------------------------------
   typedef enum int unsigned { PCIE_FC_P = 0, PCIE_FC_NP = 1, PCIE_FC_CPL = 2 } pcie_fc_cls_e;
   typedef enum int unsigned { FC_ADV_INIT, FC_ADV_UPDATE, FC_STATUS, FC_PEER_INIT, FC_PEER_UPDATE } pcie_fc_kind_e;
+
+  //--------------------------------------------------------------------------
+  // [TC_VC] vc_id_e - Virtual Channel ID (PCIe Base 6.0 Sec 2.5.1)
+  //   VC0 = default VC (lowest priority), VC7 = highest priority (Sec 6.3.3.2)
+  //--------------------------------------------------------------------------
+  typedef enum bit [2:0] { VC0, VC1, VC2, VC3, VC4, VC5, VC6, VC7 } vc_id_e;
 
 
 endpackage

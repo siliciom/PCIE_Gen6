@@ -892,3 +892,19 @@
 //   2 = SHARED    : every TLP uses shared
 //   3 = ALTERNATE : per type, TLPs take turns shared / dedicated / shared ...
 `define PCIe_FC_POOL_MODE            0
+
+
+`define PCIe_NUM_VC_MAX              8
+`define PCIe_NUM_VC_DEFAULT          1
+
+`define PCIe_FC_MVC_DED_HDR_CREDITS  8
+`define PCIe_FC_MVC_DED_DATA_CREDITS 64
+
+// VC arbitration (PCIe_VC_Arbiter + RC controller driver)
+//   PCIe_VC_ARB_COLLECT_NS  : after a request is taken from the sequencer, keep
+//     collecting further requests for this many ns of "nothing new" before
+//     the arbiter picks, so requests issued together really compete.
+//   PCIe_VC_ARB_STARVE_WARN : warn when a non-empty VC lost this many rounds
+//     in a row (strict priority can starve low VCs, Sec 6.3.3.2.1).
+`define PCIe_VC_ARB_COLLECT_NS       20 //driver waits 20 ns for more requests before picking
+`define PCIe_VC_ARB_STARVE_WARN      64 //If the count reaches 64 losses in a row for vc0 , the bench prints one warning

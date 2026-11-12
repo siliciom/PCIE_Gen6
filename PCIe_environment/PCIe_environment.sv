@@ -24,6 +24,8 @@ class PCIe_environment extends uvm_env;
    PCIe_subscriber              pcie_subscriber;
    // [ORDERING] checks that TLPs leave the RC TL in an order allowed by Table 2-42
    PCIe_ordering_checker        pcie_ordering_checker;
+   // [TC_VC] one TX queue per VC + Strict Priority arbitration 
+   PCIe_VC_Arbiter              vc_arb;
 
    PCIe_env_config              pcie_ecfg;
    uvm_event                    rc_to_ep_bit_event;
@@ -52,6 +54,9 @@ class PCIe_environment extends uvm_env;
          `uvm_fatal("PCIe_ENV","Cannot_get_ENV_CONFIG")
       end
 
+      // [TC_VC] TC -> VC table into every sequence item / model  
+      pcie_ecfg.apply_tc2vc_map();
+
       if(pcie_ecfg.has_rc_top_agent)
       begin
          rc_top_agent = PCIe_RC_top_agent::type_id::create("rc_top_agent", this);
@@ -76,6 +81,9 @@ class PCIe_environment extends uvm_env;
       if(pcie_ecfg.has_rc_top_agent)
       begin
          pcie_ordering_checker = PCIe_ordering_checker::type_id::create("pcie_ordering_checker", this);
+         // [TC_VC] VC arbiter 
+         vc_arb = PCIe_VC_Arbiter::type_id::create("vc_arb", this);
+         uvm_config_db#(PCIe_VC_Arbiter)::set(this, "*", "vc_arb", vc_arb);
       end
       `uvm_info(get_type_name(),"EXIT_BUILD_PHASE",  UVM_LOW)
    endfunction
@@ -89,11 +97,15 @@ class PCIe_environment extends uvm_env;
            rc_top_agent.rc_controller_agent.rc_controller_driver.rc_tl_model = rc_top_agent.rc_controller_agent.rc_tl_model;
            rc_top_agent.rc_controller_agent.rc_controller_driver.rc_dl_model = rc_top_agent.rc_controller_agent.rc_dl_model;
            rc_top_agent.rc_controller_agent.rc_controller_driver.rc_pl_model = rc_top_agent.rc_controller_agent.rc_pl_model;
+           // [TC_VC] arbiter : asks the RC TL FC gate of each VC; driver feeds / drains it
+           vc_arb.rc_tl_model = rc_top_agent.rc_controller_agent.rc_tl_model;
+           rc_top_agent.rc_controller_agent.rc_controller_driver.vc_arb = vc_arb;
     	  // rc monitor to dl model handle sharing
            rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_dl_model = rc_top_agent.rc_controller_agent.rc_dl_model;
            rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_pl_model = rc_top_agent.rc_controller_agent.rc_pl_model;
 	    rc_top_agent.rc_phy_agent.rc_phy_driver.ep_pl_model = ep_top_agent.ep_controller_agent.ep_pl_model;
-	  uvm_config_db#(PCIe_RC_PL_model)::set(this,"pcie_subscriber","RC_PL_MODEL",rc_top_agent.rc_controller_agent.rc_pl_model);
+	  // [PL_COV] not needed any more : the subscriber takes PL data from rc_cov_ap, not from the PL model
+	  // uvm_config_db#(PCIe_RC_PL_model)::set(this,"pcie_subscriber","RC_PL_MODEL",rc_top_agent.rc_controller_agent.rc_pl_model);
          // [RECOVERY] scoreboard : gates the per-dword data compare on the real data phase
          uvm_config_db#(PCIe_RC_PL_model)::set(this,"pcie_scoreboard","RC_PL_MODEL",rc_top_agent.rc_controller_agent.rc_pl_model);
          // [RECOVERY] RC monitor needs the EP PL model to know the length of the EP's
@@ -111,7 +123,8 @@ class PCIe_environment extends uvm_env;
            ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_pl_model = ep_top_agent.ep_controller_agent.ep_pl_model;
 	      // ep monitor to dl model handle sharing
 ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_dl_model = ep_top_agent.ep_controller_agent.ep_dl_model;
-           uvm_config_db#(PCIe_EP_PL_model)::set(this,"pcie_subscriber","EP_PL_MODEL", ep_top_agent.ep_controller_agent.ep_pl_model);
+           // [PL_COV] not needed any more : the subscriber takes PL data from ep_cov_ap, not from the PL model
+           // uvm_config_db#(PCIe_EP_PL_model)::set(this,"pcie_subscriber","EP_PL_MODEL", ep_top_agent.ep_controller_agent.ep_pl_model);
            // [RECOVERY] scoreboard : gates the per-dword data compare on the real data phase
            uvm_config_db#(PCIe_EP_PL_model)::set(this,"pcie_scoreboard","EP_PL_MODEL", ep_top_agent.ep_controller_agent.ep_pl_model);
           // ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_con_rx_mon_ap.connect(ep_top_agent.ep_controller_agent.ep_tl_model.rx_imp);
@@ -152,6 +165,38 @@ ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_dl_model = ep_top_agen
       begin
          // Example:
          // rc_top_agent.rc_controller_agent.rc_controller_monitor.tx_cov_ap.connect(pcie_subscriber.analysis_export);
+
+         // [TL_COV] received TLPs, sent by the TL models after decoding
+         if(pcie_ecfg.has_rc_top_agent)
+            rc_top_agent.rc_controller_agent.rc_tl_model.rx_decoded_ap.connect(pcie_subscriber.rc_rx_tl_imp);   // RC received Completions
+         if(pcie_ecfg.has_ep_top_agent)
+            ep_top_agent.ep_controller_agent.ep_tl_model.rx_decoded_ap.connect(pcie_subscriber.ep_rx_tl_imp);   // EP received Requests
+
+         // [DL_COV] DL model handles (DLCMSM coverage) and received flits
+         //   flits come from the SAME monitor ports that feed the DL models
+         if(pcie_ecfg.has_rc_top_agent)
+         begin
+            uvm_config_db#(PCIe_RC_DL_model)::set(this, "pcie_subscriber", "RC_DL_MODEL", rc_top_agent.rc_controller_agent.rc_dl_model);
+            // [DL_COV] FIX : the subscriber needs the DLP fields DECODED by the DL model
+            //   (dl_flit_usage, dl_replay_cmd, dl_seq_num, dl_dllp_type, dl_fc_*), so connect the
+            //   DL model coverage port, not the monitor raw 242B port (its dl_* fields are all 0).
+            // OLD : rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_mon_dl_242b_ap.connect(pcie_subscriber.rc_rx_dl_imp);
+            rc_top_agent.rc_controller_agent.rc_dl_model.rc_dl_cov_ap.connect(pcie_subscriber.rc_rx_dl_imp);   // EP -> RC flits (decoded)
+         end
+         if(pcie_ecfg.has_ep_top_agent)
+         begin
+            uvm_config_db#(PCIe_EP_DL_model)::set(this, "pcie_subscriber", "EP_DL_MODEL", ep_top_agent.ep_controller_agent.ep_dl_model);
+            // [DL_COV] FIX : DL model coverage port (decoded DLP fields), not the monitor raw port
+            // OLD : ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_mon_dl_242b_ap.connect(pcie_subscriber.ep_rx_dl_imp);
+            ep_top_agent.ep_controller_agent.ep_dl_model.ep_dl_cov_ap.connect(pcie_subscriber.ep_rx_dl_imp);   // RC -> EP flits (decoded)
+         end
+
+         // [PL_COV] PIPE control / status pins from the controller monitors
+         //   item.cov_dir = PCIE_COV_TX / PCIE_COV_RX -> write_rc() / write_ep()
+         if(pcie_ecfg.has_rc_top_agent)
+            rc_top_agent.rc_controller_agent.rc_controller_monitor.rc_cov_ap.connect(pcie_subscriber.rc_export);
+         if(pcie_ecfg.has_ep_top_agent)
+            ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_cov_ap.connect(pcie_subscriber.ep_export);
       end
       `uvm_info(get_type_name(),"EXIT_CONNECT_PHASE", UVM_LOW)
 

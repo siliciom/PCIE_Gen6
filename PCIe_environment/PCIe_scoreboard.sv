@@ -231,8 +231,8 @@ class PCIe_scoreboard extends uvm_scoreboard;
               // different data. Require a run of consecutive matches before
               // declaring sync; 4 random 32 bit dwords will not collide.
               run++;
-              tx_q.pop_front();
-              rx_q.pop_front();
+              void'(tx_q.pop_front());
+              void'(rx_q.pop_front());
               if (run >= `SB_SYNC_RUN_LEN) begin
                  synced = 1'b1;
                  `uvm_info("PCIe_SCOREBOARD",$sformatf("%s_STREAM_SYNCED after %0d consecutive dwords, RESYNCS=%0d",
@@ -247,26 +247,26 @@ class PCIe_scoreboard extends uvm_scoreboard;
            for (look = 1; look < `SB_SYNC_SEARCH_WIN; look++) begin
               if (look >= rx_q.size()) break;
               if (rx_q[look] == tx_q[0]) begin
-                 repeat (look) rx_q.pop_front();
+                 repeat (look) void'(rx_q.pop_front());
                  resync_count++;
                  return 1'b0;
               end
            end
            // Receiver does not have it yet : the transmitter is ahead.
            if (tx_q.size() > 1 && (tx_q[1] == rx_q[0])) begin
-              tx_q.pop_front();
+              void'(tx_q.pop_front());
               resync_count++;
               return 1'b0;
            end
-           rx_q.pop_front();
+           void'(rx_q.pop_front());
            resync_count++;
            return 1'b0;
         end
 
         // ---- steady state : absorb up to `SB_DRIFT_WIN dwords of drift, else report ----
         if (tx_q[0] == rx_q[0]) begin
-           tx_q.pop_front();
-           rx_q.pop_front();
+           void'(tx_q.pop_front());
+           void'(rx_q.pop_front());
            return 1'b1;
         end
         // [FIX] Receiver behind : it still holds stale dwords (IDLE-flit zeros
@@ -275,7 +275,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
         for (look = 1; look < `SB_DRIFT_WIN; look++) begin
            if (look >= rx_q.size()) break;
            if (rx_q[look] == tx_q[0]) begin
-              repeat (look) rx_q.pop_front();
+              repeat (look) void'(rx_q.pop_front());
               resync_count++;
               return 1'b0;
            end
@@ -284,7 +284,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
         for (look = 1; look < `SB_DRIFT_WIN; look++) begin
            if (look >= tx_q.size()) break;
            if (tx_q[look] == rx_q[0]) begin
-              repeat (look) tx_q.pop_front();
+              repeat (look) void'(tx_q.pop_front());
               resync_count++;
               return 1'b0;
            end
@@ -297,8 +297,8 @@ class PCIe_scoreboard extends uvm_scoreboard;
         end
         `uvm_error("PCIe_SCOREBOARD",$sformatf("***********FAIL*****************:FAIL_%s_EXPECTED_DATA = %08h  ACTUAL_DATA = %08h", dir, tx_q[0], rx_q[0]))
         mismatch_count++;
-        tx_q.pop_front();
-        rx_q.pop_front();
+        void'(tx_q.pop_front());
+        void'(rx_q.pop_front());
         return 1'b0;
      endfunction
 
@@ -563,7 +563,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
   endfunction
   
 
-  function compare_rc_ep_dl(PCIe_sequence_item item);
+  function void compare_rc_ep_dl(PCIe_sequence_item item);
 
 	  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] expected_dlp_rc_ep;
           bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] actual_dlp_rc_ep;
@@ -591,7 +591,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
           end
   endfunction
 
-  function compare_ep_rc_dl(PCIe_sequence_item item);
+  function void compare_ep_rc_dl(PCIe_sequence_item item);
 
 	  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] expected_dlp_ep_rc;
           bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] actual_dlp_ep_rc;
@@ -646,7 +646,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
   // INFO when all 256 bytes match; ERROR when any byte does not match.
   // Prints the compared bytes (hex, both directions) and explains to the team
   // that the same 256 bytes sent on RC tx.data arrived at EP rx.data.
-  function compare_rc_ep_256b_flit(PCIe_sequence_item pkt);
+  function void compare_rc_ep_256b_flit(PCIe_sequence_item pkt);
     bit [`PCIe_BYTE_W-1:0] tx_256b [256];
     bit [`PCIe_BYTE_W-1:0] rx_256b [256];
     int  byte_mismatch_count;

@@ -40,6 +40,7 @@ class PCIe_gen6_3DW_Flit_MemRd_MinPayload_test extends PCIe_base_test;
     PCIe_EP_controller_base_sequence::type_id::set_type_override(
         PCIe_EP_3DW_flit_sequence::get_type());
     super.build_phase(phase);
+      pcie_env_config.num_vc = 8;
     `uvm_info("PCIE_GEN6_3DW_FLIT_MEMRD_MINPAYLOAD_TEST","EXIT_FROM_PCIE_GEN6_3DW_FLIT_MEMRD_MINPAYLOAD_TEST_BUILD_PHASE", UVM_LOW)
   endfunction
 

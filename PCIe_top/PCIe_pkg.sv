@@ -27,12 +27,14 @@ package PCIe_pkg;
 `include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_TL_model.sv"
 	// [ORDERING] PCIe 6.1 Table 2-42 ordering rules (used by PCIe_ordering_checker)
 	`include "../PCIe_agents/PCIe_ordering_rules.sv"
-	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_config_access.sv"   // [CAM] CF8 / CFC registers
+	
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_DL_model.sv"
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_PL_model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_TL_model.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_DL_model.sv"
 `include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_PL_model.sv"
+	// [TC_VC] per-VC TX queues + Strict Priority VC arbitration (needs PCIe_RC_TL_model)
+	`include "../PCIe_agents/PCIe_VC_Arbiter.sv"
         
 	`include "../PCIe_agents/PCIe_RC_controller_agent/PCIe_RC_controller_sequencer.sv"
 	`include "../PCIe_agents/PCIe_EP_controller_agent/PCIe_EP_controller_sequencer.sv"
@@ -89,6 +91,7 @@ package PCIe_pkg;
 
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd0_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd0_sequence.sv"
+	`include "../PCIe_config/PCIe_RC_enumeration_params.sv"     // [ENUM] offsets, CAM ports, ECAM window
 	`include "../PCIe_sequences/PCIe_RC_enumeration_sequence.sv"   // [ENUM]
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd1_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CFGRd1_sequence.sv"
@@ -192,6 +195,8 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MemWr_followed_MemRd_Random_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MsgWr_withdata_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MsgWr_withoutdata_sequence.sv"
+	// [TC_VC] MemWr + DMWr + MemRd on the TC given by the test
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MemWr_MemRd_tc_vc_sequence.sv"
 
 
 
@@ -326,6 +331,8 @@ package PCIe_pkg;
 	`include "../PCIe_tests/PCIe_gen6_4DW_NonFlit_MemWr_followed_MemRd_Random_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_4DW_NonFlit_MsgWr_withdata_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_4DW_NonFlit_MsgWr_withoutdata_test.sv"
+	// [TC_VC] TC0..TC7 -> VC0..VC7, per-VC FC, Strict Priority 
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test.sv"
 
 
 endpackage

@@ -24,6 +24,10 @@ class PCIe_gen6_enumeration_test extends PCIe_base_test;
 
   function void build_phase(uvm_phase phase);
     `uvm_info("PCIE_GEN6_ENUMERATION_TEST","ENTERED_INTO_PCIE_GEN6_ENUMERATION_TEST_BUILD_PHASE", UVM_LOW)
+    // [LINK_FIRST] Enumeration must run after LTSSM : the RC driver brings the
+    // link up (L0 + DL_ACTIVE) first, then the enumeration sequence starts.
+    uvm_config_db#(bit)::set(this, "*", "link_up_before_traffic", 1'b1);
+
     // The base test's rc_controller_sequence handle will run the enumeration sequence.
     PCIe_RC_controller_base_sequence::type_id::set_type_override(
         PCIe_RC_enumeration_sequence::get_type());

@@ -77,6 +77,11 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
     // so the scoreboard compares all 256 transmitted bytes vs EP rx.data.
     uvm_analysis_port #(PCIe_sequence_item) rc_con_tx_256b_mon_ap;
     bit [`PCIe_MON_DATA_W-1:0] rc_tx_256b_flit_dword_q[$];  // last 64 tx dwords = current 256B flit	
+
+    // [PL_COV] Dedicated RC coverage port. This is intentionally separate
+    // from all scoreboard/DL analysis ports. It sends the same transaction the
+    // monitor already stamps with the RX/TX control fields.
+    uvm_analysis_port #(PCIe_sequence_item) rc_cov_ap;
  
     function new(string name="PCIe_RC_controller_monitor", uvm_component parent);
      super.new(name,parent);
@@ -91,6 +96,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
  	  rc_con_tx_mon_ap =new("rc_con_tx_mon_ap",this);
  	  rc_con_rx_mon_ap =new("rc_con_rx_mon_ap",this);
  	  rc_con_tx_256b_mon_ap =new("rc_con_tx_256b_mon_ap",this);
+ 	  rc_cov_ap =new("rc_cov_ap",this);   // [PL_COV]
       // [RECOVERY] rc_pl_model is intentionally NOT created here. PCIe_environment's
       // connect_phase shares the controller agent's single PL model with this
       // monitor. Creating a second instance here spawned a second, orphaned
@@ -171,17 +177,24 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
       `uvm_info("RC_CONTROLLER", "ENTERED_INTO_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_LOW)
-      wait(rc_pipe_intf_tx.tx_valid);
 
       dword_in_os = 0;
 
-      while (rc_pipe_intf_tx.tx_valid) begin
+      while (1) begin
          @(negedge rc_pipe_intf_tx.pclk);
          pcie_seq_item.tx_valid     = rc_pipe_intf_tx.tx_valid;
          pcie_seq_item.tx_elec_idle = rc_pipe_intf_tx.tx_elec_idle;
          pcie_seq_item.tx_detect_rx = rc_pipe_intf_tx.tx_detect_rx;
          pcie_seq_item.powerdown    = rc_pipe_intf_tx.powerdown;
          pcie_seq_item.rate         = rc_pipe_intf_tx.rate;
+
+         // [PL_COV] Send the TX control fields from this task every pclk,
+         // including the idle / Detect / electrical-idle clocks where
+         // tx_valid is low.
+         pcie_seq_item.cov_dir = PCIE_COV_TX;
+         rc_cov_ap.write(pcie_seq_item);
+
+         if (!pcie_seq_item.tx_valid) continue;
 
          if (pcie_seq_item.tx_valid) begin
             // [MULTI-LANE] Ordered Sets are broadcast on every lane. After the
@@ -277,7 +290,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             // [ADDED] keep only the trailing 64 tx dwords = current 256B flit (RC->EP)
             rc_tx_256b_flit_dword_q.push_back(descrambled_data);
             if (rc_tx_256b_flit_dword_q.size() > 64)
-               rc_tx_256b_flit_dword_q.pop_front();
+               void'(rc_tx_256b_flit_dword_q.pop_front());
 
             // [ADDED] once per 64-dword flit boundary (after the 232 training
             // dwords), rebuild the full 256B flit sent by RC on tx.data after
@@ -345,7 +358,6 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
       `uvm_info("RC_CONTROLLER", "ENTERED_INTO_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
-      wait(rc_pipe_intf_rx.rx_valid);
 
       dword_in_os = 0;
 
@@ -358,6 +370,11 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
          pcie_seq_item.rx_elec_idle = rc_pipe_intf_rx.rx_elec_idle;
          pcie_seq_item.rx_status    = rc_pipe_intf_rx.rx_status;
          pcie_seq_item.phy_status   = rc_pipe_intf_rx.phy_status;
+
+         // [PL_COV] Send the RX control fields from this task every pclk,
+         // including the idle / Detect periods where rx_valid is low.
+         pcie_seq_item.cov_dir = PCIE_COV_RX;
+         rc_cov_ap.write(pcie_seq_item);
 
          // [RECOVERY] extended by the extra training dwords of a directed Recovery walk
          if (rx_os_dword_count > (30000 + rx_training_dwords() - `PCIe_LINKUP_TRAINING_DWORDS)) break;
@@ -616,7 +633,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
    bit [31:0] word;
    // remove first 232 elements in queue.
    do begin
-	   item.data_q_rc_mon_con_tx.pop_front();
+	   void'(item.data_q_rc_mon_con_tx.pop_front());
    end
    while(item.data_q_rc_mon_con_tx.size() > 61 );
   
@@ -1327,6 +1344,3 @@ endtask
 
 
 endclass
-
-
-
