@@ -20,6 +20,10 @@ class PCIe_RC_PL_model extends uvm_component;
    
    PCIe_env_config   pcie_ecfg;
    PCIe_sequence_item     pcie_seq_item;
+   // Item handle of the LTSSM run currently in progress. Kept so the directed
+   // Disabled / Loopback / Hot Reset states can read the link-control knobs
+   // (e.g. loopback_exit_directed, which the sequence may flip mid-run).
+   PCIe_sequence_item     rc_ctrl_item;
 
    virtual PCIe_RC_interface rc_pipe_intf_tx, rc_pipe_intf_rx;
 
@@ -30,6 +34,10 @@ class PCIe_RC_PL_model extends uvm_component;
    bit               rc_present;
    bit               rc_active_gen;
    bit [7:0]         rc_ts1_os [`PCIe_TS_OS_SIZE];   
+   // Training Control byte placed in TS1 symbol 5 by build_rc_ts1().
+   //   bit 0 = Hot Reset, bit 1 = Disable Link, bit 2 = Loopback.
+   // Default 0 keeps every existing (non directed) TS1 unchanged.
+   bit [7:0]         rc_ts1_training_ctrl = 8'h00;
    bit [7:0]         rc_idle_os [`PCIe_TS_OS_SIZE];   
    int               ts1_tx_count;
    int               ts2_tx_count;
@@ -267,7 +275,9 @@ class PCIe_RC_PL_model extends uvm_component;
       end
    endtask
 
-   task rc_ltssm(PCIe_sequence_item  pcie_seq_item);
+    task rc_ltssm(PCIe_sequence_item  pcie_seq_item);
+        rc_ctrl_item = pcie_seq_item;
+        rc_ts1_training_ctrl = 8'h00;
         if(pcie_seq_item.pkt_mode == FLIT)
          `uvm_info("RC_PL_MODEL","Configured_in_FLIT_MODE",UVM_LOW)
         else
@@ -404,6 +414,31 @@ class PCIe_RC_PL_model extends uvm_component;
                 // directed speed change, so the loop continues in Recovery.
                 if (link_up) break;
              end
+              DISABLED: begin
+                 rc_state_disabled();
+                 `uvm_info("RC_LTSSM","DISABLED_COMPLETE_ENDING_TESTCASE",UVM_LOW)
+                 break;
+              end
+              LOOPBACK_ENTRY: begin
+                 rc_state_loopback_entry();
+              end
+              LOOPBACK_ACTIVE: begin
+                 rc_state_loopback_active();
+              end
+              LOOPBACK_EXIT: begin
+                 rc_state_loopback_exit();
+                 `uvm_info("RC_LTSSM","LOOPBACK_EXIT_COMPLETE_ENDING_TESTCASE",UVM_LOW)
+                 break;
+              end
+              HOT_RESET: begin
+                 bit remain;
+                 rc_state_hot_reset(remain);
+                 if (!remain) begin
+                    `uvm_info("RC_LTSSM","HOT_RESET_COMPLETE_ENDING_TESTCASE",UVM_LOW)
+                    break;
+                 end
+              end
+
              default: begin
                 `uvm_error("RC_LTSSM","INVALID_RC_LTSSM_STATE")
              end
@@ -655,6 +690,19 @@ class PCIe_RC_PL_model extends uvm_component;
        `uvm_info("RC_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("RC_LTSSM","SUB_STATE_CONFIGURATION_LinkWidth_Start",UVM_LOW)
        `uvm_info("RC_LTSSM","==========================================",UVM_LOW)
+       //---------------------------------------------------------------
+       // Directed link-control exit (before Link Number negotiation).
+       //---------------------------------------------------------------
+       if (rc_ctrl_item != null && rc_ctrl_item.link_ctrl_disable_link) begin
+          `uvm_info("RC_LTSSM","LINK_DISABLE_SET_PRIOR_TO_ENTRY_IMMEDIATE_DISABLED",UVM_LOW)
+          rc_main_state = DISABLED;
+          return;
+       end
+       if (rc_ctrl_item != null && rc_ctrl_item.link_ctrl_enter_loopback) begin
+          `uvm_info("RC_LTSSM","ENTER_LOOPBACK_SET_PRIOR_TO_ENTRY_IMMEDIATE_LOOPBACK_ENTRY",UVM_LOW)
+          rc_main_state = LOOPBACK_ENTRY;
+          return;
+       end
        // Reset precoder state for reliable K-symbol detection at the peer
        previous_symbol = 2'b11;
        // Select a non-PAD Link number on entry (§4.2.7.3.1); Lane number remains PAD.
@@ -974,6 +1022,153 @@ task rc_state_config_complete();
        end
     endtask
 
+    //=======================================================================
+    //  DIRECTED SUBSTATES : Disabled / Loopback / Hot Reset
+    //  Each one ends the LTSSM run without asserting link_up, so the driver
+    //  returns and the testcase can complete.
+    //=======================================================================
+
+    //-------------------------------------------------------------------------
+    // rc_state_disabled - PCIe Base 6.0 Sec 4.2.7.2
+    //   Send TS1 with Disable Link=1, then enter Electrical Idle.
+    //-------------------------------------------------------------------------
+    task rc_state_disabled();
+       `uvm_info("RC_LTSSM","ENTERED_DISABLED_BROADCASTING_TS1_WITH_DISABLE_LINK",UVM_LOW)
+       previous_symbol = 2'b11;
+       rc_link_num = PAD_BYTE;
+       rc_lane_num = PAD_BYTE;
+       rc_ts1_training_ctrl = `PCIe_TS1_TC_DISABLE_LINK;
+       build_rc_ts1();
+       send_ordered_set(rc_ts1_os,`PCIe_DISABLED_TS1_COUNT,"DISABLED_TS1");
+       rc_ts1_training_ctrl = 8'h00;
+       @(posedge rc_pipe_intf_tx.pclk);
+       rc_pipe_intf_tx.tx_valid     <= 1'b0;
+       rc_pipe_intf_tx.tx_data      <= '0;
+       rc_pipe_intf_tx.tx_elec_idle <= 1'b1;
+       link_up = 1'b0;
+       `uvm_info("RC_LTSSM","DISABLED_EIOS_TRANSMITTED_LINKUP=0_LANES_DISABLED",UVM_LOW)
+    endtask
+
+    //-------------------------------------------------------------------------
+    // rc_state_loopback_entry - RC is the Loopback master.
+    //-------------------------------------------------------------------------
+    task rc_state_loopback_entry();
+       bit rx_done;
+       bit timeout_occured;
+       `uvm_info("RC_LTSSM","ENTERED_LOOPBACK_ENTRY_MASTER_BROADCASTING_TS1_WITH_LOOPBACK",UVM_LOW)
+       previous_symbol = 2'b11;
+       rc_link_num  = RC_SELECTED_LINK_NUM;
+       rc_lane_num  = PAD_BYTE;
+       rx_done          = 1'b0;
+       timeout_occured  = 1'b0;
+       rc_ts1_training_ctrl = `PCIe_TS1_TC_LOOPBACK;
+       build_rc_ts1();
+       fork
+          begin
+             send_ordered_set(rc_ts1_os,`PCIe_LOOPBACK_ENTRY_TS1_COUNT,"LOOPBACK_ENTRY_TS1");
+          end
+          begin
+             rc_check_ep_ts1(2,rx_done);
+          end
+          begin
+             rc_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_ENTRY);
+             timeout_occured = 1'b1;
+          end
+       join_any
+       disable fork;
+       rc_ts1_training_ctrl = 8'h00;
+       @(posedge rc_pipe_intf_tx.pclk);
+       rc_pipe_intf_tx.tx_valid <= 1'b0;
+       rc_pipe_intf_tx.tx_data  <= '0;
+       if (rx_done) begin
+          `uvm_info("RC_LTSSM","LOOPBACK_ENTRY_SLAVE_TS1_SEEN_TO_LOOPBACK_ACTIVE",UVM_LOW)
+          rc_main_state = LOOPBACK_ACTIVE;
+       end
+       else begin
+          `uvm_info("RC_LTSSM",$sformatf("LOOPBACK_ENTRY_TIMEOUT=%0b_TO_LOOPBACK_EXIT",timeout_occured),UVM_LOW)
+          rc_main_state = LOOPBACK_EXIT;
+       end
+    endtask
+
+    //-------------------------------------------------------------------------
+    // rc_state_loopback_active - wait for a directed exit or the timeout.
+    //-------------------------------------------------------------------------
+    task rc_state_loopback_active();
+       bit timeout_occured;
+       `uvm_info("RC_LTSSM","ENTERED_LOOPBACK_ACTIVE_MASTER_WAITING_FOR_DIRECTED_EXIT",UVM_LOW)
+       timeout_occured = 1'b0;
+       fork
+          begin
+             wait (rc_ctrl_item != null && rc_ctrl_item.loopback_exit_directed);
+             `uvm_info("RC_LTSSM","LOOPBACK_ACTIVE_DIRECTED_EXIT",UVM_LOW)
+          end
+          begin
+             rc_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_ACTIVE);
+             timeout_occured = 1'b1;
+          end
+       join_any
+       disable fork;
+       `uvm_info("RC_LTSSM",$sformatf("LOOPBACK_ACTIVE_TIMEOUT=%0b_TO_LOOPBACK_EXIT",timeout_occured),UVM_LOW)
+       rc_main_state = LOOPBACK_EXIT;
+    endtask
+
+    //-------------------------------------------------------------------------
+    // rc_state_loopback_exit - EIOS burst then Electrical Idle.
+    //-------------------------------------------------------------------------
+    task rc_state_loopback_exit();
+       `uvm_info("RC_LTSSM","ENTERED_LOOPBACK_EXIT_MASTER_EIOS_BURST_THEN_ELECTRICAL_IDLE",UVM_LOW)
+       previous_symbol = 2'b11;
+       repeat (8) @(posedge rc_pipe_intf_tx.pclk);
+       rc_pipe_intf_tx.tx_valid     <= 1'b0;
+       rc_pipe_intf_tx.tx_data      <= '0;
+       rc_pipe_intf_tx.tx_elec_idle <= 1'b1;
+       rc_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_EXIT_IDLE);
+       link_up = 1'b0;
+       `uvm_info("RC_LTSSM","LOOPBACK_EXIT_ELECTRICAL_IDLE_COMPLETE_LINKUP=0",UVM_LOW)
+    endtask
+
+    //-------------------------------------------------------------------------
+    // rc_state_hot_reset - RC is directed.
+    //-------------------------------------------------------------------------
+    task rc_state_hot_reset(output bit remain);
+       bit echo_done;
+       bit timeout_occured;
+       `uvm_info("RC_LTSSM","ENTERED_HOT_RESET_DIRECTED_BROADCASTING_TS1_WITH_HOT_RESET",UVM_LOW)
+       remain          = 1'b0;
+       echo_done       = 1'b0;
+       timeout_occured = 1'b0;
+       previous_symbol = 2'b11;
+       rc_link_num = RC_SELECTED_LINK_NUM;
+       rc_lane_num = RC_ASSIGNED_LANE_NUM;
+       rc_ts1_training_ctrl = `PCIe_TS1_TC_HOT_RESET;
+       build_rc_ts1();
+       fork
+          begin
+             send_ordered_set(rc_ts1_os,`PCIe_HOT_RESET_TS1_COUNT,"HOT_RESET_TS1");
+          end
+          begin
+             rc_check_ep_ts1(2,echo_done);
+          end
+          begin
+             rc_ltssm_timer(`PCIe_LTSSM_T_HOT_RESET);
+             timeout_occured = 1'b1;
+          end
+       join_any
+       disable fork;
+       rc_ts1_training_ctrl = 8'h00;
+       @(posedge rc_pipe_intf_tx.pclk);
+       rc_pipe_intf_tx.tx_valid <= 1'b0;
+       rc_pipe_intf_tx.tx_data  <= '0;
+       if (echo_done && (rc_ctrl_item != null) && rc_ctrl_item.hot_reset_remain_directed) begin
+          `uvm_info("RC_LTSSM","HOT_RESET_ECHO_SEEN_HIGHER_LAYER_STILL_DIRECTING_REMAIN",UVM_LOW)
+          remain = 1'b1;
+          return;
+       end
+       rc_pipe_intf_tx.tx_elec_idle <= 1'b1;
+       link_up = 1'b0;
+       `uvm_info("RC_LTSSM",$sformatf("HOT_RESET_ECHO_SEEN=%0b_TIMEOUT=%0b_LINKUP=0_EXITING",echo_done,timeout_occured),UVM_LOW)
+    endtask
+
     //-------------------------------------------------------------------------
     // [MERGE] rc_tx_training_dwords - length (in PIPE dwords) of the training
     // Ordered Set stream this port transmits before the first data flit.
@@ -1190,10 +1385,10 @@ task rc_state_config_complete();
         rc_ts1_os[1]  = rc_link_num;
         rc_ts1_os[2]  = rc_lane_num;
         rc_ts1_os[3]  = 8'h10;
-        rc_ts1_os[4]  = 8'h00;
-        rc_ts1_os[5]  = 8'h00;
-        rc_ts1_os[6]  = 8'h00;
-        rc_ts1_os[7]  = 8'h4A;
+         rc_ts1_os[4]  = 8'h00;
+         rc_ts1_os[`PCIe_TS1_TRAINING_CTRL_IDX] = rc_ts1_training_ctrl;
+         rc_ts1_os[6]  = 8'h00;
+         rc_ts1_os[7]  = 8'h4A;
         rc_ts1_os[8]  = 8'h4A;
         rc_ts1_os[9]  = 8'h4A;
         rc_ts1_os[10] = 8'h4A;
@@ -2176,6 +2371,13 @@ task rc_state_config_complete();
        base_idle    = rc_rx_idle_count;
        `uvm_info("RC_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("RC_RECOVERY","SUB_STATE_RECOVERY_Idle",UVM_LOW)
+       // Directed Hot Reset (PCIe Base 6.0, Sec 4.2.7.4 Recovery.Idle): when the higher
+       // layer sets the Hot Reset bit, leave Recovery.Idle for Hot Reset, not for L0.
+       if (item != null && item.link_ctrl_hot_reset) begin
+          `uvm_info("RC_RECOVERY","HOT_RESET_DIRECTED_IN_RECOVERY_IDLE_TO_HOT_RESET",UVM_LOW)
+          rc_main_state = HOT_RESET;
+          return;
+       end
        previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
        rc_build_recovery_idle();
        fork : RC_RECOVERY_IDLE_THREADS
@@ -2781,6 +2983,7 @@ task rc_state_config_complete();
   endfunction : append_final_fec_256b
 
 endclass
+
 
 
 

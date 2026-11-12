@@ -242,7 +242,12 @@ package typedef_enums;
         POLLING,
         CONFIGURATION,
         RECOVERY,
-        L0
+        L0,
+        DISABLED,
+        LOOPBACK_ENTRY,
+        LOOPBACK_ACTIVE,
+        LOOPBACK_EXIT,
+        HOT_RESET
      } main_state_e;
      
   typedef enum

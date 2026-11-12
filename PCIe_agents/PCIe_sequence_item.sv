@@ -119,6 +119,15 @@ class PCIe_sequence_item extends uvm_sequence_item;
   bit           directed_recovery = 1'b0;
 
   //--------------------------------------------------------------------------
+  // LTSSM LINK CONTROL (for DISABLED / LOOPBACK / HOT_RESET directed tests)
+  //--------------------------------------------------------------------------
+  bit           link_ctrl_disable_link   = 1'b0;
+  bit           link_ctrl_enter_loopback = 1'b0;
+  bit           link_ctrl_hot_reset      = 1'b0;
+  bit           loopback_exit_directed   = 1'b0;
+  bit           hot_reset_remain_directed= 1'b0;
+
+  //--------------------------------------------------------------------------
   // FLIT OHC indication
   //   bit 0   : OHC-A
   //   bit 1   : OHC-B

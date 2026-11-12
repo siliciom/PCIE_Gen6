@@ -23,6 +23,8 @@ class PCIe_EP_PL_model extends uvm_component;
    
    PCIe_env_config   pcie_ecfg;
    PCIe_sequence_item     pcie_seq_item;
+   // Item handle of the LTSSM run currently in progress.
+   PCIe_sequence_item     ep_ctrl_item;
    virtual PCIe_EP_interface     ep_pipe_intf_tx,ep_pipe_intf_rx;
 
    //EP
@@ -52,6 +54,7 @@ class PCIe_EP_PL_model extends uvm_component;
    bit             tx_parity_q[$];
    bit	           pl_sent;
    bit [7:0]       ep_ts1_os [`PCIe_TS_OS_SIZE];
+   bit [7:0]       ep_ts1_training_ctrl = 8'h00;
    bit [7:0]       ep_ts2_os [`PCIe_TS_OS_SIZE];
    bit [7:0]       ep_idle_os [`PCIe_TS_OS_SIZE];
    int             ts1_tx_count;
@@ -238,6 +241,8 @@ class PCIe_EP_PL_model extends uvm_component;
    endtask
 
  task ep_ltssm( PCIe_sequence_item pcie_seq_item);
+        ep_ctrl_item = pcie_seq_item;
+        ep_ts1_training_ctrl = 8'h00;
        if(pcie_seq_item.pkt_mode == FLIT)
        `uvm_info("RC_PL_MODEL","Configured_in_FLIT_MODE",UVM_LOW)
        else
@@ -374,6 +379,30 @@ class PCIe_EP_PL_model extends uvm_component;
                 // Only the FINAL L0 leaves the LTSSM
                 if (link_up) break;
                   end
+              DISABLED: begin
+                 ep_state_disabled();
+                 `uvm_info("EP_LTSSM","EP_DISABLED_COMPLETE_ENDING_TESTCASE",UVM_LOW)
+                 break;
+              end
+              LOOPBACK_ENTRY: begin
+                 ep_state_loopback_entry();
+              end
+              LOOPBACK_ACTIVE: begin
+                 ep_state_loopback_active();
+              end
+              LOOPBACK_EXIT: begin
+                 ep_state_loopback_exit();
+                 `uvm_info("EP_LTSSM","EP_LOOPBACK_EXIT_COMPLETE_ENDING_TESTCASE",UVM_LOW)
+                 break;
+              end
+              HOT_RESET: begin
+                 bit remain;
+                 ep_state_hot_reset(remain);
+                 if (!remain) begin
+                    `uvm_info("EP_LTSSM","EP_HOT_RESET_COMPLETE_ENDING_TESTCASE",UVM_LOW)
+                    break;
+                 end
+              end
              default: begin
                 `uvm_error("EP_LTSSM","INVALID_EP_LTSSM_STATE")
              end
@@ -621,6 +650,19 @@ class PCIe_EP_PL_model extends uvm_component;
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LinkWidth_Start",UVM_LOW)
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       //---------------------------------------------------------------
+       // Directed link-control exit (before Link Number negotiation).
+       //---------------------------------------------------------------
+       if (ep_ctrl_item != null && ep_ctrl_item.link_ctrl_disable_link) begin
+          `uvm_info("EP_LTSSM","LINK_DISABLE_SET_PRIOR_TO_ENTRY_IMMEDIATE_EP_DISABLED",UVM_LOW)
+          ep_main_state = DISABLED;
+          return;
+       end
+       if (ep_ctrl_item != null && ep_ctrl_item.link_ctrl_enter_loopback) begin
+          `uvm_info("EP_LTSSM","ENTER_LOOPBACK_SET_PRIOR_TO_ENTRY_IMMEDIATE_LOOPBACK_ENTRY",UVM_LOW)
+          ep_main_state = LOOPBACK_ENTRY;
+          return;
+       end
        // Reset precoder state for reliable K-symbol detection at the peer
        previous_symbol = 2'b11;
        // EP transmits PAD/PAD while still discovering RC's selected Link number.
@@ -940,6 +982,137 @@ task ep_state_config_complete();
        end
     endtask
 
+    //=======================================================================
+    //  DIRECTED SUBSTATES : Disabled / Loopback / Hot Reset
+    //=======================================================================
+    task ep_state_disabled();
+       `uvm_info("EP_LTSSM","ENTERED_DISABLED_BROADCASTING_TS1_WITH_DISABLE_LINK",UVM_LOW)
+       previous_symbol = 2'b11;
+       ep_link_num = PAD_BYTE;
+       ep_lane_num = PAD_BYTE;
+       ep_ts1_training_ctrl = `PCIe_TS1_TC_DISABLE_LINK;
+       build_ep_ts1();
+       send_ordered_set(ep_ts1_os,`PCIe_DISABLED_TS1_COUNT,"DISABLED_TS1");
+       ep_ts1_training_ctrl = 8'h00;
+       @(posedge ep_pipe_intf_tx.pclk);
+       ep_pipe_intf_tx.tx_valid     <= 1'b0;
+       ep_pipe_intf_tx.tx_data      <= '0;
+       ep_pipe_intf_tx.tx_elec_idle <= 1'b1;
+       link_up = 1'b0;
+       `uvm_info("EP_LTSSM","DISABLED_EIOS_TRANSMITTED_LINKUP=0_LANES_DISABLED",UVM_LOW)
+    endtask
+
+    //-------------------------------------------------------------------------
+    // ep_state_loopback_entry - EP is the Loopback slave (PAD/PAD TS1).
+    //-------------------------------------------------------------------------
+    task ep_state_loopback_entry();
+       bit rx_done;
+       bit timeout_occured;
+       `uvm_info("EP_LTSSM","ENTERED_LOOPBACK_ENTRY_SLAVE_BROADCASTING_PAD_TS1_WITH_LOOPBACK",UVM_LOW)
+       previous_symbol = 2'b11;
+       ep_link_num      = PAD_BYTE;
+       ep_lane_num      = PAD_BYTE;
+       rx_done          = 1'b0;
+       timeout_occured  = 1'b0;
+       ep_ts1_training_ctrl = `PCIe_TS1_TC_LOOPBACK;
+       build_ep_ts1();
+       fork
+          begin
+             send_ordered_set(ep_ts1_os,`PCIe_LOOPBACK_ENTRY_TS1_COUNT,"LOOPBACK_ENTRY_TS1");
+          end
+          begin
+             ep_check_rc_ts1(2,rx_done);
+          end
+          begin
+             ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_ENTRY);
+             timeout_occured = 1'b1;
+          end
+       join_any
+       disable fork;
+       ep_ts1_training_ctrl = 8'h00;
+       @(posedge ep_pipe_intf_tx.pclk);
+       ep_pipe_intf_tx.tx_valid <= 1'b0;
+       ep_pipe_intf_tx.tx_data  <= '0;
+       if (rx_done) begin
+          `uvm_info("EP_LTSSM","LOOPBACK_ENTRY_SYMBOL_LOCK_TO_LOOPBACK_ACTIVE",UVM_LOW)
+          ep_main_state = LOOPBACK_ACTIVE;
+       end
+       else begin
+          `uvm_info("EP_LTSSM",$sformatf("LOOPBACK_ENTRY_TIMEOUT=%0b_TO_LOOPBACK_EXIT",timeout_occured),UVM_LOW)
+          ep_main_state = LOOPBACK_EXIT;
+       end
+    endtask
+
+    task ep_state_loopback_active();
+       bit timeout_occured;
+       `uvm_info("EP_LTSSM","ENTERED_LOOPBACK_ACTIVE_SLAVE_WATCHING_FOR_DIRECTED_EXIT",UVM_LOW)
+       timeout_occured = 1'b0;
+       fork
+          begin
+             wait (ep_ctrl_item != null && ep_ctrl_item.loopback_exit_directed);
+             `uvm_info("EP_LTSSM","LOOPBACK_ACTIVE_DIRECTED_EXIT",UVM_LOW)
+          end
+          begin
+             ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_ACTIVE);
+             timeout_occured = 1'b1;
+          end
+       join_any
+       disable fork;
+       `uvm_info("EP_LTSSM",$sformatf("LOOPBACK_ACTIVE_TIMEOUT=%0b_TO_LOOPBACK_EXIT",timeout_occured),UVM_LOW)
+       ep_main_state = LOOPBACK_EXIT;
+    endtask
+
+    task ep_state_loopback_exit();
+       `uvm_info("EP_LTSSM","ENTERED_LOOPBACK_EXIT_SLAVE_ELECTRICAL_IDLE",UVM_LOW)
+       previous_symbol = 2'b11;
+       @(posedge ep_pipe_intf_tx.pclk);
+       ep_pipe_intf_tx.tx_valid     <= 1'b0;
+       ep_pipe_intf_tx.tx_data      <= '0;
+       ep_pipe_intf_tx.tx_elec_idle <= 1'b1;
+       ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_EXIT_IDLE);
+       link_up = 1'b0;
+       `uvm_info("EP_LTSSM","LOOPBACK_EXIT_ELECTRICAL_IDLE_COMPLETE_LINKUP=0",UVM_LOW)
+    endtask
+
+    task ep_state_hot_reset(output bit remain);
+       bit echo_done;
+       bit timeout_occured;
+       `uvm_info("EP_LTSSM","ENTERED_HOT_RESET_NOT_DIRECTED_BROADCASTING_TS1_WITH_HOT_RESET",UVM_LOW)
+       remain          = 1'b0;
+       echo_done       = 1'b0;
+       timeout_occured = 1'b0;
+       previous_symbol = 2'b11;
+       ep_link_num = PAD_BYTE;
+       ep_lane_num = PAD_BYTE;
+       ep_ts1_training_ctrl = `PCIe_TS1_TC_HOT_RESET;
+       build_ep_ts1();
+       fork
+          begin
+             send_ordered_set(ep_ts1_os,`PCIe_HOT_RESET_TS1_COUNT,"HOT_RESET_TS1");
+          end
+          begin
+             ep_check_rc_ts1(2,echo_done);
+          end
+          begin
+             ep_ltssm_timer(`PCIe_LTSSM_T_HOT_RESET);
+             timeout_occured = 1'b1;
+          end
+       join_any
+       disable fork;
+       ep_ts1_training_ctrl = 8'h00;
+       @(posedge ep_pipe_intf_tx.pclk);
+       ep_pipe_intf_tx.tx_valid <= 1'b0;
+       ep_pipe_intf_tx.tx_data  <= '0;
+       if (echo_done) begin
+          `uvm_info("EP_LTSSM","HOT_RESET_MATCHING_TS1S_STILL_ARRIVING_REMAIN",UVM_LOW)
+          remain = 1'b1;
+          return;
+       end
+       ep_pipe_intf_tx.tx_elec_idle <= 1'b1;
+       link_up = 1'b0;
+       `uvm_info("EP_LTSSM",$sformatf("HOT_RESET_TIMEOUT=%0b_LINKUP=0_EXITING",timeout_occured),UVM_LOW)
+    endtask
+
      task ep_state_l0(PCIe_sequence_item item);
 
         `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
@@ -1168,10 +1341,10 @@ task ep_state_config_complete();
         ep_ts1_os[1]  = ep_link_num;
         ep_ts1_os[2]  = ep_lane_num;
         ep_ts1_os[3]  = 8'h10;
-        ep_ts1_os[4]  = 8'h00;
-        ep_ts1_os[5]  = 8'h00;
-        ep_ts1_os[6]  = 8'h00;
-        ep_ts1_os[7]  = 8'h4A;
+         ep_ts1_os[4]  = 8'h00;
+         ep_ts1_os[`PCIe_TS1_TRAINING_CTRL_IDX] = ep_ts1_training_ctrl;
+         ep_ts1_os[6]  = 8'h00;
+         ep_ts1_os[7]  = 8'h4A;
         ep_ts1_os[8]  = 8'h4A;
         ep_ts1_os[9]  = 8'h4A;
         ep_ts1_os[10] = 8'h4A;
@@ -2024,6 +2197,13 @@ task ep_state_config_complete();
        base_idle    = ep_rx_idle_count;
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_Idle",UVM_LOW)
+       // Directed Hot Reset (PCIe Base 6.0, Sec 4.2.7.4 Recovery.Idle): when the higher
+       // layer sets the Hot Reset bit, leave Recovery.Idle for Hot Reset, not for L0.
+       if (item != null && item.link_ctrl_hot_reset) begin
+          `uvm_info("EP_RECOVERY","HOT_RESET_DIRECTED_IN_RECOVERY_IDLE_TO_HOT_RESET",UVM_LOW)
+          ep_main_state = HOT_RESET;
+          return;
+       end
        previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
        ep_build_recovery_idle();
        fork : EP_RECOVERY_IDLE_THREADS

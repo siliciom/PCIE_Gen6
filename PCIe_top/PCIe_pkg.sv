@@ -77,6 +77,13 @@ package PCIe_pkg;
 	// [RECOVERY] Directed Recovery / sequential rate negotiation (Gen1 -> Gen6)
 	`include "../PCIe_sequences/PCIe_RC_ltssm_recovery_sequence.sv"
 	`include "../PCIe_sequences/PCIe_EP_ltssm_recovery_sequence.sv"
+	// [LINK_CTRL] Directed Disabled / Loopback / Hot Reset paths (no L0)
+	`include "../PCIe_sequences/PCIe_RC_ltssm_disabled_sequence.sv"
+	`include "../PCIe_sequences/PCIe_EP_ltssm_disabled_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_ltssm_loopback_sequence.sv"
+	`include "../PCIe_sequences/PCIe_EP_ltssm_loopback_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_ltssm_hot_reset_sequence.sv"
+	`include "../PCIe_sequences/PCIe_EP_ltssm_hot_reset_sequence.sv"
       //`include "../PCIe_sequences/PCIe_MEM_3DW_FLIT_sequence.sv"
       //`include "../PCIe_sequences/PCIe_MEM_4DW_FLIT_sequence.sv"
 
@@ -208,6 +215,10 @@ package PCIe_pkg;
 	// [RECOVERY] Directed Recovery / sequential rate negotiation testcase.
 	// One test drives the complete Gen1 -> Gen2 -> ... -> Gen6 walk.
 	`include "../PCIe_tests/PCIe_gen6_ltssm_recovery_test.sv"
+	// [LINK_CTRL] Directed Disabled / Loopback / Hot Reset testcases.
+	`include "../PCIe_tests/PCIe_gen6_ltssm_disabled_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_ltssm_loopback_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_ltssm_hot_reset_test.sv"
       //`include "../PCIe_tests/PCIe_MEM_3DW_FLIT_test.sv"
       //`include "../PCIe_tests/PCIe_MEM_4DW_FLIT_test.sv"
 

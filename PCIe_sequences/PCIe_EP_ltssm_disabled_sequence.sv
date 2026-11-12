@@ -1,0 +1,45 @@
+//=========================================================================================
+// File         : PCIe_EP_ltssm_disabled_sequence.sv
+// Project      : PCIE_Gen6
+// Description  : PCIe_sequences/PCIe_EP_ltssm_disabled_sequence.sv
+//                Drives the EP LTSSM into DISABLED out of
+//                Configuration.Linkwidth.Start (Disable Link control bit).
+//=========================================================================================
+
+/**********************************************************************************************************************
+ * Copyright by the SILICIOM TECHNOLOGIES PVT LTD,
+ * By using, accessing or downloading any part of this file/document,  including by copying, saving,
+ * distributing, displaying or preparing derivatives of,
+ * you agree to be and are bound to the terms of the SILICIOM TECHNOLOGIES PVT LTD license agreement.
+ * All other rights reserved.
+ ***********************************************************************************************************************/
+
+class PCIe_EP_ltssm_disabled_sequence extends PCIe_EP_controller_base_sequence;
+
+  `uvm_object_utils(PCIe_EP_ltssm_disabled_sequence)
+
+  function new(string name = "PCIe_EP_ltssm_disabled_sequence");
+    super.new(name);
+  endfunction
+
+  task body();
+    `uvm_info("EP_LTSSM_DISABLED_SEQ","Starting_EP_LTSSM_Disabled_Sequence",UVM_LOW)
+    pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
+    pcie_seq_item.link_ctrl_disable_link = 1'b1;
+    start_item(pcie_seq_item);
+    if (!pcie_seq_item.randomize() with {
+      electrical_idle_test == 1'b0;
+      no_receiver_test     == 1'b0;
+      tx_elec_idle         == 1'b1;
+      tx_valid             == 1'b0;
+      rate                 == 3'b000;
+      pkt_mode             == FLIT;
+    }) begin
+      `uvm_error("EP_LTSSM_DISABLED_SEQ","EP_ltssm_disabled_sequence_randomization_failed")
+    end
+    finish_item(pcie_seq_item);
+    `uvm_info("EP_LTSSM_DISABLED_SEQ","EP_LTSSM_Disabled_Sequence_item_completed",UVM_LOW)
+  endtask
+
+endclass
+

@@ -775,6 +775,28 @@
 `define PCIe_LTSSM_T_RCVRY_RCVRCFG           48ms
 `define PCIe_LTSSM_T_RCVRY_IDLE               2ms
 
+//==============================================================================
+// TS1 TRAINING CONTROL  (PCIe Base 6.0, Sec 4.2.7 - Symbol 5)
+//   bit 0 : Hot Reset       bit 1 : Disable Link      bit 2 : Loopback
+//==============================================================================
+`define PCIe_TS1_TRAINING_CTRL_IDX         5
+`define PCIe_TS1_TC_HOT_RESET       8'h01
+`define PCIe_TS1_TC_DISABLE_LINK    8'h02
+`define PCIe_TS1_TC_LOOPBACK        8'h04
+
+//==============================================================================
+// DIRECTED LINK-CONTROL SUBSTATES  (Disabled / Loopback / Hot Reset)
+//==============================================================================
+`define PCIe_DISABLED_TS1_COUNT            16
+`define PCIe_LOOPBACK_ENTRY_TS1_COUNT      16
+`define PCIe_HOT_RESET_TS1_COUNT           16
+`define PCIe_LTSSM_T_LOOPBACK_ENTRY         5ms
+`define PCIe_LTSSM_T_LOOPBACK_ACTIVE        5ms
+`define PCIe_LTSSM_T_LOOPBACK_EXIT_IDLE     2ms
+`define PCIe_LTSSM_T_HOT_RESET              2ms
+`define PCIe_LTSSM_T_DISABLED               2ms
+
+
 `endif 
 // PCIe_DEFINES_SVH
 
