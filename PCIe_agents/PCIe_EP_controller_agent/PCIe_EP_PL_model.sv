@@ -1103,11 +1103,11 @@ task ep_state_config_complete();
        @(posedge ep_pipe_intf_tx.pclk);
        ep_pipe_intf_tx.tx_valid <= 1'b0;
        ep_pipe_intf_tx.tx_data  <= '0;
-       if (echo_done) begin
-          `uvm_info("EP_LTSSM","HOT_RESET_MATCHING_TS1S_STILL_ARRIVING_REMAIN",UVM_LOW)
-          remain = 1'b1;
-          return;
-       end
+        if (echo_done && (ep_ctrl_item != null) && ep_ctrl_item.hot_reset_remain_directed) begin
+           `uvm_info("EP_LTSSM","HOT_RESET_MATCHING_TS1S_STILL_ARRIVING_REMAIN",UVM_LOW)
+           remain = 1'b1;
+           return;
+        end
        ep_pipe_intf_tx.tx_elec_idle <= 1'b1;
        link_up = 1'b0;
        `uvm_info("EP_LTSSM",$sformatf("HOT_RESET_TIMEOUT=%0b_LINKUP=0_EXITING",timeout_occured),UVM_LOW)

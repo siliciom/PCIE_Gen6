@@ -22,7 +22,7 @@ class PCIe_RC_ltssm_loopback_sequence extends PCIe_RC_controller_base_sequence;
 
   // Directed exit is raised this long after the LTSSM run starts, i.e. while
   // the LTSSM is sitting in Loopback.Active.
-  localparam time LOOPBACK_EXIT_DELAY = 3ms;
+  localparam time LOOPBACK_EXIT_DELAY = 10us;
 
   function new(string name = "PCIe_RC_ltssm_loopback_sequence");
     super.new(name);

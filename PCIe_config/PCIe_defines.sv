@@ -792,7 +792,7 @@
 `define PCIe_HOT_RESET_TS1_COUNT           16
 `define PCIe_LTSSM_T_LOOPBACK_ENTRY         5ms
 `define PCIe_LTSSM_T_LOOPBACK_ACTIVE        5ms
-`define PCIe_LTSSM_T_LOOPBACK_EXIT_IDLE     2ms
+`define PCIe_LTSSM_T_LOOPBACK_EXIT_IDLE     10us
 `define PCIe_LTSSM_T_HOT_RESET              2ms
 `define PCIe_LTSSM_T_DISABLED               2ms
 
