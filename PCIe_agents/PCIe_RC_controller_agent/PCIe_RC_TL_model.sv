@@ -76,6 +76,8 @@ class PCIe_RC_TL_model extends uvm_component;
   // [FLIT_SEG] shadow of every DW the RC has written (DW address -> data),
   // used to check the 1024 DW read back in the CplD against what was written
   bit [31:0]               wr_shadow      [bit [63:0]];
+  time  wr_shadow_t  [bit [63:0]];                       // when each DW was written
+  time  rd_req_time  [bit [`PCIe_TL_TAG_W-1:0]];         // when each read request was sent
   int unsigned             n_rd_cpl_checked, n_rd_cpl_dw_match, n_rd_cpl_dw_mismatch, n_rd_cpl_dw_unwritten;
   int unsigned             n_seg_txn;        // transactions that were split
   int unsigned             n_seg_tlp;        // segment TLPs created
@@ -1106,6 +1108,7 @@ class PCIe_RC_TL_model extends uvm_component;
 
       if (have_req) begin
         if (!wr_shadow.exists(base_dw + i))           n_unw++;
+	else if (wr_shadow_t[base_dw + i] > rd_req_time[cpl.tag]) n_unw++;   // written after this read was sent
         else if (wr_shadow[base_dw + i] == cpl.cpl_data[i]) n_match++;
         else begin
           n_mis++;
@@ -1615,6 +1618,7 @@ class PCIe_RC_TL_model extends uvm_component;
     //----------------------------------------------------------------------
     if (is_non_posted(tr)) begin
       outstanding[tr.tag] = tr;
+      rd_req_time[tr.tag] = $time;
     end
 
     //----------------------------------------------------------------------
@@ -1632,7 +1636,10 @@ class PCIe_RC_TL_model extends uvm_component;
 
     // [FLIT_SEG] remember what was written, to check later read completions
     if ((tr.txn_type == PCIe_TL_MEM) && (tr.dir == PCIe_TL_WRITE))
-      foreach (tr.data[i]) wr_shadow[(64'(tr.address) >> 2) + i] = tr.data[i];
+	    foreach (tr.data[i]) begin 
+		    wr_shadow[(64'(tr.address) >> 2) + i] = tr.data[i];
+		    wr_shadow_t[(64'(tr.address) >> 2) + i] = $time;
+	    end
 
     `uvm_info(get_type_name(), "[TL->DL] TLP_SENT_TO_DL", UVM_MEDIUM);
      tlp_dl_ap.write(tr);

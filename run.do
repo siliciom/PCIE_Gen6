@@ -5,7 +5,7 @@
 #set testname "PCIe_gen6_ltssm_detect_no_receiver_test"
 #set testname "PCIe_gen6_ltssm_basic_linkup_L0_test"
 #set testname "PCIe_gen6_ltssm_disabled_test"
-set testname "PCIe_gen6_ltssm_loopback_test"
+#set testname "PCIe_gen6_ltssm_loopback_test"
 #set testname "PCIe_gen6_ltssm_hot_reset_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MinPayload_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MaxPayload_test"
@@ -63,7 +63,7 @@ set testname "PCIe_gen6_ltssm_loopback_test"
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_MaxPayload_test"
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_Random_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
-
+set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
  
 vlib work
 vmap work work
