@@ -105,6 +105,8 @@ class PCIe_EP_DL_model extends uvm_component;
     //localparam bit [31:0] INITFC2_DLLP = 32'h0300_0000;
         // ---- DLCMSM additions ----
     dl_state_e          DL_STATE = DL_INACTIVE;
+    // [DL_ASSERT] DL state machine assertions live inside PCIe_EP_interface (PCIe_top/PCIe_PIPE_interface.sv)
+    virtual PCIe_EP_interface dl_aif;
     dl_init_substate_e  dl_init_substate;
     uvm_event           uvm_ep_l0_to_dl_ev;   // fired by PL model when LTSSM reaches L0
     int                 fc1_sent_count, fc1_rcvd_count;
@@ -180,6 +182,9 @@ class PCIe_EP_DL_model extends uvm_component;
     fc_dl_init();
 ///////////////////to enable to non flit mode//////////
      void'(uvm_config_db#(pkt_mode_e)::get(this, "", "link_mode", dl_rx_pkt_mode));
+    // [DL_ASSERT] PIPE interface also holds the DL assertions (set in PCIe_top)
+    if (!uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", dl_aif))
+      `uvm_warning("EP_DL_ASSERT", "PCIe_EP_INTERFACE not found :: DL assertions are OFF for EP")
 
   endfunction
 
@@ -212,7 +217,57 @@ class PCIe_EP_DL_model extends uvm_component;
   //   DL_ACTIVE    --> dl_link_active=1, dl_active_event fires -> TL may send TLPs
   // =========================================================================
 
+  // =========================================================================
+  // [DL_ASSERT] MIRROR FOR THE DL ASSERTIONS
+  // Copies the DLCMSM variables into dl_aif on every pclk negedge, so the assertions
+  // in PCIe_EP_interface (sampled on posedge) always sees stable values.
+  // =========================================================================
+  function void dl_aif_sample();
+    if (dl_aif == null) return;
+    dl_aif.dl_state               = DL_STATE;
+    dl_aif.dl_init_sub            = dl_init_substate;
+    dl_aif.dl_link_active         = dl_link_active;
+    dl_aif.phy_linkup             = phy_linkup;
+    dl_aif.next_tx_seq            = NEXT_TX_FLIT_SEQ_NUM;
+    dl_aif.tx_acknak_seq          = TX_ACKNAK_FLIT_SEQ_NUM;
+    dl_aif.ackd_seq               = ACKD_FLIT_SEQ_NUM;
+    dl_aif.next_exp_rx_seq        = NEXT_EXPECTED_RX_FLIT_SEQ_NUM;
+    dl_aif.implicit_rx_seq        = IMPLICIT_RX_FLIT_SEQ_NUM;
+    dl_aif.tx_replay_seq          = TX_REPLAY_FLIT_SEQ_NUM;
+    dl_aif.nak_ignore_seq         = NAK_IGNORE_FLIT_SEQ_NUM;
+    dl_aif.flit_replay_num        = FLIT_REPLAY_NUM;
+    dl_aif.nak_scheduled          = NAK_SCHEDULED;
+    dl_aif.ack_scheduled          = ACK_SCHEDULED;
+    dl_aif.replay_scheduled       = REPLAY_SCHEDULED;
+    dl_aif.replay_in_progress     = EP_REPLAY_IN_PROGRESS;
+    dl_aif.nak_withdrawal_allowed = NAK_WITHDRAWAL_ALLOWED;
+    dl_aif.tx_retry_size          = tx_retry_buffer.size();
+    dl_aif.rx_retry_size          = rx_retry_buffer.size();
+  endfunction
+
+  task run_dl_assert_mirror();
+    if (dl_aif == null) return;
+    dl_aif_sample();
+    @(negedge dl_aif.pclk);
+    dl_aif_sample();
+    dl_aif.sample_valid = 1'b1;
+    forever begin
+      @(negedge dl_aif.pclk);
+      dl_aif_sample();
+    end
+  endtask
+
+  // [DL_ASSERT] run_phase = mirror thread + the original DLCMSM loop (run_dl_main).
+  // The mirror is a SIBLING process, so 'disable fork' inside run_dl_main
+  // (used on link-down) cannot kill it.
   task run_phase(uvm_phase phase);
+    fork
+      run_dl_assert_mirror();
+      run_dl_main();
+    join
+  endtask
+
+  task run_dl_main();
      `uvm_info("EP_DLCMSM","[DLCMSM_TRACE] WAITING_FOR_ep_l0_to_dl_event (fired by PL model on LTSSM L0 entry)",UVM_LOW)
      forever begin
          uvm_ep_l0_to_dl_ev.wait_trigger();
@@ -465,6 +520,12 @@ class PCIe_EP_DL_model extends uvm_component;
        // TLP flit must stay 0, exactly as before the DLCMSM packets were driven).
        dllp_content = '0;
        dllp_tx_pending = 1'b1;
+       // [DL_ASSERT] used by DL_NO_DLLP_IN_INACTIVE_CHECK (no DLLP in DL_INACTIVE)
+       if (dl_aif != null) begin
+         dl_aif.tx_dllp_dl_state = DL_STATE;
+         dl_aif.tx_dllp_content  = content;
+         dl_aif.tx_dllp_cnt++;
+       end
        flit_cnt_count(1'b1, dcm_item.dlp_flit_out);   // [FLIT_CNT] TX
        dl_ap.write(dcm_item);
        `uvm_info("EP_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h :: WAITING_FOR_DRIVER_TO_DRIVE_IT_ON_PIPE",content),UVM_LOW)
@@ -995,6 +1056,11 @@ class PCIe_EP_DL_model extends uvm_component;
     `uvm_info("EP_DL_MODEL",$sformatf("DL -> PL: item from driver = %p",item.tlp_data),UVM_LOW)
     form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
 
+    // [DL_ASSERT] used by DL_TLP_ONLY_IN_ACTIVE_CHECK (TLP flit only in DL_ACTIVE)
+    if (dl_aif != null && item.is_payload) begin
+      dl_aif.tx_payload_dl_state = DL_STATE;
+      dl_aif.tx_payload_cnt++;
+    end
     flit_cnt_count(1'b1, item.dlp_flit_out);   // [FLIT_CNT] TX
     dl_ap.write(item);
   endfunction
