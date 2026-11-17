@@ -21,6 +21,29 @@ PCIe_gen6_ltssm_loopback_test
 PCIe_gen6_ltssm_recovery_test
 
 #------------------------------------------------------------------------------
+# LTSSM directed timeout tests (3DW build)
+#------------------------------------------------------------------------------
+PCIe_gen6_ltssm_timeout_detect_quiet_test
+PCIe_gen6_ltssm_timeout_detect_active_test
+PCIe_gen6_ltssm_timeout_polling_active_test
+PCIe_gen6_ltssm_timeout_polling_configuration_test
+PCIe_gen6_ltssm_timeout_config_linkwidth_start_test
+PCIe_gen6_ltssm_timeout_config_linkwidth_accept_test
+PCIe_gen6_ltssm_timeout_config_lanenum_wait_test
+PCIe_gen6_ltssm_timeout_config_lanenum_accept_test
+PCIe_gen6_ltssm_timeout_config_complete_test
+PCIe_gen6_ltssm_timeout_config_idle_test
+PCIe_gen6_ltssm_timeout_recovery_rcvrlock_test
+PCIe_gen6_ltssm_timeout_recovery_equalization_test
+PCIe_gen6_ltssm_timeout_recovery_rcvrcfg_test
+PCIe_gen6_ltssm_timeout_recovery_idle_test
+PCIe_gen6_ltssm_timeout_loopback_entry_test
+PCIe_gen6_ltssm_timeout_loopback_active_test
+PCIe_gen6_ltssm_timeout_loopback_exit_test
+PCIe_gen6_ltssm_timeout_hot_reset_test
+PCIe_gen6_ltssm_timeout_disabled_test
+
+#------------------------------------------------------------------------------
 # 3DW FLIT mode
 #------------------------------------------------------------------------------
 PCIe_gen6_3DW_Flit_CFGRd0_Random_test
