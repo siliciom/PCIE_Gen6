@@ -81,8 +81,8 @@
 //      "same Requester ID but different PASID" part of A2b / B2b / C2b is never used.
 //      When a PASID field is added, only has_pasid() / get_pasid() need to change.
 //    * Requester Segment (Flit Mode) is not modelled -> only the 16 bit Requester ID is used.
-//    * AtomicOp is not in pcie_tl_txn_type_e yet. When it is added, put it in the
-//      ORD_NPR_DATA group inside get_ord_class().
+//    * [ATOMIC] AtomicOp (FetchAdd / Swap / CAS) is a MEM write with atomic_op != NONE,
+//      it is put in the ORD_NPR_DATA group inside get_ord_class().
 //    * Different Traffic Class (TC) : the spec says the table applies only inside ONE TC.
 //      Two TLPs with different TC have no ordering rule -> check_pass() returns ORD_YN.
 //=========================================================================================
@@ -95,7 +95,7 @@ import typedef_enums :: *;
 typedef enum bit [1:0] {
   ORD_POSTED   = 2'd0,   // Row A / Col 2 : MWr, Msg, MsgD
   ORD_READ     = 2'd1,   // Row B / Col 3 : MRd, MRdLk, IORd, CfgRd
-  ORD_NPR_DATA = 2'd2,   // Row C / Col 4 : IOWr, CfgWr, DMWr, (AtomicOp)
+  ORD_NPR_DATA = 2'd2,   // Row C / Col 4 : IOWr, CfgWr, DMWr, AtomicOp
   ORD_CPL      = 2'd3    // Row D / Col 5 : Cpl, CplD, CplLk, CplDLk
 } pcie_ord_class_e;
 
@@ -164,7 +164,7 @@ class PCIe_ordering_rules extends uvm_object;
       // Memory : normal write is Posted, DMWr is NPR with Data, any read is a Read Request
       PCIe_TL_MEM : begin
         if (t.dir == PCIe_TL_WRITE)
-          return t.mem_deferrable ? ORD_NPR_DATA : ORD_POSTED;
+          return t.is_np_mem_write() ? ORD_NPR_DATA : ORD_POSTED;   // [ATOMIC] DMWr + AtomicOp = NPR with Data
         else
           return ORD_READ;                       // MRd and MRdLk
       end

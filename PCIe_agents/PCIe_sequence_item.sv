@@ -41,6 +41,10 @@ class PCIe_sequence_item extends uvm_sequence_item;
   //--------------------------------------------------------------------------
   rand bit        mem_locked;        // 1 => MRdLk (Memory Read Request-Locked)
   rand bit        mem_deferrable;    // 1 => DMWr  (Deferrable Memory Write)
+  // [ATOMIC] AtomicOp kind. NONE for every normal request (soft default below).
+  //   An AtomicOp is sent as txn_type = MEM, dir = WRITE (it carries data),
+  //   but it is NON-POSTED : the completer returns a CplD with the old value.
+  rand pcie_atomic_op_e atomic_op;
   rand bit [`PCIe_TL_DW_BE_W-1:0]  first_dw_be;   // First DW byte enables
   rand bit [`PCIe_TL_DW_BE_W-1:0]  last_dw_be;    // Last  DW byte enables
   rand bit [`PCIe_TL_REQ_ID_W-1:0] requester_id;  // {bus, dev, fn}
@@ -438,6 +442,7 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_int  (length,         UVM_ALL_ON)
     `uvm_field_int  (mem_locked,     UVM_ALL_ON)
     `uvm_field_int  (mem_deferrable, UVM_ALL_ON)
+    `uvm_field_enum (pcie_atomic_op_e, atomic_op, UVM_ALL_ON)    // [ATOMIC]
     `uvm_field_int  (first_dw_be,    UVM_ALL_ON | UVM_HEX)
     `uvm_field_int  (last_dw_be,     UVM_ALL_ON | UVM_HEX)
     `uvm_field_int  (requester_id,   UVM_ALL_ON | UVM_HEX)
@@ -655,6 +660,40 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     if (mem_deferrable) dir == PCIe_TL_WRITE;
   }
 
+  //--------------------------------------------------------------------------
+  // [ATOMIC] AtomicOp rules - PCIe Base 6.0 Sec 2.2.7 / Table 2-15
+  //   * default is "not an atomic" (soft, so the inline 'with' can override)
+  //   * Memory Request carrying data, never locked / deferrable
+  //   * Length must be an architected value :
+  //       FetchAdd / Swap : 1 DW (32-bit) or 2 DW (64-bit)
+  //       CAS             : 2 DW (32-bit) or 4 DW (64-bit)
+  //   * Address naturally aligned to the operand size (4 B or 8 B)
+  //   * DW BE fields are Reserved -> no OHC-A1 in Flit Mode, so the BEs are
+  //     kept at their "implied" value (First = 1111b, Last = 1111b / 0000b)
+  //--------------------------------------------------------------------------
+  constraint c_atomic_default { soft atomic_op == PCIe_ATOMIC_NONE; }
+
+  constraint c_atomic_rules {
+    if (atomic_op != PCIe_ATOMIC_NONE) {
+      txn_type       == PCIe_TL_MEM;
+      dir            == PCIe_TL_WRITE;
+      mem_locked     == 1'b0;
+      mem_deferrable == 1'b0;
+
+      if (atomic_op == PCIe_ATOMIC_CAS) length inside {`PCIe_ATOMIC_CAS_LEN_32, `PCIe_ATOMIC_CAS_LEN_64};
+      else                              length inside {`PCIe_ATOMIC_FETCHADD_LEN_32, `PCIe_ATOMIC_FETCHADD_LEN_64};
+
+      // natural alignment : 64-bit operand -> address[2:0] == 0
+      if (((atomic_op == PCIe_ATOMIC_CAS) && (length == `PCIe_ATOMIC_CAS_LEN_64)) ||
+          ((atomic_op != PCIe_ATOMIC_CAS) && (length == `PCIe_ATOMIC_FETCHADD_LEN_64)))
+        address[2:0] == 3'b000;
+
+      first_dw_be == 4'hF;
+      (length == 10'd1) -> (last_dw_be == 4'h0);
+      (length != 10'd1) -> (last_dw_be == 4'hF);
+    }
+  }
+
   constraint c_cfg_fields {
     if (txn_type != PCIe_TL_CFG) {
       cfg_reg_num     == '0;
@@ -721,6 +760,13 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   function pcie_fmttype_e get_fmttype();
     case (txn_type)
       PCIe_TL_MEM : begin
+        // [ATOMIC] FetchAdd / Swap / CAS
+        case (atomic_op)
+          PCIe_ATOMIC_FETCHADD : return is_4dw() ? PCIe_FMTTYPE_FETCHADD_64 : PCIe_FMTTYPE_FETCHADD_32;
+          PCIe_ATOMIC_SWAP     : return is_4dw() ? PCIe_FMTTYPE_SWAP_64     : PCIe_FMTTYPE_SWAP_32;
+          PCIe_ATOMIC_CAS      : return is_4dw() ? PCIe_FMTTYPE_CAS_64      : PCIe_FMTTYPE_CAS_32;
+          default              : ;   // not an atomic -> normal memory request below
+        endcase
         if (mem_deferrable)
           return is_4dw() ? PCIe_FMTTYPE_DMWR_64 : PCIe_FMTTYPE_DMWR_32;
         if (mem_locked)
@@ -749,6 +795,13 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     case (txn_type)
 
       PCIe_TL_MEM: begin
+        // [ATOMIC] FetchAdd / Swap / CAS (Table 2-5 : 4Ch/4Dh/4Eh 32-bit, 6Ch/6Dh/6Eh 64-bit)
+        case (atomic_op)
+          PCIe_ATOMIC_FETCHADD : return is_64bit_addr() ? PCIe_FLITTYPE_FETCHADD_64 : PCIe_FLITTYPE_FETCHADD_32;
+          PCIe_ATOMIC_SWAP     : return is_64bit_addr() ? PCIe_FLITTYPE_SWAP_64     : PCIe_FLITTYPE_SWAP_32;
+          PCIe_ATOMIC_CAS      : return is_64bit_addr() ? PCIe_FLITTYPE_CAS_64      : PCIe_FLITTYPE_CAS_32;
+          default              : ;   // not an atomic -> normal memory request below
+        endcase
         if (mem_deferrable) begin
           return is_64bit_addr() ? PCIe_FLITTYPE_DMWR_64 : PCIe_FLITTYPE_DMWR_32;
         end
@@ -798,6 +851,91 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   endfunction
 
   //==========================================================================
+  // [ATOMIC] AtomicOp helpers (shared by the sequences, RC TL and EP TL)
+  //
+  //   Data layout used by this bench (one DW = one 32-bit word) :
+  //     32-bit operand : value = data[k]
+  //     64-bit operand : value = {data[k+1], data[k]}   (low DW first)
+  //   FetchAdd / Swap : operand 1 = data[0 ..]
+  //   CAS             : operand 1 = compare = first half of data[]
+  //                     operand 2 = swap    = second half of data[]
+  //==========================================================================
+
+  // 1 => this request is an AtomicOp (FetchAdd / Swap / CAS)
+  function bit is_atomic();
+    return (txn_type == PCIe_TL_MEM) && (atomic_op != PCIe_ATOMIC_NONE);
+  endfunction
+
+  // 1 => Memory Write that is NON-POSTED (needs a completion) : DMWr or AtomicOp
+  function bit is_np_mem_write();
+    return mem_deferrable || is_atomic();
+  endfunction
+
+  // Operand size in DW (1 = 32-bit, 2 = 64-bit) from the op and the Length field
+  static function int unsigned atomic_operand_dw(pcie_atomic_op_e op, int unsigned len_dw);
+    if (op == PCIe_ATOMIC_CAS) return len_dw / 2;   // CAS carries two operands
+    return len_dw;
+  endfunction
+
+  // 1 => Length is an architected value for this AtomicOp (Table 2-15)
+  static function bit atomic_length_ok(pcie_atomic_op_e op, int unsigned len_dw);
+    if (op == PCIe_ATOMIC_CAS) return (len_dw == 2) || (len_dw == 4);
+    return (len_dw == 1) || (len_dw == 2);
+  endfunction
+
+  // Read one operand (1 or 2 DW) out of a DW array, starting at DW 'start'
+  static function bit [63:0] atomic_get_operand(bit [`PCIe_TL_DATA_DW_W-1:0] dws[],
+                                                int unsigned start, int unsigned n_dw);
+    bit [63:0] v;
+    v = '0;
+    if (start < dws.size())                    v[31:0]  = dws[start];
+    if ((n_dw == 2) && (start + 1 < dws.size())) v[63:32] = dws[start + 1];
+    return v;
+  endfunction
+
+  // Write one operand (1 or 2 DW) into a new DW array (low DW first)
+  static function void atomic_put_operand(bit [63:0] v, int unsigned n_dw,
+                                          ref bit [`PCIe_TL_DATA_DW_W-1:0] dws[]);
+    dws = new[n_dw];
+    dws[0] = v[31:0];
+    if (n_dw == 2) dws[1] = v[63:32];
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // atomic_compute : THE atomic operation. Given the original memory value,
+  // returns the value that must be written back to memory.
+  //   FetchAdd : new = old + add          (wraps around, carry is dropped)
+  //   Swap     : new = swap
+  //   CAS      : new = (old == compare) ? swap : old
+  //   operand1 = add / swap / compare value, operand2 = CAS swap value
+  //--------------------------------------------------------------------------
+  static function bit [63:0] atomic_compute(pcie_atomic_op_e op, int unsigned n_dw,
+                                            bit [63:0] old_val,
+                                            bit [63:0] operand1, bit [63:0] operand2);
+    bit [63:0] new_val;
+    case (op)
+      PCIe_ATOMIC_FETCHADD : new_val = old_val + operand1;
+      PCIe_ATOMIC_SWAP     : new_val = operand1;
+      PCIe_ATOMIC_CAS      : new_val = (old_val == operand1) ? operand2 : old_val;
+      default              : new_val = old_val;
+    endcase
+    if (n_dw == 1) new_val[63:32] = 32'h0;   // 32-bit operation : keep only 32 bits
+    return new_val;
+  endfunction
+
+  // Text of an atomic op for the log ("FetchAdd 32-bit" ...)
+  static function string atomic_name(pcie_atomic_op_e op, int unsigned n_dw);
+    string s;
+    case (op)
+      PCIe_ATOMIC_FETCHADD : s = "FetchAdd";
+      PCIe_ATOMIC_SWAP     : s = "Swap";
+      PCIe_ATOMIC_CAS      : s = "CAS";
+      default              : s = "NotAtomic";
+    endcase
+    return $sformatf("%s %0d-bit", s, n_dw * 32);
+  endfunction
+
+  //==========================================================================
   // [FLIT_SEG] FLIT segmentation helpers (shared by the RC and EP TL models)
   //
   //   max payload per TLP = 59 DW region - Header Base - OHC - ECRC trailer
@@ -832,9 +970,13 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     case (txn_type)
 
       PCIe_TL_MEM: begin
+        // [ATOMIC] DW BE fields are Reserved for AtomicOps -> never OHC-A1
+        if (is_atomic()) begin
+          ohc_a_type = OHC_A_NONE;
+        end
         // Explicit byte enables require OHC-A1
         // [FLIT_SEG] a segment of a request that needed OHC-A1 keeps it
-        if ((first_dw_be != 4'hF) ||
+        else if ((first_dw_be != 4'hF) ||
             ((get_payload_dw() > 1) && (last_dw_be != 4'hF)) ||
             flit_seg_keep_ohc) begin
           ohc_a_type = OHC_A1;
@@ -874,7 +1016,8 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     return $sformatf(
       "TLP %s/%s fmttype=%s addr=0x%016h len=%0d tag=0x%0h reqid=0x%04h data_dw=%0d",
       txn_type.name(),
-      (txn_type == PCIe_TL_MSG) ? (msg_has_data ? "MSGD" : "MSG") : dir.name(),
+      (txn_type == PCIe_TL_MSG) ? (msg_has_data ? "MSGD" : "MSG") :
+      is_atomic() ? atomic_op.name() : dir.name(),                       // [ATOMIC]
       get_fmttype().name(), address, length, tag, requester_id, data.size());
   endfunction
 
@@ -982,7 +1125,9 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   endfunction
 
   // TLP -> (credit class, header credits, data credits)
-  //   P  : memory write, message        NP : memory read, DMWr, IO, CFG     CPL : completion
+  //   P  : memory write, message        NP : memory read, DMWr, AtomicOp, IO, CFG     CPL : completion
+  //   deferrable : 1 for a Non-Posted memory write (DMWr or [ATOMIC] AtomicOp),
+  //                callers pass item.is_np_mem_write()
   static function void fc_classify(pcie_tl_txn_type_e t, pcie_tl_dir_e d, bit deferrable,
                                    int payload_dw,
                                    output int unsigned c, output int unsigned h,

@@ -10,7 +10,7 @@
 # --- LTSSM directed timeout tests ---
 #set testname "PCIe_gen6_ltssm_timeout_detect_quiet_test"
 #set testname "PCIe_gen6_ltssm_timeout_detect_active_test"
-set testname "PCIe_gen6_ltssm_timeout_polling_active_test"
+#set testname "PCIe_gen6_ltssm_timeout_polling_active_test"
 #set testname "PCIe_gen6_ltssm_timeout_polling_configuration_test"
 #set testname "PCIe_gen6_ltssm_timeout_config_linkwidth_start_test"
 #set testname "PCIe_gen6_ltssm_timeout_config_linkwidth_accept_test"
@@ -83,7 +83,20 @@ set testname "PCIe_gen6_ltssm_timeout_polling_active_test"
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_MaxPayload_test"
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_Random_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
-set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
+#set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
+# [ATOMIC] AtomicOp tests (4DW ones : use the FORCE_4DW+CONFIG_4DW vlog block below)
+set testname "PCIe_gen6_3DW_Flit_FetchAdd_1dwPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_FetchAdd_2dwPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_swap_1dwPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_swap_2dwPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_CAS_1dwPayload_test"
+#set testname "PCIe_gen6_3DW_Flit_CAS_2dwPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_FetchAdd_2dwPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_swap_1dwPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_swap_2dwPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_CAS_1dwPayload_test"
+#set testname "PCIe_gen6_4DW_Flit_CAS_2dwPayload_test"
  
 vlib work
 vmap work work

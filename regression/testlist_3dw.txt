@@ -120,3 +120,13 @@ PCIe_gen6_3DW_Flit_MsgWr_withoutdata_test
 #PCIe_gen6_3DW_NonFlit_MemWr_followed_MemRd_Random_test
 #PCIe_gen6_3DW_NonFlit_MsgWr_withdata_test
 #PCIe_gen6_3DW_NonFlit_MsgWr_wothoutdata_test
+
+#------------------------------------------------------------------------------
+# [ATOMIC] FetchAdd / Swap / CAS AtomicOp, Flit mode (3DW build)
+#------------------------------------------------------------------------------
+PCIe_gen6_3DW_Flit_FetchAdd_1dwPayload_test
+PCIe_gen6_3DW_Flit_FetchAdd_2dwPayload_test
+PCIe_gen6_3DW_Flit_swap_1dwPayload_test
+PCIe_gen6_3DW_Flit_swap_2dwPayload_test
+PCIe_gen6_3DW_Flit_CAS_1dwPayload_test
+PCIe_gen6_3DW_Flit_CAS_2dwPayload_test

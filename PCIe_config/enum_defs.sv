@@ -151,6 +151,21 @@ package typedef_enums;
   } pcie_msg_route_e;
 
   //--------------------------------------------------------------------------
+  // [ATOMIC] pcie_atomic_op_e - AtomicOp kind of a Memory Request
+  //   PCIe_ATOMIC_NONE     : normal MRd / MWr / MRdLk / DMWr
+  //   PCIe_ATOMIC_FETCHADD : new = old + add value          (Sec 6.15)
+  //   PCIe_ATOMIC_SWAP     : new = swap value
+  //   PCIe_ATOMIC_CAS      : new = (old == compare) ? swap : old
+  //   For all three the Completion returns the ORIGINAL (old) memory value.
+  //--------------------------------------------------------------------------
+  typedef enum bit [1:0] {
+    PCIe_ATOMIC_NONE     = 2'd0,
+    PCIe_ATOMIC_FETCHADD = 2'd1,
+    PCIe_ATOMIC_SWAP     = 2'd2,
+    PCIe_ATOMIC_CAS      = 2'd3
+  } pcie_atomic_op_e;
+
+  //--------------------------------------------------------------------------
   // pkt_mode_e - TL packet mode selector used by the sequences
   //--------------------------------------------------------------------------
   typedef enum logic {

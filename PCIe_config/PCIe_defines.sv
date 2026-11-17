@@ -746,6 +746,32 @@
 `define PCIe_FLIT_NOP_DLLP           32'h3100_0000  // NOP DLLP, Non-Flit Mode
 `define PCIe_FLIT_TLP_REGION_DW      59            // 236 B / 4
 
+//==============================================================================
+// ATOMIC OPERATIONS (FetchAdd / Swap / CAS)  -  PCIe Base 6.0       [ATOMIC]
+//   Sec 2.2.7 Table 2-15 : Length field value for each operand size
+//
+//                         32-bit operand    64-bit operand
+//     FetchAdd / Swap   :      1 DW              2 DW        (1 operand)
+//     CAS               :      2 DW              4 DW        (compare + swap)
+//
+//   Address must be naturally aligned to the operand size (4 B / 8 B).
+//   Completion : CplD, data = original memory value (1 operand),
+//                Byte Count = operand size in bytes, Lower Address reserved.
+//==============================================================================
+`define PCIe_ATOMIC_OPERAND_32_DW      1          // 32-bit operand = 1 DW
+`define PCIe_ATOMIC_OPERAND_64_DW      2          // 64-bit operand = 2 DW
+`define PCIe_ATOMIC_OPERAND_32_BYTES   4
+`define PCIe_ATOMIC_OPERAND_64_BYTES   8
+
+`define PCIe_ATOMIC_FETCHADD_LEN_32    10'd1      // FetchAdd 32-bit  : 1 DW payload
+`define PCIe_ATOMIC_FETCHADD_LEN_64    10'd2      // FetchAdd 64-bit  : 2 DW payload
+`define PCIe_ATOMIC_SWAP_LEN_32        10'd1      // Swap     32-bit  : 1 DW payload
+`define PCIe_ATOMIC_SWAP_LEN_64        10'd2      // Swap     64-bit  : 2 DW payload
+`define PCIe_ATOMIC_CAS_LEN_32         10'd2      // CAS      32-bit  : 2 DW payload (compare, swap)
+`define PCIe_ATOMIC_CAS_LEN_64         10'd4      // CAS      64-bit  : 4 DW payload (compare, swap)
+
+`define PCIe_ATOMIC_CPL_TIMEOUT_NS     200000     // sequence waits this long for the AtomicOp CplD
+
 `define PCIe_EP_BUS_NUMBER           8'h01
 `define PCIe_EP_DEVICE_NUMBER        5'h00
 `define PCIe_EP_FUNCTION_NUMBER      3'h0

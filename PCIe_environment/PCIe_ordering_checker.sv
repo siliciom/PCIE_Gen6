@@ -144,6 +144,7 @@ class PCIe_ordering_checker extends uvm_component;
   protected function string tlp_name(PCIe_sequence_item t);
     case (t.txn_type)
       PCIe_TL_MEM : begin
+        if (t.is_atomic()) return t.atomic_op.name();          // [ATOMIC]
         if (t.dir == PCIe_TL_WRITE) return t.mem_deferrable ? "DMWr" : "MemWr";
         return t.mem_locked ? "MemRdLk" : "MemRd";
       end
