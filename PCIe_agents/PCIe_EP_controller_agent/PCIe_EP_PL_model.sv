@@ -70,9 +70,12 @@ class PCIe_EP_PL_model extends uvm_component;
     localparam bit [7:0] EP_ASSIGNED_LANE_NUM = 8'h00;
     localparam bit [7:0] PAD_BYTE              = 8'hFF;
  bit            tx_process_executed;
-     bit            electrical_idle_test_done;
-     bit            no_receiver_test;
-     int            detect_fail_count;
+ bit            electrical_idle_test_done;
+ bit            no_receiver_test;
+ int            detect_fail_count;
+ // [TIMEOUT_TEST] Set when a directed timeout test has fired its state
+ // watchdog and the LTSSM has been returned to DETECT.QUIET.
+ bit            timeout_test_done;
 
     //============================================================================
     // RECOVERY / SEQUENTIAL RATE NEGOTIATION   (PCIe Base 6.0 Section 4.2.7.4)
@@ -158,6 +161,7 @@ class PCIe_EP_PL_model extends uvm_component;
         reset_scrambler();
         electrical_idle_test_done = 1'b0;
         detect_fail_count  = 0;
+        timeout_test_done  = 1'b0;
         previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
 
         // ---- Recovery / rate negotiation state (Section 4.2.7.4) ----
@@ -240,6 +244,81 @@ class PCIe_EP_PL_model extends uvm_component;
       end
    endtask
 
+   //-------------------------------------------------------------------------
+   // [TIMEOUT_TEST] Directed timeout injection helpers.
+   //-------------------------------------------------------------------------
+   function bit ep_is_timeout_target(ltssm_timeout_target_e target);
+      ep_is_timeout_target = (ep_ctrl_item != null) &&
+                             ep_ctrl_item.ltssm_timeout_test &&
+                             (ep_ctrl_item.ltssm_timeout_target == target);
+   endfunction
+
+   task automatic ep_timeout_test_finish(input string state_name);
+      `uvm_info("EP_LTSSM",$sformatf("TIMEOUT_TEST_%s_DECLARED_TIMEOUT_EXPIRED_RETURNING_TO_DETECT_QUIET",
+                state_name),UVM_LOW)
+      ep_pipe_intf_tx.tx_valid     <= 1'b0;
+      ep_pipe_intf_tx.tx_data      <= '0;
+      ep_pipe_intf_tx.tx_elec_idle <= 1'b1;
+      ep_pipe_intf_tx.tx_detect_rx <= 1'b0;
+      ep_main_state     = DETECT;
+      ep_detect_state   = DETECT_QUIET;
+      timeout_test_done = 1'b1;
+   endtask
+
+   task automatic ep_apply_timeout_start(input ltssm_timeout_target_e target);
+      case (target)
+         LTSSM_TO_DETECT_QUIET: begin
+            ep_main_state   = DETECT;       ep_detect_state   = DETECT_QUIET;
+         end
+         LTSSM_TO_DETECT_ACTIVE: begin
+            ep_main_state   = DETECT;       ep_detect_state   = DETECT_ACTIVE;
+         end
+         LTSSM_TO_POLLING_ACTIVE: begin
+            ep_main_state   = POLLING;      ep_poll_state     = POLLING_ACTIVE;
+         end
+         LTSSM_TO_POLLING_CONFIGURATION: begin
+            ep_main_state   = POLLING;      ep_poll_state     = POLLING_CONFIGURATION;
+         end
+         LTSSM_TO_CFG_LINKWIDTH_START: begin
+            ep_main_state   = CONFIGURATION;ep_cfg_state      = LINKWIDTH_START;
+         end
+         LTSSM_TO_CFG_LINKWIDTH_ACCEPT: begin
+            ep_main_state   = CONFIGURATION;ep_cfg_state      = LINKWIDTH_ACCEPT;
+         end
+         LTSSM_TO_CFG_LANENUM_WAIT: begin
+            ep_main_state   = CONFIGURATION;ep_cfg_state      = LANENUM_WAIT;
+         end
+         LTSSM_TO_CFG_LANENUM_ACCEPT: begin
+            ep_main_state   = CONFIGURATION;ep_cfg_state      = LANENUM_ACCEPT;
+         end
+         LTSSM_TO_CFG_COMPLETE: begin
+            ep_main_state   = CONFIGURATION;ep_cfg_state      = CONFIG_COMPLETE;
+         end
+         LTSSM_TO_CFG_IDLE: begin
+            ep_main_state   = CONFIGURATION;ep_cfg_state      = CONFIG_IDLE;
+         end
+         LTSSM_TO_RCVRY_RCVRLOCK: begin
+            ep_main_state   = RECOVERY;     ep_recovery_state = RECOVERY_RCVR_LOCK;
+         end
+         LTSSM_TO_RCVRY_EQUALIZATION: begin
+            ep_main_state   = RECOVERY;     ep_recovery_state = RECOVERY_EQUALIZATION;
+         end
+         LTSSM_TO_RCVRY_RCVRCFG: begin
+            ep_main_state   = RECOVERY;     ep_recovery_state = RECOVERY_RCVR_CFG;
+         end
+         LTSSM_TO_RCVRY_IDLE: begin
+            ep_main_state   = RECOVERY;     ep_recovery_state = RECOVERY_IDLE;
+         end
+         LTSSM_TO_LOOPBACK_ENTRY:  ep_main_state = LOOPBACK_ENTRY;
+         LTSSM_TO_LOOPBACK_ACTIVE: ep_main_state = LOOPBACK_ACTIVE;
+         LTSSM_TO_LOOPBACK_EXIT:   ep_main_state = LOOPBACK_EXIT;
+         LTSSM_TO_HOT_RESET:       ep_main_state = HOT_RESET;
+         LTSSM_TO_DISABLED:        ep_main_state = DISABLED;
+         default: ;
+      endcase
+      `uvm_info("EP_LTSSM",$sformatf("TIMEOUT_TEST_STARTING_DIRECTLY_IN_%s",target.name()),UVM_LOW)
+   endtask
+
  task ep_ltssm( PCIe_sequence_item pcie_seq_item);
         ep_ctrl_item = pcie_seq_item;
         ep_ts1_training_ctrl = 8'h00;
@@ -271,6 +350,10 @@ class PCIe_EP_PL_model extends uvm_component;
            `uvm_info("EP_LTSSM",$sformatf("DIRECTED_RECOVERY_DISABLED_SINGLE_LINKUP_AT=%s",
                      ep_cur_rate.name()),UVM_LOW)
         end
+        // [TIMEOUT_TEST] start directly in the requested state/substate.
+        timeout_test_done = 1'b0;
+        if (ep_ctrl_item.ltssm_timeout_test)
+           ep_apply_timeout_start(ep_ctrl_item.ltssm_timeout_target);
         forever begin
            case (ep_main_state)
               DETECT: begin
@@ -407,6 +490,10 @@ class PCIe_EP_PL_model extends uvm_component;
                 `uvm_error("EP_LTSSM","INVALID_EP_LTSSM_STATE")
              end
           endcase
+          if (timeout_test_done) begin
+             `uvm_info("EP_LTSSM","TIMEOUT_TEST_DONE_ENDING_EP_LTSSM_AT_DETECT_QUIET",UVM_LOW)
+             break;
+          end
        end
     endtask
 
@@ -420,6 +507,8 @@ class PCIe_EP_PL_model extends uvm_component;
 
    //=======================DETECT.QUIET==========================================
     task ep_state_detect_quiet(PCIe_sequence_item item);
+       bit is_timeout_target;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_DETECT_QUIET);
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
        `uvm_info("EP_LTSSM","LTSSM_STATE_DETECT",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_DETECT_Quiet",UVM_LOW)
@@ -440,18 +529,24 @@ class PCIe_EP_PL_model extends uvm_component;
            return;
        end
        //===============Wait for Detect.Quiet Timer or Electrical Idle Break==============
-       fork : EP_DETECT_QUIET_WATCHDOG
-          begin
-             wait(!ep_pipe_intf_rx.rx_elec_idle);
-          end
-          begin
-             ep_ltssm_timer(`PCIe_LTSSM_T_DETECT_QUIET);
-             `uvm_info("EP_LTSSM","12ms timeout in DETECT_QUIET -> DETECT_ACTIVE",UVM_LOW)
-          end
-       join_any
-       disable fork;
+        fork : EP_DETECT_QUIET_WATCHDOG
+           begin
+              if (!is_timeout_target) wait(!ep_pipe_intf_rx.rx_elec_idle);
+              else                    wait(1'b0);
+           end
+           begin
+              ep_ltssm_timer(`PCIe_LTSSM_T_DETECT_QUIET);
+              `uvm_info("EP_LTSSM","12ms timeout in DETECT_QUIET -> DETECT_ACTIVE",UVM_LOW)
+           end
+        join_any
+        disable fork;
 
-       //===============Inform PHY to Start Receiver Detection==============
+        if (is_timeout_target) begin
+           ep_timeout_test_finish("DETECT_QUIET");
+           return;
+        end
+
+        //===============Inform PHY to Start Receiver Detection==============
        `uvm_info("EP_LTSSM","Request_sent_to_PHY_to_Start_Receiver_Detection",UVM_LOW)
        `uvm_info("EP_LTSSM","Transition_DETECT_Quiet_DETECT_Active",UVM_LOW)
         ep_detect_state = DETECT_ACTIVE;
@@ -461,7 +556,9 @@ class PCIe_EP_PL_model extends uvm_component;
     //=======================DETECT.ACTIVE=============================================
     task ep_state_detect_active();
         bit timeout_occured;
+        bit is_timeout_target;
         timeout_occured = 1'b0;
+        is_timeout_target = ep_is_timeout_target(LTSSM_TO_DETECT_ACTIVE);
         `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
         `uvm_info("EP_LTSSM","LTSSM_STATE_DETECT",UVM_LOW)
         `uvm_info("EP_LTSSM","SUB_STATE_DETECT_Active",UVM_LOW)
@@ -478,7 +575,8 @@ class PCIe_EP_PL_model extends uvm_component;
         `uvm_info("EP_LTSSM","Waiting_for_PHY_Receiver_Detection_Result...",UVM_LOW)
         fork : EP_DETECT_ACTIVE_WATCHDOG
            begin
-              wait(ep_pipe_intf_tx.phy_status == 1'b1);
+              if (!is_timeout_target) wait(ep_pipe_intf_tx.phy_status == 1'b1);
+              else                    wait(1'b0);
            end
            begin
               ep_ltssm_timer(`PCIe_LTSSM_T_DETECT_QUIET);
@@ -487,6 +585,10 @@ class PCIe_EP_PL_model extends uvm_component;
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("DETECT_ACTIVE");
+              return;
+           end
            `uvm_error("EP_LTSSM","Receiver Detection Timeout")
            ep_pipe_intf_tx.tx_detect_rx <= 1'b0;
            if (no_receiver_test) detect_fail_count = detect_fail_count + 1;
@@ -520,7 +622,9 @@ class PCIe_EP_PL_model extends uvm_component;
         bit tx_ts1_10_done;
         bit rx_ts1_8_done;
         bit timeout_occured;
+        bit is_timeout_target;
         timeout_occured = 1'b0;
+        is_timeout_target = ep_is_timeout_target(LTSSM_TO_POLLING_ACTIVE);
         `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
         `uvm_info("EP_LTSSM","LTSSM_STATE_POLLING",UVM_LOW)
         `uvm_info("EP_LTSSM","SUB_STATE_POLLING_ACTIVE",UVM_LOW)
@@ -536,20 +640,26 @@ class PCIe_EP_PL_model extends uvm_component;
          fork : EP_POLLING_ACTIVE_WATCHDOG
            begin
               fork : EP_POLLING_THREADS
-                 // THREAD 1 : RC -> EP 8 TS1 CHECKER
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_RC_8_TS1_CHECKER",UVM_LOW)
-                     ep_check_rc_ts1(`PCIe_TS1_RX_COUNT,rx_ts1_8_done);
-                    `uvm_info("EP_LTSSM",$sformatf("RC_8_TS1_CHECKER_DONE_RX_DONE=%0b",rx_ts1_8_done),UVM_LOW)
-                 end
-                 // THREAD 2 : EP -> RC 10 TS1
-                 begin
-                    @(posedge ep_pipe_intf_rx.pclk);
-                    `uvm_info("EP_LTSSM","STARTING_EP_10_TS1_TRANSMISSION",UVM_LOW)
-                     send_ordered_set(ep_ts1_os,`PCIe_TS1_TX_COUNT,"TS1");
-                     tx_ts1_10_done = 1'b1;
-                    `uvm_info("EP_LTSSM","EP_10_TS1_TRANSMISSION_COMPLETED",UVM_LOW)
-                 end
+                  // THREAD 1 : RC -> EP 8 TS1 CHECKER
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_RC_8_TS1_CHECKER",UVM_LOW)
+                         ep_check_rc_ts1(`PCIe_TS1_RX_COUNT,rx_ts1_8_done);
+                        `uvm_info("EP_LTSSM",$sformatf("RC_8_TS1_CHECKER_DONE_RX_DONE=%0b",rx_ts1_8_done),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
+                  // THREAD 2 : EP -> RC 10 TS1
+                  begin
+                     if (!is_timeout_target) begin
+                        @(posedge ep_pipe_intf_rx.pclk);
+                        `uvm_info("EP_LTSSM","STARTING_EP_10_TS1_TRANSMISSION",UVM_LOW)
+                         send_ordered_set(ep_ts1_os,`PCIe_TS1_TX_COUNT,"TS1");
+                         tx_ts1_10_done = 1'b1;
+                        `uvm_info("EP_LTSSM","EP_10_TS1_TRANSMISSION_COMPLETED",UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
               join
            end
            begin
@@ -559,6 +669,10 @@ class PCIe_EP_PL_model extends uvm_component;
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("POLLING_ACTIVE");
+              return;
+           end
            `uvm_info("EP_LTSSM","Polling.Active 24ms timeout",UVM_LOW)
            if (rx_ts1_8_done) ep_poll_state = POLLING_CONFIGURATION;
            else              ep_poll_state = POLLING_COMPLIANCE;
@@ -576,7 +690,9 @@ class PCIe_EP_PL_model extends uvm_component;
         bit tx_ts2_16_done;
         bit rx_ts2_8_done;
         bit timeout_occured;
+        bit is_timeout_target;
         timeout_occured = 1'b0;
+        is_timeout_target = ep_is_timeout_target(LTSSM_TO_POLLING_CONFIGURATION);
         `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
         `uvm_info("EP_LTSSM","LTSSM_STATE_POLLING",UVM_LOW)
         `uvm_info("EP_LTSSM","SUB_STATE_POLLING_Configuration",UVM_LOW)
@@ -590,20 +706,26 @@ class PCIe_EP_PL_model extends uvm_component;
         fork : EP_POLLING_CONFIGURATION_WATCHDOG
            begin
               fork : EP_POLLING_CONFIGURATION_THREADS
-                 // THREAD 1 : EP TRANSMITS 16 TS2
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_RC_16_TS2_TRANSMISSION",UVM_LOW)
-                     send_ordered_set(ep_ts2_os,`PCIe_TS2_TX_COUNT,"TS2");
-                     ts2_tx_count += `PCIe_TS2_TX_COUNT;
-                     tx_ts2_16_done = 1'b1;
-                    `uvm_info("EP_LTSSM",$sformatf("RC_TS2_TX_COMPLETED_COUNT=%0d",ts2_tx_count),UVM_LOW)
-                 end
-                 // THREAD 2 : WAIT FOR EP 8 TS2
-                 begin
-                    `uvm_info("EP_LTSSM","WAITING_FOR_8_CONSECUTIVE_TS2_FROM_EP",UVM_LOW)
-                    ep_check_rc_ts2(`PCIe_TS2_RX_COUNT,rx_ts2_8_done);
-                    `uvm_info("EP_LTSSM","EP_8_TS2_RECEIVED",UVM_LOW)
-                 end
+                  // THREAD 1 : EP TRANSMITS 16 TS2
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_RC_16_TS2_TRANSMISSION",UVM_LOW)
+                         send_ordered_set(ep_ts2_os,`PCIe_TS2_TX_COUNT,"TS2");
+                         ts2_tx_count += `PCIe_TS2_TX_COUNT;
+                         tx_ts2_16_done = 1'b1;
+                        `uvm_info("EP_LTSSM",$sformatf("RC_TS2_TX_COMPLETED_COUNT=%0d",ts2_tx_count),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
+                  // THREAD 2 : WAIT FOR EP 8 TS2
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","WAITING_FOR_8_CONSECUTIVE_TS2_FROM_EP",UVM_LOW)
+                        ep_check_rc_ts2(`PCIe_TS2_RX_COUNT,rx_ts2_8_done);
+                        `uvm_info("EP_LTSSM","EP_8_TS2_RECEIVED",UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
               join
            end
            begin
@@ -613,6 +735,10 @@ class PCIe_EP_PL_model extends uvm_component;
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("POLLING_CONFIGURATION");
+              return;
+           end
            `uvm_info("EP_LTSSM","Polling.Configuration 48ms timeout",UVM_LOW)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
@@ -643,9 +769,11 @@ class PCIe_EP_PL_model extends uvm_component;
        bit tx_ts1_8_done;
        bit rx_ts1_8_done;
        bit timeout_occured;
+       bit is_timeout_target;
        tx_ts1_8_done = 1'b0;
        rx_ts1_8_done = 1'b0;
        timeout_occured = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_LINKWIDTH_START);
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LinkWidth_Start",UVM_LOW)
@@ -673,18 +801,24 @@ class PCIe_EP_PL_model extends uvm_component;
        fork : EP_CFG_LWSTART_WATCHDOG
            begin
               fork : EP_CFG_LWSTART_THREADS
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_RC_8_TS1_CHECKER",UVM_LOW)
-                    ep_check_rc_ts1(8, rx_ts1_8_done);
-                    `uvm_info("EP_LTSSM",$sformatf("RC_8_TS1_CHECKER_DONE_RX_DONE=%0b",rx_ts1_8_done),UVM_LOW)
-                 end
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_EP_8_TS1_TRANSMISSION",UVM_LOW)
-                    send_ordered_set(ep_ts1_os,8,"TS1");
-                    ts1_tx_count += 8;
-                    tx_ts1_8_done = 1'b1;
-                    `uvm_info("EP_LTSSM",$sformatf("LINKWIDTH_START_8_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
-                 end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_RC_8_TS1_CHECKER",UVM_LOW)
+                        ep_check_rc_ts1(8, rx_ts1_8_done);
+                        `uvm_info("EP_LTSSM",$sformatf("RC_8_TS1_CHECKER_DONE_RX_DONE=%0b",rx_ts1_8_done),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_EP_8_TS1_TRANSMISSION",UVM_LOW)
+                        send_ordered_set(ep_ts1_os,8,"TS1");
+                        ts1_tx_count += 8;
+                        tx_ts1_8_done = 1'b1;
+                        `uvm_info("EP_LTSSM",$sformatf("LINKWIDTH_START_8_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
               join
            end
            begin
@@ -694,6 +828,10 @@ class PCIe_EP_PL_model extends uvm_component;
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("CFG_LINKWIDTH_START");
+              return;
+           end
            `uvm_info("EP_LTSSM","Configuration.Linkwidth.Start 24ms timeout",UVM_LOW)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
@@ -713,9 +851,11 @@ class PCIe_EP_PL_model extends uvm_component;
        bit tx_ts1_2_done;
        bit rx_ts1_2_done;
        bit timeout_occured;
+       bit is_timeout_target;
        tx_ts1_2_done = 1'b0;
        rx_ts1_2_done = 1'b0;
        timeout_occured = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_LINKWIDTH_ACCEPT);
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LinkWidth_Accept",UVM_LOW)
@@ -728,17 +868,23 @@ class PCIe_EP_PL_model extends uvm_component;
        fork : EP_CFG_LWACCEPT_WATCHDOG
            begin
               fork : EP_CFG_LWACCEPT_THREADS
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
-                     ep_check_rc_ts1(2,rx_ts1_2_done);
-                 end
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
-                    send_ordered_set(ep_ts1_os,2,"TS1");
-                    ts1_tx_count += 2;
-                    tx_ts1_2_done = 1'b1;
-                    `uvm_info("EP_LTSSM",$sformatf("LINKWIDTH_ACCEPT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
-                 end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
+                         ep_check_rc_ts1(2,rx_ts1_2_done);
+                     end
+                     else wait(1'b0);
+                  end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
+                        send_ordered_set(ep_ts1_os,2,"TS1");
+                        ts1_tx_count += 2;
+                        tx_ts1_2_done = 1'b1;
+                        `uvm_info("EP_LTSSM",$sformatf("LINKWIDTH_ACCEPT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
               join
            end
            begin
@@ -748,6 +894,10 @@ class PCIe_EP_PL_model extends uvm_component;
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("CFG_LINKWIDTH_ACCEPT");
+              return;
+           end
            `uvm_info("EP_LTSSM","Configuration.Linkwidth.Accept 2ms timeout",UVM_LOW)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
@@ -765,9 +915,11 @@ class PCIe_EP_PL_model extends uvm_component;
        bit tx_ts1_2_done;
        bit rx_ts1_2_done;
        bit timeout_occured;
+       bit is_timeout_target;
        tx_ts1_2_done = 1'b0;
        rx_ts1_2_done = 1'b0;
        timeout_occured = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_LANENUM_WAIT);
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LaneNum_Wait",UVM_LOW)
@@ -780,17 +932,23 @@ class PCIe_EP_PL_model extends uvm_component;
        fork : EP_CFG_LNWAIT_WATCHDOG
            begin
               fork : EP_CFG_LNWAIT_THREADS
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
-                     ep_check_rc_ts1(2, rx_ts1_2_done);
-                 end
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
-                    send_ordered_set(ep_ts1_os,2,"TS1");
-                    ts1_tx_count += 2;
-                    tx_ts1_2_done = 1'b1;
-                    `uvm_info("EP_LTSSM",$sformatf("LANENUM_WAIT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
-                 end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
+                         ep_check_rc_ts1(2, rx_ts1_2_done);
+                     end
+                     else wait(1'b0);
+                  end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
+                        send_ordered_set(ep_ts1_os,2,"TS1");
+                        ts1_tx_count += 2;
+                        tx_ts1_2_done = 1'b1;
+                        `uvm_info("EP_LTSSM",$sformatf("LANENUM_WAIT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
               join
            end
            begin
@@ -800,6 +958,10 @@ class PCIe_EP_PL_model extends uvm_component;
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("CFG_LANENUM_WAIT");
+              return;
+           end
            `uvm_info("EP_LTSSM","Configuration.Lanenum.Wait 2ms timeout",UVM_LOW)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
@@ -817,9 +979,11 @@ class PCIe_EP_PL_model extends uvm_component;
        bit tx_ts1_2_done;
        bit rx_ts1_2_done;
        bit timeout_occured;
+       bit is_timeout_target;
        tx_ts1_2_done = 1'b0;
        rx_ts1_2_done = 1'b0;
        timeout_occured = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_LANENUM_ACCEPT);
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LaneNum_Accept",UVM_LOW)
@@ -831,17 +995,23 @@ class PCIe_EP_PL_model extends uvm_component;
        fork : EP_CFG_LNACCEPT_WATCHDOG
            begin
               fork : EP_CFG_LNACCEPT_THREADS
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
-                    ep_check_rc_ts1(2, rx_ts1_2_done);
-                 end
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
-                    send_ordered_set(ep_ts1_os,2,"TS1");
-                    ts1_tx_count += 2;
-                    tx_ts1_2_done = 1'b1;
-                    `uvm_info("EP_LTSSM",$sformatf("LANENUM_ACCEPT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
-                 end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
+                        ep_check_rc_ts1(2, rx_ts1_2_done);
+                     end
+                     else wait(1'b0);
+                  end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
+                        send_ordered_set(ep_ts1_os,2,"TS1");
+                        ts1_tx_count += 2;
+                        tx_ts1_2_done = 1'b1;
+                        `uvm_info("EP_LTSSM",$sformatf("LANENUM_ACCEPT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
               join
            end
            begin
@@ -851,6 +1021,10 @@ class PCIe_EP_PL_model extends uvm_component;
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("CFG_LANENUM_ACCEPT");
+              return;
+           end
            `uvm_info("EP_LTSSM","Configuration.Lanenum.Accept 2ms timeout",UVM_LOW)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
@@ -868,9 +1042,11 @@ task ep_state_config_complete();
        bit tx_ts2_16_done;
        bit rx_ts2_8_done;
        bit timeout_occured;
+       bit is_timeout_target;
        tx_ts2_16_done = 1'b0;
        rx_ts2_8_done  = 1'b0;
        timeout_occured = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_COMPLETE);
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_Complete",UVM_LOW)
@@ -882,17 +1058,23 @@ task ep_state_config_complete();
          fork : EP_CFG_COMPLETE_WATCHDOG
            begin
               fork : EP_CFG_COMPLETE_THREADS
-                 begin
-                    `uvm_info("EP_LTSSM","WAITING_FOR_8_CONSECUTIVE_TS2_FROM_RC",UVM_LOW)
-                     ep_check_rc_ts2(`PCIe_TS2_RX_COUNT, rx_ts2_8_done);
-                 end
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_EP_16_TS2_TRANSMISSION",UVM_LOW)
-                    send_ordered_set(ep_ts2_os,`PCIe_TS2_TX_COUNT,"TS2");
-                    ts2_tx_count += `PCIe_TS2_TX_COUNT;
-                    tx_ts2_16_done = 1'b1;
-                    `uvm_info("EP_LTSSM",$sformatf("CONFIG_COMPLETE_16_TS2_TX_COMPLETED_COUNT=%0d",ts2_tx_count),UVM_LOW)
-                 end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","WAITING_FOR_8_CONSECUTIVE_TS2_FROM_RC",UVM_LOW)
+                         ep_check_rc_ts2(`PCIe_TS2_RX_COUNT, rx_ts2_8_done);
+                     end
+                     else wait(1'b0);
+                  end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_EP_16_TS2_TRANSMISSION",UVM_LOW)
+                        send_ordered_set(ep_ts2_os,`PCIe_TS2_TX_COUNT,"TS2");
+                        ts2_tx_count += `PCIe_TS2_TX_COUNT;
+                        tx_ts2_16_done = 1'b1;
+                        `uvm_info("EP_LTSSM",$sformatf("CONFIG_COMPLETE_16_TS2_TX_COMPLETED_COUNT=%0d",ts2_tx_count),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
               join
            end
            begin
@@ -902,6 +1084,10 @@ task ep_state_config_complete();
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("CFG_COMPLETE");
+              return;
+           end
            `uvm_info("EP_LTSSM","Configuration.Complete 2ms timeout",UVM_LOW)
            if ((ep_rate_gen_num(ep_cur_rate) <= 2) ||
                (ep_idle_to_rlock_transitioned == 8'hFF)) begin
@@ -925,9 +1111,11 @@ task ep_state_config_complete();
        bit tx_idle_2_done;
        bit rx_idle_2_done;
        bit timeout_occured;
+       bit is_timeout_target;
        tx_idle_2_done = 1'b0;
        rx_idle_2_done = 1'b0;
        timeout_occured = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_IDLE);
        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_Idle",UVM_LOW)
@@ -939,17 +1127,23 @@ task ep_state_config_complete();
        fork : EP_CFG_IDLE_WATCHDOG
            begin
               fork : EP_CFG_IDLE_THREADS
-                 begin
-                    `uvm_info("EP_LTSSM","WAITING_FOR_2_CONSECUTIVE_IDLE_FROM_RC",UVM_LOW)
-                     ep_check_rc_idle(2, rx_idle_2_done);
-                    `uvm_info("EP_LTSSM",$sformatf("RC_2_IDLE_CHECKER_DONE_RX_DONE=%0b",rx_idle_2_done),UVM_LOW)
-                 end
-                 begin
-                    `uvm_info("EP_LTSSM","STARTING_EP_2_IDLE_FLIT_TRANSMISSION",UVM_LOW)
-                    send_ordered_set(ep_idle_os,2,"IDLE_FLIT");
-                    tx_idle_2_done = 1'b1;
-                    `uvm_info("EP_LTSSM","CONFIG_IDLE_2_IDLE_FLIT_TX_COMPLETED",UVM_LOW)
-                 end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","WAITING_FOR_2_CONSECUTIVE_IDLE_FROM_RC",UVM_LOW)
+                         ep_check_rc_idle(2, rx_idle_2_done);
+                        `uvm_info("EP_LTSSM",$sformatf("RC_2_IDLE_CHECKER_DONE_RX_DONE=%0b",rx_idle_2_done),UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
+                  begin
+                     if (!is_timeout_target) begin
+                        `uvm_info("EP_LTSSM","STARTING_EP_2_IDLE_FLIT_TRANSMISSION",UVM_LOW)
+                        send_ordered_set(ep_idle_os,2,"IDLE_FLIT");
+                        tx_idle_2_done = 1'b1;
+                        `uvm_info("EP_LTSSM","CONFIG_IDLE_2_IDLE_FLIT_TX_COMPLETED",UVM_LOW)
+                     end
+                     else wait(1'b0);
+                  end
               join
            end
            begin
@@ -959,6 +1153,10 @@ task ep_state_config_complete();
         join_any
         disable fork;
         if (timeout_occured) begin
+           if (is_timeout_target) begin
+              ep_timeout_test_finish("CFG_IDLE");
+              return;
+           end
            `uvm_info("EP_LTSSM","Configuration.Idle 2ms timeout",UVM_LOW)
            if (ep_idle_to_rlock_transitioned != 8'hFF) begin
               if (ep_rate_gen_num(ep_cur_rate) >= 3)
@@ -986,6 +1184,14 @@ task ep_state_config_complete();
     //  DIRECTED SUBSTATES : Disabled / Loopback / Hot Reset
     //=======================================================================
     task ep_state_disabled();
+       bit is_timeout_target;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_DISABLED);
+       if (is_timeout_target) begin
+          `uvm_info("EP_LTSSM","TIMEOUT_TEST_DISABLED_WAITING_DECLARED_TIMEOUT",UVM_LOW)
+          ep_ltssm_timer(`PCIe_LTSSM_T_DISABLED);
+          ep_timeout_test_finish("DISABLED");
+          return;
+       end
        `uvm_info("EP_LTSSM","ENTERED_DISABLED_BROADCASTING_TS1_WITH_DISABLE_LINK",UVM_LOW)
        previous_symbol = 2'b11;
        ep_link_num = PAD_BYTE;
@@ -1008,6 +1214,8 @@ task ep_state_config_complete();
     task ep_state_loopback_entry();
        bit rx_done;
        bit timeout_occured;
+       bit is_timeout_target;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_LOOPBACK_ENTRY);
        `uvm_info("EP_LTSSM","ENTERED_LOOPBACK_ENTRY_SLAVE_BROADCASTING_PAD_TS1_WITH_LOOPBACK",UVM_LOW)
        previous_symbol = 2'b11;
        ep_link_num      = PAD_BYTE;
@@ -1016,24 +1224,34 @@ task ep_state_config_complete();
        timeout_occured  = 1'b0;
        ep_ts1_training_ctrl = `PCIe_TS1_TC_LOOPBACK;
        build_ep_ts1();
-       fork
-          begin
-             send_ordered_set(ep_ts1_os,`PCIe_LOOPBACK_ENTRY_TS1_COUNT,"LOOPBACK_ENTRY_TS1");
-          end
-          begin
-             ep_check_rc_ts1(2,rx_done);
-          end
-          begin
-             ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_ENTRY);
-             timeout_occured = 1'b1;
-          end
-       join_any
-       disable fork;
-       ep_ts1_training_ctrl = 8'h00;
-       @(posedge ep_pipe_intf_tx.pclk);
-       ep_pipe_intf_tx.tx_valid <= 1'b0;
-       ep_pipe_intf_tx.tx_data  <= '0;
-       if (rx_done) begin
+        fork
+           begin
+              if (!is_timeout_target)
+                 send_ordered_set(ep_ts1_os,`PCIe_LOOPBACK_ENTRY_TS1_COUNT,"LOOPBACK_ENTRY_TS1");
+              else
+                 wait(1'b0);
+           end
+           begin
+              if (!is_timeout_target)
+                 ep_check_rc_ts1(2,rx_done);
+              else
+                 wait(1'b0);
+           end
+           begin
+              ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_ENTRY);
+              timeout_occured = 1'b1;
+           end
+        join_any
+        disable fork;
+        ep_ts1_training_ctrl = 8'h00;
+        @(posedge ep_pipe_intf_tx.pclk);
+        ep_pipe_intf_tx.tx_valid <= 1'b0;
+        ep_pipe_intf_tx.tx_data  <= '0;
+        if (is_timeout_target) begin
+           ep_timeout_test_finish("LOOPBACK_ENTRY");
+           return;
+        end
+        if (rx_done) begin
           `uvm_info("EP_LTSSM","LOOPBACK_ENTRY_SYMBOL_LOCK_TO_LOOPBACK_ACTIVE",UVM_LOW)
           ep_main_state = LOOPBACK_ACTIVE;
        end
@@ -1045,24 +1263,41 @@ task ep_state_config_complete();
 
     task ep_state_loopback_active();
        bit timeout_occured;
+       bit is_timeout_target;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_LOOPBACK_ACTIVE);
        `uvm_info("EP_LTSSM","ENTERED_LOOPBACK_ACTIVE_SLAVE_WATCHING_FOR_DIRECTED_EXIT",UVM_LOW)
        timeout_occured = 1'b0;
        fork
-          begin
-             wait (ep_ctrl_item != null && ep_ctrl_item.loopback_exit_directed);
-             `uvm_info("EP_LTSSM","LOOPBACK_ACTIVE_DIRECTED_EXIT",UVM_LOW)
-          end
-          begin
-             ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_ACTIVE);
-             timeout_occured = 1'b1;
-          end
-       join_any
-       disable fork;
-       `uvm_info("EP_LTSSM",$sformatf("LOOPBACK_ACTIVE_TIMEOUT=%0b_TO_LOOPBACK_EXIT",timeout_occured),UVM_LOW)
-       ep_main_state = LOOPBACK_EXIT;
+           begin
+              if (!is_timeout_target) begin
+                 wait (ep_ctrl_item != null && ep_ctrl_item.loopback_exit_directed);
+                 `uvm_info("EP_LTSSM","LOOPBACK_ACTIVE_DIRECTED_EXIT",UVM_LOW)
+              end
+              else wait(1'b0);
+           end
+           begin
+              ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_ACTIVE);
+              timeout_occured = 1'b1;
+           end
+        join_any
+        disable fork;
+        if (is_timeout_target) begin
+           ep_timeout_test_finish("LOOPBACK_ACTIVE");
+           return;
+        end
+        `uvm_info("EP_LTSSM",$sformatf("LOOPBACK_ACTIVE_TIMEOUT=%0b_TO_LOOPBACK_EXIT",timeout_occured),UVM_LOW)
+        ep_main_state = LOOPBACK_EXIT;
     endtask
 
     task ep_state_loopback_exit();
+       bit is_timeout_target;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_LOOPBACK_EXIT);
+       if (is_timeout_target) begin
+          `uvm_info("EP_LTSSM","TIMEOUT_TEST_LOOPBACK_EXIT_WAITING_DECLARED_TIMEOUT",UVM_LOW)
+          ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_EXIT_IDLE);
+          ep_timeout_test_finish("LOOPBACK_EXIT");
+          return;
+       end
        `uvm_info("EP_LTSSM","ENTERED_LOOPBACK_EXIT_SLAVE_ELECTRICAL_IDLE",UVM_LOW)
        previous_symbol = 2'b11;
        @(posedge ep_pipe_intf_tx.pclk);
@@ -1077,6 +1312,8 @@ task ep_state_config_complete();
     task ep_state_hot_reset(output bit remain);
        bit echo_done;
        bit timeout_occured;
+       bit is_timeout_target;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_HOT_RESET);
        `uvm_info("EP_LTSSM","ENTERED_HOT_RESET_NOT_DIRECTED_BROADCASTING_TS1_WITH_HOT_RESET",UVM_LOW)
        remain          = 1'b0;
        echo_done       = 1'b0;
@@ -1086,24 +1323,34 @@ task ep_state_config_complete();
        ep_lane_num = PAD_BYTE;
        ep_ts1_training_ctrl = `PCIe_TS1_TC_HOT_RESET;
        build_ep_ts1();
-       fork
-          begin
-             send_ordered_set(ep_ts1_os,`PCIe_HOT_RESET_TS1_COUNT,"HOT_RESET_TS1");
-          end
-          begin
-             ep_check_rc_ts1(2,echo_done);
-          end
-          begin
-             ep_ltssm_timer(`PCIe_LTSSM_T_HOT_RESET);
-             timeout_occured = 1'b1;
-          end
-       join_any
-       disable fork;
-       ep_ts1_training_ctrl = 8'h00;
-       @(posedge ep_pipe_intf_tx.pclk);
-       ep_pipe_intf_tx.tx_valid <= 1'b0;
-       ep_pipe_intf_tx.tx_data  <= '0;
-        if (echo_done && (ep_ctrl_item != null) && ep_ctrl_item.hot_reset_remain_directed) begin
+        fork
+           begin
+              if (!is_timeout_target)
+                 send_ordered_set(ep_ts1_os,`PCIe_HOT_RESET_TS1_COUNT,"HOT_RESET_TS1");
+              else
+                 wait(1'b0);
+           end
+           begin
+              if (!is_timeout_target)
+                 ep_check_rc_ts1(2,echo_done);
+              else
+                 wait(1'b0);
+           end
+           begin
+              ep_ltssm_timer(`PCIe_LTSSM_T_HOT_RESET);
+              timeout_occured = 1'b1;
+           end
+        join_any
+        disable fork;
+        ep_ts1_training_ctrl = 8'h00;
+        @(posedge ep_pipe_intf_tx.pclk);
+        ep_pipe_intf_tx.tx_valid <= 1'b0;
+        ep_pipe_intf_tx.tx_data  <= '0;
+        if (is_timeout_target) begin
+           ep_timeout_test_finish("HOT_RESET");
+           return;
+        end
+         if (echo_done && (ep_ctrl_item != null) && ep_ctrl_item.hot_reset_remain_directed) begin
            `uvm_info("EP_LTSSM","HOT_RESET_MATCHING_TS1S_STILL_ARRIVING_REMAIN",UVM_LOW)
            remain = 1'b1;
            return;
@@ -2031,9 +2278,11 @@ task ep_state_config_complete();
     task ep_state_recovery_rcvrlock(PCIe_sequence_item item);
        bit tx_ts1_done;
        bit rx_ts1_done;
+       bit is_timeout_target;
        int  base_ts1;
        tx_ts1_done = 1'b0;
        rx_ts1_done = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_RCVRLOCK);
        base_ts1    = ep_rx_ts1_count;
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_RcvrLock",UVM_LOW)
@@ -2041,15 +2290,29 @@ task ep_state_config_complete();
        ep_build_recovery_ts1();
        fork : EP_RECOVERY_RCVR_LOCK_THREADS
           begin
-             `uvm_info("EP_RECOVERY","STARTING_EP_8_TS1_TRANSMISSION",UVM_LOW)
-             send_ordered_set(ep_ts1_os,`PCIe_RECOVERY_TS1_TX_COUNT,"RECOVERY_TS1");
-             tx_ts1_done = 1'b1;
+             if (!is_timeout_target) begin
+                `uvm_info("EP_RECOVERY","STARTING_EP_8_TS1_TRANSMISSION",UVM_LOW)
+                send_ordered_set(ep_ts1_os,`PCIe_RECOVERY_TS1_TX_COUNT,"RECOVERY_TS1");
+                tx_ts1_done = 1'b1;
+             end
+             else wait(1'b0);
           end
           begin
-             `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS1_FROM_RC",UVM_LOW)
-             ep_wait_rc_ts1_os(`PCIe_RECOVERY_TS1_RX_COUNT, base_ts1, rx_ts1_done);
+             if (!is_timeout_target) begin
+                `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS1_FROM_RC",UVM_LOW)
+                ep_wait_rc_ts1_os(`PCIe_RECOVERY_TS1_RX_COUNT, base_ts1, rx_ts1_done);
+             end
+             else wait(1'b0);
           end
-       join
+          begin
+             ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_RCVRLOCK);
+          end
+       join_any
+       disable fork;
+       if (is_timeout_target) begin
+          ep_timeout_test_finish("RECOVERY_RCVRLOCK");
+          return;
+       end
        if (tx_ts1_done && rx_ts1_done) begin
           `uvm_info("EP_RECOVERY","8_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_LOW)
           // Equalization applies to the rate being moved to (8 GT/s and above)
@@ -2076,16 +2339,37 @@ task ep_state_config_complete();
     //-------------------------------------------------------------------------
     task ep_state_recovery_equalization(PCIe_sequence_item item);
        int phase;
+       bit is_timeout_target;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_EQUALIZATION);
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_Equalization",UVM_LOW)
        `uvm_info("EP_RECOVERY",$sformatf("EQUALIZING_AT_RATE=%s",ep_cur_rate.name()),UVM_LOW)
+       if (is_timeout_target) begin
+          ep_eq_phase = EQ_PHASE_1;
+          ep_build_recovery_ts1();
+          `uvm_info("EP_RECOVERY","TIMEOUT_TEST_EQUALIZATION_WAITING_PHASE1_DECLARED_TIMEOUT",UVM_LOW)
+          ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_EQ_PH1);
+          ep_timeout_test_finish("RECOVERY_EQUALIZATION");
+          return;
+       end
        for (phase = 1; phase <= `PCIe_RECOVERY_EQ_PHASE_COUNT; phase++) begin
           bit tx_eq_done;
           bit rx_eq_done;
+          bit timeout_occured;
           int  base_ts1;
+          int  gen_num;
+          time eq_timeout;
           tx_eq_done = 1'b0;
           rx_eq_done = 1'b0;
+          timeout_occured = 1'b0;
           base_ts1  = ep_rx_ts1_count;
+          gen_num   = ep_rate_gen_num(ep_cur_rate);
+          case (phase)
+             1: eq_timeout = `PCIe_LTSSM_T_RCVRY_EQ_PH1;
+             2: eq_timeout = (gen_num >= 6) ? `PCIe_LTSSM_T_RCVRY_EQ_PH2_64G : `PCIe_LTSSM_T_RCVRY_EQ_PH2;
+             3: eq_timeout = (gen_num >= 6) ? `PCIe_LTSSM_T_RCVRY_EQ_PH3_64G : `PCIe_LTSSM_T_RCVRY_EQ_PH3;
+             default: eq_timeout = `PCIe_LTSSM_T_RCVRY_EQ_PH1;
+          endcase
           ep_eq_phase = equalization_phase_e'(phase);
           ep_build_recovery_ts1();
           fork : EP_RECOVERY_EQ_THREADS
@@ -2096,7 +2380,16 @@ task ep_state_config_complete();
              begin
                 ep_wait_rc_ts1_os(`PCIe_RECOVERY_TS1_RX_COUNT, base_ts1, rx_eq_done);
              end
-          join
+             begin
+                ep_ltssm_timer(eq_timeout);
+                timeout_occured = 1'b1;
+             end
+          join_any
+          disable fork;
+          if (timeout_occured) begin
+             `uvm_error("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_TIMEOUT",phase))
+             break;
+          end
           if (tx_eq_done && rx_eq_done) begin
              ep_eq_phase_count++;
              `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_COMPLETED",phase),UVM_LOW)
@@ -2136,24 +2429,40 @@ task ep_state_config_complete();
     task ep_state_recovery_rcvrcfg(PCIe_sequence_item item);
        bit tx_ts2_done;
        bit rx_ts2_done;
+       bit is_timeout_target;
        int  base_ts2;
        tx_ts2_done = 1'b0;
        rx_ts2_done = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_RCVRCFG);
        base_ts2    = ep_rx_ts2_count;
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_RcvrCfg",UVM_LOW)
        ep_build_recovery_ts2();
        fork : EP_RECOVERY_RCVR_CFG_THREADS
           begin
-             `uvm_info("EP_RECOVERY","STARTING_EP_16_TS2_TRANSMISSION",UVM_LOW)
-             send_ordered_set(ep_ts2_os,`PCIe_RECOVERY_TS2_TX_COUNT,"RECOVERY_TS2");
-             tx_ts2_done = 1'b1;
+             if (!is_timeout_target) begin
+                `uvm_info("EP_RECOVERY","STARTING_EP_16_TS2_TRANSMISSION",UVM_LOW)
+                send_ordered_set(ep_ts2_os,`PCIe_RECOVERY_TS2_TX_COUNT,"RECOVERY_TS2");
+                tx_ts2_done = 1'b1;
+             end
+             else wait(1'b0);
           end
           begin
-             `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS2_FROM_RC",UVM_LOW)
-             ep_wait_rc_ts2_os_rate(`PCIe_RECOVERY_TS2_RX_COUNT, base_ts2, rx_ts2_done);
+             if (!is_timeout_target) begin
+                `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS2_FROM_RC",UVM_LOW)
+                ep_wait_rc_ts2_os_rate(`PCIe_RECOVERY_TS2_RX_COUNT, base_ts2, rx_ts2_done);
+             end
+             else wait(1'b0);
           end
-       join
+          begin
+             ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_RCVRCFG);
+          end
+       join_any
+       disable fork;
+       if (is_timeout_target) begin
+          ep_timeout_test_finish("RECOVERY_RCVRCFG");
+          return;
+       end
        if (tx_ts2_done && rx_ts2_done) begin
           ep_rx_adv_rate = ep_dri_to_rate(ep_rx_dri_rate);
           if (ep_rate_gen_num(ep_rx_adv_rate) < ep_rate_gen_num(ep_adv_rate))
@@ -2191,12 +2500,20 @@ task ep_state_config_complete();
     task ep_state_recovery_idle(PCIe_sequence_item item);
        bit tx_idle_done;
        bit rx_idle_done;
+       bit is_timeout_target;
        int  base_idle;
        tx_idle_done = 1'b0;
        rx_idle_done = 1'b0;
+       is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_IDLE);
        base_idle    = ep_rx_idle_count;
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_Idle",UVM_LOW)
+       if (is_timeout_target) begin
+          `uvm_info("EP_RECOVERY","TIMEOUT_TEST_RECOVERY_IDLE_WAITING_DECLARED_TIMEOUT",UVM_LOW)
+          ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_IDLE);
+          ep_timeout_test_finish("RECOVERY_IDLE");
+          return;
+       end
        // Directed Hot Reset (PCIe Base 6.0, Sec 4.2.7.4 Recovery.Idle): when the higher
        // layer sets the Hot Reset bit, leave Recovery.Idle for Hot Reset, not for L0.
        if (item != null && item.link_ctrl_hot_reset) begin
@@ -2216,7 +2533,11 @@ task ep_state_config_complete();
               `uvm_info("EP_RECOVERY","WAITING_FOR_2_IDLE_FROM_RC",UVM_LOW)
               ep_wait_rc_idle_os(`PCIe_RECOVERY_IDLE_COUNT, base_idle, rx_idle_done);
            end
-        join
+           begin
+              ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_IDLE);
+           end
+        join_any
+        disable fork;
         if (tx_idle_done && rx_idle_done) begin
            ep_main_state = L0;
            `uvm_info("EP_RECOVERY",$sformatf("2_IDLE_TX_AND_2_IDLE_RX_CONDITIONS_SATISFIED LTSSM_TRANSITION_RECOVERY_Idle_L0_AT=%s",

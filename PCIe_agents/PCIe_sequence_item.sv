@@ -158,6 +158,17 @@ class PCIe_sequence_item extends uvm_sequence_item;
   bit           hot_reset_remain_directed= 1'b0;
 
   //--------------------------------------------------------------------------
+  // LTSSM TIMEOUT INJECTION (directed timeout testcases)
+  //   ltssm_timeout_test  : 1 => the LTSSM starts directly in the selected
+  //                          state/substate, skips the normal handshake and
+  //                          lets that state's declared watchdog expire.
+  //   ltssm_timeout_target: state/substate whose timeout must fire.
+  //   Both are non-rand and defaulted, so existing sequences are unchanged.
+  //--------------------------------------------------------------------------
+  bit                    ltssm_timeout_test   = 1'b0;
+  ltssm_timeout_target_e ltssm_timeout_target = LTSSM_TO_NONE;
+
+  //--------------------------------------------------------------------------
   // FLIT OHC indication
   //   bit 0   : OHC-A
   //   bit 1   : OHC-B
@@ -419,6 +430,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_enum (pkt_mode_e,         pkt_mode,     UVM_ALL_ON)
     `uvm_field_int  (target_gen,         UVM_ALL_ON)
     `uvm_field_int  (directed_recovery,  UVM_ALL_ON)
+    `uvm_field_int  (ltssm_timeout_test, UVM_ALL_ON)
+    `uvm_field_enum (ltssm_timeout_target_e, ltssm_timeout_target, UVM_ALL_ON)
     `uvm_field_enum (pcie_tl_txn_type_e, txn_type,     UVM_ALL_ON)
     `uvm_field_enum (pcie_tl_dir_e,      dir,          UVM_ALL_ON)
     `uvm_field_int  (address,        UVM_ALL_ON | UVM_HEX)

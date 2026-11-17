@@ -302,6 +302,38 @@ package typedef_enums;
       } recovery_state_e;
 
    //--------------------------------------------------------------------------
+   // ltssm_timeout_target_e - LTSSM timeout-injection target.
+   //   A directed timeout test sets ltssm_timeout_test on the sequence item and
+   //   selects the state/substate it must time out in. The matching LTSSM state
+   //   task deliberately lets its declared watchdog expire instead of
+   //   completing the handshake, then returns the LTSSM to DETECT.QUIET.
+   //   LTSSM_TO_NONE keeps the normal (non timeout) behaviour.
+   //--------------------------------------------------------------------------
+   typedef enum
+      {
+         LTSSM_TO_NONE,
+         LTSSM_TO_DETECT_QUIET,
+         LTSSM_TO_DETECT_ACTIVE,
+         LTSSM_TO_POLLING_ACTIVE,
+         LTSSM_TO_POLLING_CONFIGURATION,
+         LTSSM_TO_CFG_LINKWIDTH_START,
+         LTSSM_TO_CFG_LINKWIDTH_ACCEPT,
+         LTSSM_TO_CFG_LANENUM_WAIT,
+         LTSSM_TO_CFG_LANENUM_ACCEPT,
+         LTSSM_TO_CFG_COMPLETE,
+         LTSSM_TO_CFG_IDLE,
+         LTSSM_TO_RCVRY_RCVRLOCK,
+         LTSSM_TO_RCVRY_EQUALIZATION,
+         LTSSM_TO_RCVRY_RCVRCFG,
+         LTSSM_TO_RCVRY_IDLE,
+         LTSSM_TO_LOOPBACK_ENTRY,
+         LTSSM_TO_LOOPBACK_ACTIVE,
+         LTSSM_TO_LOOPBACK_EXIT,
+         LTSSM_TO_HOT_RESET,
+         LTSSM_TO_DISABLED
+      } ltssm_timeout_target_e;
+
+   //--------------------------------------------------------------------------
    // pcie_link_rate_e - the link data rate a Port operates at / advertises in
    // the Data Rate Identifier. The enum value IS the 3-bit PIPE `rate` label.
    //--------------------------------------------------------------------------
