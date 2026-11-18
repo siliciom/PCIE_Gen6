@@ -19,4 +19,5 @@
                          CFG_IDLE,
                          RC_ltssm_timeout_config_idle_sequence,
                          EP_ltssm_timeout_config_idle_sequence,
-                         22ms)
+                         22us)   // [SIM-FAST] was 22ms
+

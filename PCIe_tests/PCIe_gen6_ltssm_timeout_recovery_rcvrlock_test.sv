@@ -19,4 +19,5 @@
                          RECOVERY_RCVRLOCK,
                          RC_ltssm_timeout_recovery_rcvrlock_sequence,
                          EP_ltssm_timeout_recovery_rcvrlock_sequence,
-                         44ms)
+                         44us)   // [SIM-FAST] was 44ms
+

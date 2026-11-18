@@ -83,7 +83,7 @@ set testname "PCIe_gen6_ltssm_timeout_polling_active_test"
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_MaxPayload_test"
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_Random_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
-set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
+#set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
  
 vlib work
 vmap work work

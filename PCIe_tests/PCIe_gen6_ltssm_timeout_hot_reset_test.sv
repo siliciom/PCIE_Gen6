@@ -19,4 +19,5 @@
                          HOT_RESET,
                          RC_ltssm_timeout_hot_reset_sequence,
                          EP_ltssm_timeout_hot_reset_sequence,
-                         22ms)
+                         22us)   // [SIM-FAST] was 22ms
+

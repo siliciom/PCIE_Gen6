@@ -19,4 +19,5 @@
                          RECOVERY_EQUALIZATION,
                          RC_ltssm_timeout_recovery_equalization_sequence,
                          EP_ltssm_timeout_recovery_equalization_sequence,
-                         32ms)
+                         32us)   // [SIM-FAST] was 32ms
+
