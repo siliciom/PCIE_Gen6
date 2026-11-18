@@ -235,6 +235,19 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_4DW_NonFlit_MsgWr_withoutdata_sequence.sv"
 	// [TC_VC] MemWr + DMWr + MemRd on the TC given by the test
 	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_MemWr_MemRd_tc_vc_sequence.sv"
+	// [ATOMIC] FetchAdd / Swap / CAS AtomicOp sequences (3DW + 4DW, Flit)
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_FetchAdd_1dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_FetchAdd_2dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_swap_1dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_swap_2dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CAS_1dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_CAS_2dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_FetchAdd_1dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_FetchAdd_2dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_swap_1dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_swap_2dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_CAS_1dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_CAS_2dwPayload_sequence.sv"
 
 
 
@@ -389,6 +402,19 @@ package PCIe_pkg;
 	`include "../PCIe_tests/PCIe_gen6_4DW_NonFlit_MsgWr_withoutdata_test.sv"
 	// [TC_VC] TC0..TC7 -> VC0..VC7, per-VC FC, Strict Priority 
 	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test.sv"
+	// [ATOMIC] FetchAdd / Swap / CAS AtomicOp tests (4DW ones need +define+FORCE_4DW+CONFIG_4DW)
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_FetchAdd_1dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_FetchAdd_2dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_swap_1dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_swap_2dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_CAS_1dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_CAS_2dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_FetchAdd_2dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_swap_1dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_swap_2dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_CAS_1dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_CAS_2dwPayload_test.sv"
 
 
 endpackage

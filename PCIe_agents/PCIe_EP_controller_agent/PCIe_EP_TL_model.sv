@@ -105,6 +105,7 @@ class PCIe_EP_TL_model extends uvm_component;
   bit                                   d_has_data;
   bit                                   d_mem_locked;
   bit                                   d_mem_deferrable;
+  pcie_atomic_op_e                      d_atomic_op;    // [ATOMIC] FetchAdd / Swap / CAS / NONE
   bit [63:0]                            d_address;      // always 64-bit internally
   bit [`PCIe_TL_LEN_W-1:0]              d_length;
   bit [`PCIe_TL_TC_W-1:0]               d_tc;
@@ -150,6 +151,7 @@ class PCIe_EP_TL_model extends uvm_component;
   int unsigned n_cfg_wr;
   int unsigned n_cfg_ur;
   int unsigned n_dmwr_rcvd;        // [FLIT_SEG] DMWr TLPs received (one Cpl each)
+  int unsigned n_atomic_rcvd;      // [ATOMIC] AtomicOp requests executed
   int unsigned n_cpl_split_txn;    // [FLIT_SEG] completions that had to be split
   int unsigned n_cpl_split_parts;  // [FLIT_SEG] CplD parts sent for them
 
@@ -1310,6 +1312,8 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     `uvm_info("EP_TL_FLIT_SEG",
       $sformatf("EP_FLIT_SEG_SUMMARY : DMWr received=%0d (one Cpl each)  split completions=%0d  CplD parts sent=%0d",
                  n_dmwr_rcvd, n_cpl_split_txn, n_cpl_split_parts), UVM_LOW)
+    `uvm_info("EP_TL_ATOMIC",
+      $sformatf("EP_ATOMICOP_SUMMARY : AtomicOp requests executed=%0d", n_atomic_rcvd), UVM_LOW)   // [ATOMIC]
   endfunction
 
   //==========================================================================
@@ -1390,7 +1394,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     if (!PCIe_sequence_item::tc_txn_allowed(d_txn_type, d_mem_locked, d_tc))
       `uvm_error("EP_TL_TC_VC", $sformatf("TXN_TYPE_NOT_ALLOWED_ON_TC%0d : %s %s%s received - only MEM (MRd/MWr) and DMWr may use TC1-7",
                  d_tc, d_txn_type.name(), d_dir.name(), d_mem_locked ? " (MRdLk, Sec 6.5 TC0 only)" : ""))
-    PCIe_sequence_item::fc_classify(d_txn_type, d_dir, d_mem_deferrable, d_payload_dw,
+    PCIe_sequence_item::fc_classify(d_txn_type, d_dir, d_mem_deferrable || (d_atomic_op != PCIe_ATOMIC_NONE), d_payload_dw,   // [ATOMIC] NP
                                     fc_c, fc_h, fc_d);
     fc_rx_account(fc_v, fc_c, fc_h, fc_d,
                   $sformatf("%s %s TC%0d len=%0d", d_txn_type.name(), d_dir.name(), d_tc, d_payload_dw), fc_pool);
@@ -1420,6 +1424,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     d_ohc_dw         = 0;
     d_mem_locked     = 1'b0;
     d_mem_deferrable = 1'b0;
+    d_atomic_op      = PCIe_ATOMIC_NONE;     // [ATOMIC]
     d_cfg_type1      = 1'b0;
     d_td             = 1'b0;
     d_ts             = 3'b000;
@@ -1510,6 +1515,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     item.cfg_reg_num     = d_cfg_reg_num;
     item.mem_locked   = d_mem_locked;
     item.mem_deferrable = d_mem_deferrable;
+    item.atomic_op    = d_atomic_op;           // [ATOMIC]
     item.hdr_dw_count = d_hdr_dw;
     item.tlp_header_dw_count  = d_hdr_dw;
     item.tlp_payload_dw_count = d_payload_dw;
@@ -1558,6 +1564,13 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       `PCIe_FLITTYPE_CFGWR0   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_cfg_type1=0; end
       `PCIe_FLITTYPE_CFGRD1   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_READ;  d_is_4dw=0; d_has_data=0; d_cfg_type1=1; end
       `PCIe_FLITTYPE_CFGWR1   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_WRITE; d_is_4dw=1'b0; d_has_data=1; d_cfg_type1=1; end
+      // [ATOMIC] AtomicOp Requests : Memory Request with data, Non-Posted
+      `PCIe_FLITTYPE_FETCHADD_32 : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_atomic_op=PCIe_ATOMIC_FETCHADD; end
+      `PCIe_FLITTYPE_FETCHADD_64 : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=1; d_has_data=1; d_atomic_op=PCIe_ATOMIC_FETCHADD; end
+      `PCIe_FLITTYPE_SWAP_32     : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_atomic_op=PCIe_ATOMIC_SWAP;     end
+      `PCIe_FLITTYPE_SWAP_64     : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=1; d_has_data=1; d_atomic_op=PCIe_ATOMIC_SWAP;     end
+      `PCIe_FLITTYPE_CAS_32      : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_atomic_op=PCIe_ATOMIC_CAS;      end
+      `PCIe_FLITTYPE_CAS_64      : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=1; d_has_data=1; d_atomic_op=PCIe_ATOMIC_CAS;      end
       default : begin
         if ((d_byte0 == `PCIe_FLITTYPE_MSG) || (d_byte0 == `PCIe_FLITTYPE_MSGD)) begin
           d_txn_type = PCIe_TL_MSG;
@@ -1644,6 +1657,13 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       `PCIe_FMTTYPE_CFGWR0   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_cfg_type1=0; end
       `PCIe_FMTTYPE_CFGRD1   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_READ;  d_is_4dw=0; d_has_data=0; d_cfg_type1=1; end
       `PCIe_FMTTYPE_CFGWR1   : begin d_txn_type=PCIe_TL_CFG; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_cfg_type1=1; end
+      // [ATOMIC] AtomicOp Requests
+      `PCIe_FMTTYPE_FETCHADD_32 : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_atomic_op=PCIe_ATOMIC_FETCHADD; end
+      `PCIe_FMTTYPE_FETCHADD_64 : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=1; d_has_data=1; d_atomic_op=PCIe_ATOMIC_FETCHADD; end
+      `PCIe_FMTTYPE_SWAP_32     : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_atomic_op=PCIe_ATOMIC_SWAP;     end
+      `PCIe_FMTTYPE_SWAP_64     : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=1; d_has_data=1; d_atomic_op=PCIe_ATOMIC_SWAP;     end
+      `PCIe_FMTTYPE_CAS_32      : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=0; d_has_data=1; d_atomic_op=PCIe_ATOMIC_CAS;      end
+      `PCIe_FMTTYPE_CAS_64      : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_WRITE; d_is_4dw=1; d_has_data=1; d_atomic_op=PCIe_ATOMIC_CAS;      end
       default : begin
         if ((d_byte0 == `PCIe_FMTTYPE_MSG) || (d_byte0 == `PCIe_FMTTYPE_MSGD)) begin
           d_txn_type = PCIe_TL_MSG;
@@ -1893,6 +1913,83 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
   endfunction
  
+  //==========================================================================
+  //   [ATOMIC] atomic_access - execute one FetchAdd / Swap / CAS
+  //
+  //   Uses the decoded request (d_atomic_op, d_address, d_length, d_payload)
+  //   and the same mem3dw / mem4dw memory as MRd / MWr (through mem_access):
+  //     1. check Length (Table 2-15) and natural alignment
+  //     2. READ  the old value      (1 or 2 DW)
+  //     3. COMPUTE the new value    (PCIe_sequence_item::atomic_compute)
+  //     4. WRITE the new value      (CAS writes only when compare matched)
+  //     5. return the OLD value -> it goes back in the CplD
+  //
+  //   A bad Length / alignment is a Malformed TLP in the spec. This model
+  //   reports a uvm_error and answers with a UR Cpl (no data) so the RC
+  //   is not left waiting for a completion.
+  //==========================================================================
+  function void atomic_access(output bit [`PCIe_TL_DATA_DW_W-1:0] old_dws [],
+                              output bit                          with_data);
+    int unsigned n_dw;                         // operand size in DW (1 or 2)
+    bit [63:0]   operand1, operand2, old_val, new_val;
+    bit [`PCIe_TL_DATA_DW_W-1:0] new_dws [];
+    bit [`PCIe_TL_DATA_DW_W-1:0] dummy   [];
+    string       name;
+
+    n_atomic_rcvd++;
+    n_dw = PCIe_sequence_item::atomic_operand_dw(d_atomic_op, d_payload_dw);
+    name = PCIe_sequence_item::atomic_name(d_atomic_op, n_dw);
+
+    // ---- 1. Length and alignment checks ------------------------------------
+    if (!PCIe_sequence_item::atomic_length_ok(d_atomic_op, d_payload_dw) ||
+        ((d_address % (n_dw * `PCIe_TL_DW_BYTES)) != 0)) begin
+      `uvm_error("EP_TL_ATOMIC",
+        $sformatf("MALFORMED_ATOMICOP %s : Length=%0d DW addr=0x%0h (Length must follow Table 2-15, address aligned to %0d B) -> UR",
+                  d_atomic_op.name(), d_payload_dw, d_address, n_dw * `PCIe_TL_DW_BYTES))
+      cfg_status_override = `PCIe_CPL_STATUS_UR;
+      with_data           = 1'b0;
+      old_dws             = new[0];
+      return;
+    end
+
+    // ---- 2. read the old value ---------------------------------------------
+    mem_access(PCIe_TL_MEM_OP_READ, d_is_4dw, d_mode, d_address, n_dw, dummy, old_dws);
+    old_val = PCIe_sequence_item::atomic_get_operand(old_dws, 0, n_dw);
+
+    // ---- 3. compute the new value ------------------------------------------
+    operand1 = PCIe_sequence_item::atomic_get_operand(d_payload, 0,    n_dw);   // add / swap / compare
+    operand2 = PCIe_sequence_item::atomic_get_operand(d_payload, n_dw, n_dw);   // CAS swap value
+    new_val  = PCIe_sequence_item::atomic_compute(d_atomic_op, n_dw, old_val, operand1, operand2);
+
+    // ---- 4. write the new value back (CAS : only if compare matched) --------
+    if (new_val != old_val) begin
+      PCIe_sequence_item::atomic_put_operand(new_val, n_dw, new_dws);
+      mem_access(PCIe_TL_MEM_OP_WRITE, d_is_4dw, d_mode, d_address, n_dw, new_dws, dummy);
+    end
+
+    // ---- 5. old value goes back in the CplD ---------------------------------
+    with_data = 1'b1;
+
+    `uvm_info("EP_TL_ATOMIC",
+      $sformatf({"\n",
+        "         ============================================================\n",
+        "              EP TL MODEL : ATOMICOP EXECUTED on %s\n",
+        "         ============================================================\n",
+        "          Operation          : %s   tag=0x%0h\n",
+        "          Address            : 0x%0h\n",
+        "          Operand 1          : 0x%0h\n",
+        "          Operand 2          : 0x%0h%s\n",
+        "          Old value          : 0x%0h  (returned in CplD)\n",
+        "          New value          : 0x%0h  %s\n",
+        "         ============================================================"},
+        d_is_4dw ? "mem4dw" : "mem3dw", name, d_tag, d_address,
+        operand1, operand2, (d_atomic_op == PCIe_ATOMIC_CAS) ? "  (CAS swap value)" : "  (not used)",
+        old_val, new_val,
+        (d_atomic_op != PCIe_ATOMIC_CAS)  ? "(written)" :
+        (old_val == operand1)              ? "(compare MATCHED -> swap written)"
+                                           : "(compare FAILED -> memory unchanged)"), UVM_LOW)
+  endfunction
+
     //==========================================================================
   //   MEMORY ACCESS FUNCTION 2 of 2
   //
@@ -2042,7 +2139,13 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       // MEMORY : mem3dw (3DW header) or mem4dw (4DW header)
       //------------------------------------------------------------------
       PCIe_TL_MEM: begin
-        if (d_dir == PCIe_TL_WRITE) begin
+        // [ATOMIC] FetchAdd / Swap / CAS : read old value, write new value,
+        //          return the old value in a CplD (Non-Posted)
+        if (d_atomic_op != PCIe_ATOMIC_NONE) begin
+          atomic_access(rdata, cpl_with_data);
+          need_cpl = 1'b1;
+        end
+        else if (d_dir == PCIe_TL_WRITE) begin
           mem_access(PCIe_TL_MEM_OP_WRITE, d_is_4dw, d_mode,
                      d_address, d_payload_dw, d_payload, dummy);
           // Deferrable Memory Write is Non-Posted and is completed with a
@@ -2321,6 +2424,12 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       req.address     = d_address;
       bc = req.calc_byte_count();
       la = req.calc_lower_address();
+    end
+    else if ((d_atomic_op != PCIe_ATOMIC_NONE) && with_data) begin
+      // [ATOMIC] "Byte Count must equal the AtomicOp operand size in bytes",
+      //          Lower Address is Reserved (Sec 2.2.9.1)
+      bc = rdata.size() * `PCIe_TL_DW_BYTES;
+      la = '0;
     end
     else begin
       // "For all other types of Completions, the Byte Count value must be 4"

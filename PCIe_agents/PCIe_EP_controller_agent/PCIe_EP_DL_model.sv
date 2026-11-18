@@ -86,7 +86,7 @@ class PCIe_EP_DL_model extends uvm_component;
   bit form_dlp_flit;
 
    // Simplified DLLP content encodings for DLCMSM simulation
-    localparam bit [31:0] FEATURE_DLLP = 32'h0100_0000;
+    localparam bit [31:0] FEATURE_DLLP = 32'h0200_0000;   // spec Table 3-5 : Feature DLLP type = 02h
 
     // [FLIT_CNT] flit summary counters (logic + report at the end of the class)
   typedef enum int {FLTC_FEATURE, FLTC_INITFC1, FLTC_INITFC2, FLTC_UPDATEFC,
@@ -1763,8 +1763,3 @@ endfunction
 
 
 endclass
-
-
-
- 
-

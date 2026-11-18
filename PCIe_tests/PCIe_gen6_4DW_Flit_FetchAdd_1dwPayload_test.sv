@@ -1,0 +1,47 @@
+//=========================================================================================
+// File         : PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test.sv
+// Project      : PCIE_Gen6
+// Description  : PCIe_tests/PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test.sv
+// Author       :
+// Date         : 2026-11-17
+//=========================================================================================
+
+/**********************************************************************************************************************
+* Copyright by the SILICIOM TECHNOLOGIES PVT LTD,
+* By using, accessing or downloading any part of this file/document,  including by copying, saving,
+* distributing, displaying or preparing derivatives of,
+* you agree to be and are bound to the terms of the SILICIOM TECHNOLOGIES PVT LTD license agreement.
+* All other rights reserved.
+***********************************************************************************************************************/
+
+//////////////////////////////////////////////////////////////////////////////////
+// FILE:  PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test.sv
+// DESC:  4DW-header FetchAdd AtomicOp, Flit mode, 1 DW operand (32-bit).
+//        Uses a factory type-override so the base test's rc_controller_sequence
+//        handle runs PCIe_RC_4DW_Flit_FetchAdd_1dwPayload_sequence::body().
+//        Run with:  +UVM_TESTNAME=PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test
+//        Build   :  4DW test -> compile with +define+FORCE_4DW+CONFIG_4DW (see run.do)
+//////////////////////////////////////////////////////////////////////////////////
+
+class PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test extends PCIe_base_test;
+
+  `uvm_component_utils(PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test)
+
+  function new(string name="PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test", uvm_component parent=null);
+    super.new(name, parent);
+  endfunction
+
+  function void build_phase(uvm_phase phase);
+    `uvm_info("PCIE_GEN6_4DW_FLIT_FETCHADD_1DWPAYLOAD_TEST","ENTERED_INTO_PCIE_GEN6_4DW_FLIT_FETCHADD_1DWPAYLOAD_TEST_BUILD_PHASE", UVM_LOW)
+    // Redirect the RC controller sequence to the PCIe_RC_4DW_Flit_FetchAdd_1dwPayload_sequence variant before build.
+    PCIe_RC_controller_base_sequence::type_id::set_type_override(
+        PCIe_RC_4DW_Flit_FetchAdd_1dwPayload_sequence::get_type());
+
+    // Override the EP controller sequence to run the common 3DW-Flit EP sequence for every test case.
+    PCIe_EP_controller_base_sequence::type_id::set_type_override(
+        PCIe_EP_3DW_flit_sequence::get_type());
+    super.build_phase(phase);
+    `uvm_info("PCIE_GEN6_4DW_FLIT_FETCHADD_1DWPAYLOAD_TEST","EXIT_FROM_PCIE_GEN6_4DW_FLIT_FETCHADD_1DWPAYLOAD_TEST_BUILD_PHASE", UVM_LOW)
+  endfunction
+
+endclass

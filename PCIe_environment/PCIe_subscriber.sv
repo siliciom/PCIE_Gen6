@@ -152,7 +152,7 @@ PCIe_env_config   pcie_ecfg;
         bins b_gen4           = { `PCIe_RATE_GEN4 };
         bins b_gen5           = { `PCIe_RATE_GEN5 };
         bins b_gen6           = { `PCIe_RATE_GEN6 };
-        ignore_bins b_rsvd    = { 3'b111 };
+        bins b_rsvd           = { 3'b111 };   // reserved rate value
       }
 
       //======================================================================
@@ -184,7 +184,7 @@ PCIe_env_config   pcie_ecfg;
                                      bins b_len_1     = { 1 };
                                      bins b_len_2_32  = { [2:32] };
                                      bins b_len_33_56 = { [33:56] };
-                                     ignore_bins b_len_other = { 0, [57:1023] };   // a CplD never carries more than one FLIT
+                                     bins b_len_other = { 0, [57:1023] };   // 57..1024 DW in one CplD
                                     }
       // Byte Count (DW2[11:0]) : bytes still to be returned (0 encodes 4096)
       tl_rx_byte_count : coverpoint rc_rx_tl_item.byte_count iff (src == TL_RX) {
@@ -202,12 +202,12 @@ PCIe_env_config   pcie_ecfg;
       // TC / Attr / TS / EP : copied by the EP from the request
       tl_rx_tc : coverpoint rc_rx_tl_item.tc iff (src == TL_RX) {
                                      bins b_tc0 = { 0 };
-                                     ignore_bins b_tc_1_7 = { [1:7] };
+                                     bins b_tc_1_7 = { [1:7] };   // TC1..TC7
                                     }
       tl_rx_attr : coverpoint rc_rx_tl_item.attr iff (src == TL_RX) {
                                      bins b_attr_000 = { 3'b000 };
                                      bins b_attr_110 = { 3'b110 };
-                                     ignore_bins b_attr_other = { 3'b001, 3'b010, 3'b011, 3'b100, 3'b101, 3'b111 };
+                                     bins b_attr_other = { 3'b001, 3'b010, 3'b011, 3'b100, 3'b101, 3'b111 };   // all other {IDO,RO,NS} values
                                     }
       tl_rx_ts : coverpoint rc_rx_tl_item.ts iff (src == TL_RX) {
                                      bins b_no_trailer = { 3'b000 };   // `PCIe_TL_TS_NO_TRAILER : no trailer
@@ -282,7 +282,7 @@ PCIe_env_config   pcie_ecfg;
       // DLP2 DLLP Type byte (spec Table 3-5)
       dl_rx_dllp_type : coverpoint rc_rx_dl_item.dl_dllp_type iff (src == DL_RX && rc_rx_dl_item.is_valid) {
                           bins b_nop2       = { 8'b0000_0000 };   // NOP2
-                          bins b_feature    = { 8'b0000_0001 };   // model FEATURE_DLLP (spec : 8'b0000_0010)
+                          bins b_feature    = { 8'b0000_0010 };   // FEATURE_DLLP (spec Table 3-5 : 02h)
                           bins b_initfc1[]  = { 8'b0100_0000,      // P   shared
                                                 8'b0100_1000,      // P   dedicated
                                                 8'b0101_0000,      // NP  shared
@@ -316,7 +316,7 @@ PCIe_env_config   pcie_ecfg;
                         }
       dl_rx_fc_vc : coverpoint rc_rx_dl_item.dl_fc_vc iff (src == DL_RX && rc_rx_dl_item.is_valid && rc_rx_dl_item.dl_is_fc) {
                           bins        b_vc0    = { 3'b000 };
-                          ignore_bins b_vc_1_7 = { [3'b001 : 3'b111] };   // only VC0 enabled
+                          bins        b_vc_1_7 = { [3'b001 : 3'b111] };   // VC1..VC7
                         }
       dl_rx_fc_scale : coverpoint { rc_rx_dl_item.dl_fc_hscale, rc_rx_dl_item.dl_fc_dscale } iff (src == DL_RX && rc_rx_dl_item.is_valid && rc_rx_dl_item.dl_is_fc) {
                           bins        b_1x_1x = { 4'b0101 };   // HdrScale = DataScale = 01b (model always)
@@ -418,7 +418,7 @@ PCIe_env_config   pcie_ecfg;
         bins b_gen4           = { `PCIe_RATE_GEN4 };
         bins b_gen5           = { `PCIe_RATE_GEN5 };
         bins b_gen6           = { `PCIe_RATE_GEN6 };
-        ignore_bins b_rsvd    = { 3'b111 };
+        bins b_rsvd           = { 3'b111 };   // reserved rate value
       }
 
       //======================================================================
@@ -470,30 +470,30 @@ PCIe_env_config   pcie_ecfg;
                                      bins b_len_3_32  = { [3:32] };
                                      bins b_len_33_56 = { [33:56] };   // MaxPayload write segments
                                      bins b_len_1024  = { 0 };         // MaxPayload read
-                                     ignore_bins b_len_57_1023 = { [57:1023] };   // not generated
+                                     bins b_len_57_1023 = { [57:1023] };
                                     }
       // Length of IO / CFG requests : always 1 DW
       tl_rx_io_cfg_length : coverpoint ep_rx_tl_item.length
                                iff (src == TL_RX && ep_rx_tl_item.txn_type inside {PCIe_TL_IO, PCIe_TL_CFG}) {
                                      bins b_len_1 = { 1 };
-                                     ignore_bins b_len_other = { 0, [2:1023] };   // illegal for IO / CFG
+                                     illegal_bins b_len_other = { 0, [2:1023] };   // spec : IO / CFG length must be 1 DW
                                     }
       // TC (DW0[23:21]) : sequences constrain tc == 0
       tl_rx_tc : coverpoint ep_rx_tl_item.tc iff (src == TL_RX) {
                                      bins b_tc0 = { 0 };
-                                     ignore_bins b_tc_1_7 = { [1:7] };   // not generated
+                                     bins b_tc_1_7 = { [1:7] };   // TC1..TC7
                                     }
       // Attr (DW0[12:10]) = {IDO, RO, NS} : sequences use 000 and 110
       tl_rx_attr : coverpoint ep_rx_tl_item.attr iff (src == TL_RX) {
                                      bins b_attr_000 = { 3'b000 };
                                      bins b_attr_110 = { 3'b110 };   // IDO + RO
-                                     ignore_bins b_attr_other = { 3'b001, 3'b010, 3'b011, 3'b100, 3'b101, 3'b111 };
+                                     bins b_attr_other = { 3'b001, 3'b010, 3'b011, 3'b100, 3'b101, 3'b111 };   // all other {IDO,RO,NS} values
                                     }
       // TS (DW0[15:13]) : 000 = no trailer, 001 = 1 DW ECRC (PCIe_RC_3DW_flit_sequence)
       tl_rx_ts : coverpoint ep_rx_tl_item.ts iff (src == TL_RX) {
                                      bins b_no_trailer = { 3'b000 };   // `PCIe_TL_TS_NO_TRAILER : no trailer
                                      bins b_ecrc_1dw   = { 3'b001 };   // `PCIe_TL_TS_1DW_ECRC   : 1 DW ECRC trailer
-                                     ignore_bins b_ts_other = { [3'b010 : 3'b111] };   // not generated
+                                     bins b_ts_other = { [3'b010 : 3'b111] };
                                     }
       // OHC kind = { OHC-A bit (DW0[16]) , txn_type (4 bits) }
       //   first bit  : 1 = OHC-A present, 0 = no OHC
@@ -513,12 +513,12 @@ PCIe_env_config   pcie_ecfg;
       // EP / poisoned (DW1[15]) : sequences constrain ep == 0
       tl_rx_ep : coverpoint ep_rx_tl_item.ep iff (src == TL_RX) {
                                      bins b_ep0 = { 1'b0 };
-                                     ignore_bins b_ep1 = { 1'b1 };   // poisoned TLP not generated
+                                     bins b_ep1 = { 1'b1 };   // poisoned TLP
                                     }
       // AT (MEM address bits [1:0]) : sequences constrain at == 0
       tl_rx_at : coverpoint ep_rx_tl_item.at iff (src == TL_RX && ep_rx_tl_item.txn_type == PCIe_TL_MEM) {
                                      bins b_at_00 = { 2'b00 };
-                                     ignore_bins b_at_other = { 2'b01, 2'b10, 2'b11 };   // ATS not used
+                                     bins b_at_other = { 2'b01, 2'b10, 2'b11 };   // translation req / translated
                                     }
       // First DW Byte Enable (First DW BE) : which bytes of the first DW are valid
       // MEM : no OHC when BE = 1111, OHC-A1 when BE != 1111
@@ -526,7 +526,7 @@ PCIe_env_config   pcie_ecfg;
       tl_rx_mem_first_be : coverpoint ep_rx_tl_item.first_dw_be iff (src == TL_RX && ep_rx_tl_item.txn_type == PCIe_TL_MEM) {
                                      bins ohc_none = { 4'b1111 };   // no OHC  : all 4 bytes (implied)
                                      bins ohcA1    = { 4'b1110 };   // OHC-A1  : bytes 1,2,3
-                                     ignore_bins b_be_other = { [4'b0000 : 4'b1101] };   // not generated
+                                     bins b_be_other = { [4'b0000 : 4'b1101] };
                                     }
       // IO : always OHC-A2, sequences use BE = 1111
       tl_rx_io_first_be : coverpoint ep_rx_tl_item.first_dw_be iff (src == TL_RX && ep_rx_tl_item.txn_type == PCIe_TL_IO) {
@@ -547,15 +547,15 @@ PCIe_env_config   pcie_ecfg;
       tl_rx_last_be : coverpoint ep_rx_tl_item.last_dw_be iff (src == TL_RX && ep_rx_tl_item.txn_type != PCIe_TL_MSG) {
                                      bins multi_dw = { 4'b1111 };
                                      bins one_dw = { 4'b0000 };
-                                     ignore_bins b_be_other = { [4'b0001 : 4'b1110] };   // not generated
+                                     bins b_be_other = { [4'b0001 : 4'b1110] };
                                     }
       // Requester ID (DW1[31:16]) : 0100h (sequences), 0200h (random), 0000h (enumeration)
       tl_rx_requester_id : coverpoint ep_rx_tl_item.requester_id iff (src == TL_RX) {
                                      bins b_rid_0000 = { 16'h0000 };
                                      bins b_rid_0100 = { 16'h0100 };
                                      bins b_rid_0200 = { 16'h0200 };
-                                     ignore_bins b_rid_other = { [16'h0001 : 16'h00FF], [16'h0101 : 16'h01FF],
-                                                                 [16'h0201 : 16'hFFFF] };
+                                     bins b_rid_other = { [16'h0001 : 16'h00FF], [16'h0101 : 16'h01FF],
+                                                          [16'h0201 : 16'hFFFF] };
                                     }
       // Tag (DW1[13:0]) : fixed 8-bit tags and random 10-bit tags
       tl_rx_tag : coverpoint ep_rx_tl_item.tag iff (src == TL_RX) {
@@ -591,7 +591,7 @@ PCIe_env_config   pcie_ecfg;
       tl_rx_cfg_reg : coverpoint ep_rx_tl_item.cfg_reg_num iff (src == TL_RX && ep_rx_tl_item.txn_type == PCIe_TL_CFG) {
                                      bins b_reg_header = { [12'h000 : 12'h03C] };
                                      bins b_reg_cap    = { [12'h040 : 12'h0FC] };
-                                     ignore_bins b_reg_ext = { [12'h100 : 12'hFFC] };   // not reachable with CF8/CFC
+                                     bins b_reg_ext    = { [12'h100 : 12'hFFC] };   // extended config space
                                     }
       // Message Code (DW1[7:0]) : 00h and 7Eh (Vendor Defined Type 0)
       tl_rx_msg_code : coverpoint ep_rx_tl_item.msg_code iff (src == TL_RX && ep_rx_tl_item.txn_type == PCIe_TL_MSG) {
@@ -654,7 +654,7 @@ PCIe_env_config   pcie_ecfg;
       // DLP2 DLLP Type byte (spec Table 3-5)
       dl_rx_dllp_type : coverpoint ep_rx_dl_item.dl_dllp_type iff (src == DL_RX && ep_rx_dl_item.is_valid) {
                           bins b_nop2       = { 8'b0000_0000 };   // NOP2
-                          bins b_feature    = { 8'b0000_0001 };   // model FEATURE_DLLP (spec : 8'b0000_0010)
+                          bins b_feature    = { 8'b0000_0010 };   // FEATURE_DLLP (spec Table 3-5 : 02h)
                           bins b_initfc1[]  = { 8'b0100_0000,      // P   shared
                                                 8'b0100_1000,      // P   dedicated
                                                 8'b0101_0000,      // NP  shared
@@ -688,7 +688,7 @@ PCIe_env_config   pcie_ecfg;
                         }
       dl_rx_fc_vc : coverpoint ep_rx_dl_item.dl_fc_vc iff (src == DL_RX && ep_rx_dl_item.is_valid && ep_rx_dl_item.dl_is_fc) {
                           bins        b_vc0    = { 3'b000 };
-                          ignore_bins b_vc_1_7 = { [3'b001 : 3'b111] };   // only VC0 enabled
+                          bins        b_vc_1_7 = { [3'b001 : 3'b111] };   // VC1..VC7
                         }
       dl_rx_fc_scale : coverpoint { ep_rx_dl_item.dl_fc_hscale, ep_rx_dl_item.dl_fc_dscale } iff (src == DL_RX && ep_rx_dl_item.is_valid && ep_rx_dl_item.dl_is_fc) {
                           bins        b_1x_1x = { 4'b0101 };   // HdrScale = DataScale = 01b (model always)

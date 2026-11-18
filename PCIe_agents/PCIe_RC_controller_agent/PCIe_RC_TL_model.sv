@@ -82,6 +82,8 @@ class PCIe_RC_TL_model extends uvm_component;
   int unsigned             n_seg_txn;        // transactions that were split
   int unsigned             n_seg_tlp;        // segment TLPs created
   int unsigned             n_seg_txn_done;   // segmented Non-Posted txns fully completed
+  int unsigned             n_atomic_cpl;     // [ATOMIC] AtomicOp completions checked
+  int unsigned             n_atomic_err;     // [ATOMIC] AtomicOp completion check errors
 
 
   PCIe_sequence_item item;
@@ -878,6 +880,8 @@ class PCIe_RC_TL_model extends uvm_component;
               n_seg_txn, n_seg_tlp, n_seg_txn_done), UVM_LOW)
     `uvm_info("RC_TL_FULL_CPLD", $sformatf("READ_COMPLETION_SUMMARY : reads completed=%0d  DW match=%0d  DW mismatch=%0d  DW never written=%0d  partial CplD still waiting=%0d",
               n_rd_cpl_checked, n_rd_cpl_dw_match, n_rd_cpl_dw_mismatch, n_rd_cpl_dw_unwritten, cpl_partial.size()), UVM_LOW)
+    `uvm_info("RC_TL_ATOMIC", $sformatf("ATOMICOP_SUMMARY : AtomicOp completions checked=%0d  errors=%0d",
+              n_atomic_cpl, n_atomic_err), UVM_LOW)                                     // [ATOMIC]
     if (cpl_partial.size() != 0)
       `uvm_error("RC_TL_FULL_CPLD", $sformatf("%0d read completion(s) never received their last CplD part", cpl_partial.size()))
     foreach (seg_cpl_expect[ptag]) begin
@@ -1066,7 +1070,12 @@ class PCIe_RC_TL_model extends uvm_component;
         `uvm_info("RC_TL_FLIT_SEG",
           $sformatf("LAST_CPLD tag=0x%0h : split completion reassembled, total %0d DW", cpl_it.tag, cpl_it.cpl_data.size()), UVM_LOW)
       end
-      if (has_data) begin
+      // [ATOMIC] completion of an AtomicOp : own check (old value, Byte Count ...)
+      if (cpl_req_of.exists(cpl_it.tag) && cpl_req_of[cpl_it.tag].is_atomic()) begin
+        check_atomic_completion(cpl_req_of[cpl_it.tag], cpl_it);
+        if (cpl_part_cnt.exists(cpl_it.tag)) cpl_part_cnt.delete(cpl_it.tag);
+      end
+      else if (has_data) begin
         print_full_read_completion(cpl_it, cpl_part_cnt[cpl_it.tag],
                                    cpl_req_of.exists(cpl_it.tag) ? cpl_req_of[cpl_it.tag] : null);
         cpl_part_cnt.delete(cpl_it.tag);
@@ -1149,6 +1158,93 @@ class PCIe_RC_TL_model extends uvm_component;
     if (have_req && (cpl.cpl_data.size() != req.get_payload_dw()))
       `uvm_error("RC_TL_RD_CHECK", $sformatf("READ_LENGTH_MISMATCH tag=0x%0h : requested %0d DW, completions returned %0d DW",
                  cpl.tag, req.get_payload_dw(), cpl.cpl_data.size()))
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // [ATOMIC] check_atomic_completion
+  //   Called once when the completion of a FetchAdd / Swap / CAS arrives.
+  //     1. status must be SC and it must be a CplD
+  //     2. data size = operand size, Byte Count = operand size in bytes
+  //     3. returned (old) value must equal what the RC wrote there before
+  //        (wr_shadow) - only checked when the RC really wrote that address
+  //     4. compute the new memory value with the SAME function the EP uses
+  //        and store it in wr_shadow, so a later MRd readback is checked
+  //--------------------------------------------------------------------------
+  function void check_atomic_completion(PCIe_sequence_item req, PCIe_sequence_item cpl);
+    int unsigned n_dw;          // operand size in DW (1 or 2)
+    bit [63:0]   dw_addr;       // DW address of the operand in memory
+    bit [63:0]   operand1, operand2, old_val, exp_old, new_val;
+    bit          exp_known;
+    string       name;
+
+    n_dw     = PCIe_sequence_item::atomic_operand_dw(req.atomic_op, req.get_payload_dw());
+    name     = PCIe_sequence_item::atomic_name(req.atomic_op, n_dw);
+    dw_addr  = 64'(req.address) >> 2;
+    operand1 = PCIe_sequence_item::atomic_get_operand(req.data, 0,    n_dw);   // add / swap / compare
+    operand2 = PCIe_sequence_item::atomic_get_operand(req.data, n_dw, n_dw);   // CAS swap value
+    n_atomic_cpl++;
+
+    // ---- 1. status / type -------------------------------------------------
+    if ((cpl.cpl_status != `PCIe_CPL_STATUS_SC) || !cpl.cpl_has_data) begin
+      n_atomic_err++;
+      `uvm_error("RC_TL_ATOMIC", $sformatf("%s tag=0x%0h : expected CplD with status SC, got %s status=%s",
+                 name, cpl.tag, cpl.cpl_has_data ? "CplD" : "Cpl", cpl_status_str(cpl.cpl_status)))
+      return;
+    end
+
+    // ---- 2. data size and Byte Count ---------------------------------------
+    if (cpl.cpl_data.size() != n_dw) begin
+      n_atomic_err++;
+      `uvm_error("RC_TL_ATOMIC", $sformatf("%s tag=0x%0h : CplD has %0d DW, expected %0d DW (operand size)",
+                 name, cpl.tag, cpl.cpl_data.size(), n_dw))
+    end
+    if (cpl.byte_count != (n_dw * `PCIe_TL_DW_BYTES)) begin
+      n_atomic_err++;
+      `uvm_error("RC_TL_ATOMIC", $sformatf("%s tag=0x%0h : Byte Count=%0d, expected %0d (operand size in bytes, Sec 2.2.9)",
+                 name, cpl.tag, cpl.byte_count, n_dw * `PCIe_TL_DW_BYTES))
+    end
+
+    // ---- 3. old value vs what the RC wrote before ---------------------------
+    old_val   = PCIe_sequence_item::atomic_get_operand(cpl.cpl_data, 0, n_dw);
+    exp_known = 1'b1;
+    exp_old   = '0;
+    for (int unsigned i = 0; i < n_dw; i++) begin
+      if (!wr_shadow.exists(dw_addr + i)) exp_known = 1'b0;
+      else exp_old[32*i +: 32] = wr_shadow[dw_addr + i];
+    end
+    if (exp_known && (old_val != exp_old)) begin
+      n_atomic_err++;
+      `uvm_error("RC_TL_ATOMIC", $sformatf("%s tag=0x%0h addr=0x%0h : OLD VALUE MISMATCH returned=0x%0h expected=0x%0h",
+                 name, cpl.tag, req.address, old_val, exp_old))
+    end
+
+    // ---- 4. new value -> shadow memory --------------------------------------
+    new_val = PCIe_sequence_item::atomic_compute(req.atomic_op, n_dw, old_val, operand1, operand2);
+    for (int unsigned i = 0; i < n_dw; i++) begin
+      wr_shadow  [dw_addr + i] = new_val[32*i +: 32];
+      wr_shadow_t[dw_addr + i] = $time;
+    end
+
+    `uvm_info("RC_TL_ATOMIC",
+      $sformatf({"\n",
+        "         ============================================================\n",
+        "              RC TL MODEL : ATOMICOP COMPLETION RECEIVED\n",
+        "         ============================================================\n",
+        "          Operation          : %s   tag=0x%0h\n",
+        "          Address            : 0x%0h\n",
+        "          Operand 1          : 0x%0h  (%s)\n",
+        "          Operand 2          : 0x%0h  (%s)\n",
+        "          Old value (CplD)   : 0x%0h  %s\n",
+        "          New value (memory) : 0x%0h\n",
+        "          Byte Count         : %0d\n",
+        "         ============================================================"},
+        name, cpl.tag, req.address,
+        operand1, (req.atomic_op == PCIe_ATOMIC_FETCHADD) ? "add value" :
+                  (req.atomic_op == PCIe_ATOMIC_SWAP)     ? "swap value" : "compare value",
+        operand2, (req.atomic_op == PCIe_ATOMIC_CAS) ? "swap value" : "not used",
+        old_val, exp_known ? ((old_val == exp_old) ? "-> MATCH with RC shadow" : "-> MISMATCH")
+                           : "-> not checked (address never written by RC)",
+        new_val, cpl.byte_count), UVM_LOW)
   endfunction
 
   //--------------------------------------------------------------------------
@@ -1286,7 +1382,7 @@ class PCIe_RC_TL_model extends uvm_component;
     bit          pool;
     if (!fc_applies(tr)) return;
     v = tc_vc_check_tx(tr);
-    PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.mem_deferrable, tr.data.size(), c, h, d);
+    PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.is_np_mem_write(), tr.data.size(), c, h, d);   // [ATOMIC] DMWr or AtomicOp -> NP
     fc_tx_wait(v, c, h, d, fc_ded_allowed(tr), tr.convert2string(), pool);
     fc_tx_pool_aa[tr] = pool;
     fc_log($sformatf("[FC_TX_POOL] %s TC%0d -> VC%0d class %s -> %s pool picked by the gate",
@@ -1322,7 +1418,7 @@ class PCIe_RC_TL_model extends uvm_component;
     bit          pool;
     if (!fc_applies(tr)) return 1'b1;
     v = tx_vc_of(tr);
-    PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.mem_deferrable, tr.data.size(), c, h, d);
+    PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.is_np_mem_write(), tr.data.size(), c, h, d);   // [ATOMIC] DMWr or AtomicOp -> NP
     return fc_tx_pick_pool(v, c, h, d, fc_ded_allowed(tr), pool);
   endfunction
 
@@ -1340,7 +1436,7 @@ class PCIe_RC_TL_model extends uvm_component;
     if (!fc_applies(tr)) return;
     if (!fc_tx_pool_aa.exists(tr)) begin
       v = tx_vc_of(tr);
-      PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.mem_deferrable, tr.data.size(), c, h, d);
+      PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.is_np_mem_write(), tr.data.size(), c, h, d);   // [ATOMIC] DMWr or AtomicOp -> NP
       if (!fc_tx_pick_pool(v, c, h, d, fc_ded_allowed(tr), pool))
         `uvm_error("RC_TL_FC", $sformatf("TLP_SENT_WITHOUT_CREDITS (gate not called?) %s : SHR %s | DED %s",
                    tr.convert2string(), fc_tx_status(v, FC_SHR, c), fc_tx_status(v, FC_DED, c)))
@@ -1358,7 +1454,7 @@ class PCIe_RC_TL_model extends uvm_component;
     bit          pool;
     if (!fc_applies(tr)) return;
     v = tx_vc_of(tr);
-    PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.mem_deferrable, tr.data.size(), c, h, d);
+    PCIe_sequence_item::fc_classify(tr.txn_type, tr.dir, tr.is_np_mem_write(), tr.data.size(), c, h, d);   // [ATOMIC] DMWr or AtomicOp -> NP
     if (fc_tx_pool_aa.exists(tr)) begin
       pool = fc_tx_pool_aa[tr];
       fc_tx_pool_aa.delete(tr);
@@ -1400,6 +1496,7 @@ class PCIe_RC_TL_model extends uvm_component;
     dst.dir                  = src.dir;
     dst.mem_locked           = src.mem_locked;
     dst.mem_deferrable       = src.mem_deferrable;
+    dst.atomic_op            = src.atomic_op;          // [ATOMIC]
     dst.requester_id         = src.requester_id;
     dst.completer_id         = src.completer_id;
     dst.tc                   = src.tc;
@@ -1635,7 +1732,10 @@ class PCIe_RC_TL_model extends uvm_component;
     if (tr.is_flit_segment) print_flit_seg_layout(tr);
 
     // [FLIT_SEG] remember what was written, to check later read completions
-    if ((tr.txn_type == PCIe_TL_MEM) && (tr.dir == PCIe_TL_WRITE))
+    // [ATOMIC] an AtomicOp payload is an operand, not memory data : the shadow
+    //          is updated with the real result when its CplD comes back
+    //          (check_atomic_completion).
+    if ((tr.txn_type == PCIe_TL_MEM) && (tr.dir == PCIe_TL_WRITE) && !tr.is_atomic())
 	    foreach (tr.data[i]) begin 
 		    wr_shadow[(64'(tr.address) >> 2) + i] = tr.data[i];
 		    wr_shadow_t[(64'(tr.address) >> 2) + i] = $time;
@@ -1842,7 +1942,7 @@ class PCIe_RC_TL_model extends uvm_component;
   //--------------------------------------------------------------------------
   virtual function bit is_non_posted(PCIe_sequence_item tr);
     case (tr.txn_type)
-      PCIe_TL_MEM : return (!tr.is_write()) || tr.mem_deferrable;
+      PCIe_TL_MEM : return (!tr.is_write()) || tr.is_np_mem_write();   // [ATOMIC] DMWr + AtomicOp
       PCIe_TL_IO  : return 1'b1;
       PCIe_TL_CFG : return 1'b1;
       PCIe_TL_MSG : return 1'b0;
@@ -1993,6 +2093,7 @@ class PCIe_RC_TL_model extends uvm_component;
     dw1[15:8]  = tr.tag[7:0];
     dw1[7:4]   = tr.last_dw_be;
     dw1[3:0]   = tr.first_dw_be;
+    if (tr.is_atomic()) dw1[7:0] = 8'h00;   // [ATOMIC] DW BE fields are Reserved (Sec 2.2.7.1)
 
     //======================================================================
     // Address / Request-specific header

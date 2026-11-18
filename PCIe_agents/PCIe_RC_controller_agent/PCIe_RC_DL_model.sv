@@ -98,7 +98,7 @@ class PCIe_RC_DL_model extends uvm_component;
   bit form_dlp_flit;
 
   // DLLP content encodings (FEATURE; InitFC/UpdateFC are built by the FC functions below)
-    localparam bit [31:0] FEATURE_DLLP = 32'h0100_0000;
+    localparam bit [31:0] FEATURE_DLLP = 32'h0200_0000;   // spec Table 3-5 : Feature DLLP type = 02h
 
     // [FLIT_CNT] flit summary counters (logic + report at the end of the class)
   typedef enum int {FLTC_FEATURE, FLTC_INITFC1, FLTC_INITFC2, FLTC_UPDATEFC,
@@ -1857,33 +1857,5 @@ endfunction
     flit_cnt_report();   // [FLIT_CNT]
   endfunction
 
-    // =========================================================================
-    // TASK 2: Background keep-alive loop that automatically runs during DL_Active
-    // =========================================================================
-    /*task automatic run_updatefc_loop();
-        bit [31:0] tx_payload;
-        bit        opt_flag;
-
-        `uvm_info("DL_FC", "Periodic UpdateFC loop started successfully!", UVM_LOW)
-
-        forever begin
-            #30us; // Strict spec keep-alive timing rule to prevent link timeouts [4]
-            
-            if (!EP_REPLAY_IN_PROGRESS) begin
-                // Recalculate remaining buffer space and get updated payload
-                calculate_and_build_updatefc(tx_payload, opt_flag);
-
-                // Load directly into your DL model transmit registers
-                dllp_content        = tx_payload; // Assign 32-bit payload (DLP2..5)
-                credit              = 1'b1;       // Set flag to tell TX driver to inject DLLP
-                credit_is_optimized = opt_flag;   // Selects Optimized format type
-                
-                `uvm_info("DL_FC", $sformatf("Transmitted UpdateFC: %h (Buffer Slots Occupied: %0d)", 
-                          tx_payload, rx_retry_buffer.size()), UVM_MEDIUM)
-            end
-        end
-    endtask*/ 
-
+   
 endclass
- 
-
