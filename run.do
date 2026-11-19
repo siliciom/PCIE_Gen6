@@ -1,5 +1,5 @@
 #set testname "PCIe_base_test"
-#set testname "PCIe_3DW_flit_test"
+set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_IO_3DW_FLIT_test"
 #set testname "PCIe_gen6_ltssm_electrical_idle_during_training_test"
 #set testname "PCIe_gen6_ltssm_detect_no_receiver_test"
@@ -10,7 +10,7 @@
 # --- LTSSM directed timeout tests ---
 #set testname "PCIe_gen6_ltssm_timeout_detect_quiet_test"
 #set testname "PCIe_gen6_ltssm_timeout_detect_active_test"
-set testname "PCIe_gen6_ltssm_timeout_polling_active_test"
+#set testname "PCIe_gen6_ltssm_timeout_polling_active_test"
 #set testname "PCIe_gen6_ltssm_timeout_polling_configuration_test"
 #set testname "PCIe_gen6_ltssm_timeout_config_linkwidth_start_test"
 #set testname "PCIe_gen6_ltssm_timeout_config_linkwidth_accept_test"

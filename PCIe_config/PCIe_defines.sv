@@ -772,6 +772,10 @@
 
 `define PCIe_ATOMIC_CPL_TIMEOUT_NS     200000     // sequence waits this long for the AtomicOp CplD
 
+// [TL_ASSERT] a TL "ready" flag must drop within this many pclk (1 pclk = 1 ns).
+//   The TL hands a TLP to the DL in zero time, so the flag normally drops at once.
+`define PCIe_TL_HANDOFF_CLKS          2
+
 `define PCIe_EP_BUS_NUMBER           8'h01
 `define PCIe_EP_DEVICE_NUMBER        5'h00
 `define PCIe_EP_FUNCTION_NUMBER      3'h0
