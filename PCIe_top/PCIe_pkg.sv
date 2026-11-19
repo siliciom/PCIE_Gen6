@@ -248,6 +248,7 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_swap_2dwPayload_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_CAS_1dwPayload_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_CAS_2dwPayload_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_dll_ack_nak_sequence.sv"
 
 
 
@@ -415,6 +416,7 @@ package PCIe_pkg;
 	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_swap_2dwPayload_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_CAS_1dwPayload_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_CAS_2dwPayload_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_dll_ack_nak_test.sv"
 
 
 endpackage
