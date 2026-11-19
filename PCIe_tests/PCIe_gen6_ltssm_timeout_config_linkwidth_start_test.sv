@@ -19,4 +19,5 @@
                          CFG_LINKWIDTH_START,
                          RC_ltssm_timeout_config_linkwidth_start_sequence,
                          EP_ltssm_timeout_config_linkwidth_start_sequence,
-                         44ms)
+                         44us)   // [SIM-FAST] was 44ms
+

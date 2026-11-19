@@ -19,4 +19,5 @@
                          LOOPBACK_ACTIVE,
                          RC_ltssm_timeout_loopback_active_sequence,
                          EP_ltssm_timeout_loopback_active_sequence,
-                         25ms)
+                         25us)   // [SIM-FAST] was 25ms
+

@@ -19,4 +19,5 @@
                          CFG_COMPLETE,
                          RC_ltssm_timeout_config_complete_sequence,
                          EP_ltssm_timeout_config_complete_sequence,
-                         22ms)
+                         22us)   // [SIM-FAST] was 22ms
+

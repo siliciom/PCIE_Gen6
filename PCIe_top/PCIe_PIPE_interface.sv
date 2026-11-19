@@ -414,6 +414,118 @@ interface PCIe_RC_interface(input logic pclk);
 
    // [DL_ASSERT] end of DL assertions
 
+   //==========================================================================
+   // [TL_ASSERT] RC TRANSACTION LAYER ASSERTIONS
+   //   The RC TL model writes these variables through its handle tl_aif.
+   //   TX : 236 B TLP formed -> tl_tx_ready = 1 -> sent TL -> DL -> tl_tx_ready = 0
+   //   RX : 236 B received from DL -> decoded -> completion matched to its request
+   //   Search "RC_TL_ASSERT" in the log for failures.
+   //==========================================================================
+   bit          tl_assert_en    = 1'b1;   // 1 = TL checks ON (a test can set 0)
+   bit          tl_sample_valid = 1'b0;   // RC TL model sets 1 at start of simulation
+
+   // TX : TL -> DL
+   bit          tl_tx_ready;              // 1 = 236 B TLP formed, not yet sent to DL
+   int unsigned tl_tx_formed_cnt;         // +1 when a 236 B TLP is formed
+   int unsigned tl_tx_sent_cnt;           // +1 when a TLP is sent TL -> DL
+
+   // RX : DL -> TL
+   int unsigned tl_rx_cnt;                // +1 when a 236 B TLP comes from the DL
+   int unsigned tl_rx_done_cnt;           // +1 when its decode is finished
+   int unsigned tl_rx_cpl_cnt;            // +1 when a completion is received
+   int unsigned tl_rx_cpl_matched_cnt;    // +1 when that completion's tag was outstanding
+
+   //--------------------------------------------------------------------------
+   // CHECK 1 : a formed 236 B TLP (ready = 1) must be sent to the DL
+   //--------------------------------------------------------------------------
+   TL_TX_READY_THEN_SENT_CHECK : assert property (
+      @(posedge pclk) disable iff (!tl_sample_valid || !tl_assert_en)
+      tl_tx_ready |-> ##[0:`PCIe_TL_HANDOFF_CLKS] !tl_tx_ready)
+   else `uvm_error({SIDE,"_TL_ASSERT"},
+      "[TL_TX_READY_THEN_SENT_CHECK] FAILED : 236B TLP formed (tl_tx_ready=1) but not sent to DL")
+
+   //--------------------------------------------------------------------------
+   // CHECK 2 : every formed TLP was sent (count formed = count sent)
+   //--------------------------------------------------------------------------
+   TL_TX_FORMED_EQ_SENT_CHECK : assert property (
+      @(posedge pclk) disable iff (!tl_sample_valid || !tl_assert_en)
+      (tl_tx_formed_cnt == tl_tx_sent_cnt))
+   else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+      "[TL_TX_FORMED_EQ_SENT_CHECK] FAILED : TLPs formed=%0d but sent to DL=%0d", tl_tx_formed_cnt, tl_tx_sent_cnt))
+
+   //--------------------------------------------------------------------------
+   // CHECK 3 : every 236 B TLP received from the DL is decoded
+   //--------------------------------------------------------------------------
+   TL_RX_DONE_CHECK : assert property (
+      @(posedge pclk) disable iff (!tl_sample_valid || !tl_assert_en)
+      (tl_rx_cnt == tl_rx_done_cnt))
+   else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+      "[TL_RX_DONE_CHECK] FAILED : TLPs received from DL=%0d but decoded=%0d", tl_rx_cnt, tl_rx_done_cnt))
+
+   //--------------------------------------------------------------------------
+   // CHECK 4 : every completion belongs to a request we sent (tag matched)
+   //--------------------------------------------------------------------------
+   TL_RX_CPL_MATCHED_CHECK : assert property (
+      @(posedge pclk) disable iff (!tl_sample_valid || !tl_assert_en)
+      (tl_rx_cpl_matched_cnt == tl_rx_cpl_cnt))
+   else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+      "[TL_RX_CPL_MATCHED_CHECK] FAILED : completions received=%0d but only %0d matched a request",
+      tl_rx_cpl_cnt, tl_rx_cpl_matched_cnt))
+
+   //--------------------------------------------------------------------------
+   // CHECKS 5-7 : the 236 B sent to the DL holds the right TLP
+   //   Called by the RC TL model once for every TLP it sends.
+   //   pfx    : 1 = a 1 DW Flit Mode prefix is in front of the header
+   //   hdr_dw : header DWs (Header Base + OHC), the payload starts after them
+   //--------------------------------------------------------------------------
+   function automatic void tl_tx_tlp_check(
+      input bit [0:`PCIe_TLP_DATA_BYTE_W-1][7:0] tlp,
+      input bit          pfx,
+      input bit [7:0]    exp_type,
+      input bit [9:0]    exp_len,
+      input int unsigned hdr_dw,
+      input bit [31:0]   exp_data[]);
+
+      int unsigned b0;           // byte where the TLP header starts
+      int unsigned p;            // byte where payload DW i starts
+      bit [31:0]   got;
+      int unsigned bad;
+
+      if (!tl_sample_valid || !tl_assert_en) return;
+      b0 = pfx ? 4 : 0;
+
+      // CHECK 5 : Type byte = type of the request (e.g. 4Ch = FetchAdd 32-bit)
+      TL_TX_TYPE_CHECK : assert (tlp[b0] == exp_type)
+      else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+         "[TL_TX_TYPE_CHECK] FAILED : type byte = 0x%02h, expected 0x%02h", tlp[b0], exp_type))
+
+      // CHECK 6 : Length field (DW0 bits [9:0]) = Length of the request
+      TL_TX_LENGTH_CHECK : assert ({tlp[b0+2][1:0], tlp[b0+3]} == exp_len)
+      else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+         "[TL_TX_LENGTH_CHECK] FAILED : Length field = %0d, expected %0d", {tlp[b0+2][1:0], tlp[b0+3]}, exp_len))
+
+      // CHECK 7 : every payload DW in the 236 B = the data of the request
+      bad = 0;
+      foreach (exp_data[i]) begin
+         p = b0 + (hdr_dw + i) * 4;
+         if ((p + 3) < `PCIe_TLP_DATA_BYTE_W) begin
+            got = {tlp[p], tlp[p+1], tlp[p+2], tlp[p+3]};
+            if (got != exp_data[i]) bad++;
+         end
+      end
+      TL_TX_PAYLOAD_CHECK : assert (bad == 0)
+      else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+         "[TL_TX_PAYLOAD_CHECK] FAILED : %0d payload DW in the 236B differ from the request data", bad))
+   endfunction
+
+   // end of test : one summary line
+   final
+      `uvm_info({SIDE,"_TL_STATUS"}, $sformatf(
+         "TL summary : TLPs formed=%0d sent=%0d | received=%0d decoded=%0d | completions=%0d matched=%0d",
+         tl_tx_formed_cnt, tl_tx_sent_cnt, tl_rx_cnt, tl_rx_done_cnt, tl_rx_cpl_cnt, tl_rx_cpl_matched_cnt), UVM_LOW)
+
+   // [TL_ASSERT] end of TL assertions
+
 endinterface
 
 interface PCIe_EP_interface(input logic pclk);
@@ -808,5 +920,102 @@ interface PCIe_EP_interface(input logic pclk);
    end
 
    // [DL_ASSERT] end of DL assertions
+
+   //==========================================================================
+   // [TL_ASSERT] EP TRANSACTION LAYER ASSERTIONS
+   //   The EP TL model writes these variables through its handle tl_aif.
+   //   RX  : 236 B request received from DL -> decoded
+   //   CPL : Non-Posted request -> 236 B completion formed (tl_cpl_ready = 1)
+   //         -> sent TL -> DL (tl_cpl_ready = 0)
+   //   Search "EP_TL_ASSERT" in the log for failures.
+   //==========================================================================
+   bit          tl_assert_en    = 1'b1;   // 1 = TL checks ON (a test can set 0)
+   bit          tl_sample_valid = 1'b0;   // EP TL model sets 1 at start of simulation
+
+   // RX : DL -> TL
+   int unsigned tl_rx_cnt;                // +1 when a 236 B request comes from the DL
+   int unsigned tl_rx_done_cnt;           // +1 when its processing is finished
+
+   // Non-Posted requests
+   int unsigned tl_np_rx_cnt;             // +1 Non-Posted request received (needs a completion)
+   int unsigned tl_np_done_cnt;           // +1 its completion was sent
+
+   // CPL : TL -> DL
+   bit          tl_cpl_ready;             // 1 = 236 B completion formed, not yet sent to DL
+   int unsigned tl_cpl_formed_cnt;        // +1 when a 236 B completion is formed
+   int unsigned tl_cpl_sent_cnt;          // +1 when a completion is sent TL -> DL
+
+   //--------------------------------------------------------------------------
+   // CHECK 1 : every 236 B request received from the DL is processed
+   //--------------------------------------------------------------------------
+   TL_RX_DONE_CHECK : assert property (
+      @(posedge pclk) disable iff (!tl_sample_valid || !tl_assert_en)
+      (tl_rx_cnt == tl_rx_done_cnt))
+   else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+      "[TL_RX_DONE_CHECK] FAILED : requests received=%0d but processed=%0d", tl_rx_cnt, tl_rx_done_cnt))
+
+   //--------------------------------------------------------------------------
+   // CHECK 2 : every Non-Posted request gets its completion
+   //--------------------------------------------------------------------------
+   TL_NP_GETS_CPL_CHECK : assert property (
+      @(posedge pclk) disable iff (!tl_sample_valid || !tl_assert_en)
+      (tl_np_rx_cnt == tl_np_done_cnt))
+   else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+      "[TL_NP_GETS_CPL_CHECK] FAILED : Non-Posted requests=%0d but completed=%0d", tl_np_rx_cnt, tl_np_done_cnt))
+
+   //--------------------------------------------------------------------------
+   // CHECK 3 : a formed 236 B completion (ready = 1) must be sent to the DL
+   //--------------------------------------------------------------------------
+   TL_CPL_READY_THEN_SENT_CHECK : assert property (
+      @(posedge pclk) disable iff (!tl_sample_valid || !tl_assert_en)
+      tl_cpl_ready |-> ##[0:`PCIe_TL_HANDOFF_CLKS] !tl_cpl_ready)
+   else `uvm_error({SIDE,"_TL_ASSERT"},
+      "[TL_CPL_READY_THEN_SENT_CHECK] FAILED : 236B completion formed (tl_cpl_ready=1) but not sent to DL")
+
+   //--------------------------------------------------------------------------
+   // CHECK 4 : every formed completion was sent (count formed = count sent)
+   //--------------------------------------------------------------------------
+   TL_CPL_FORMED_EQ_SENT_CHECK : assert property (
+      @(posedge pclk) disable iff (!tl_sample_valid || !tl_assert_en)
+      (tl_cpl_formed_cnt == tl_cpl_sent_cnt))
+   else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+      "[TL_CPL_FORMED_EQ_SENT_CHECK] FAILED : completions formed=%0d but sent to DL=%0d",
+      tl_cpl_formed_cnt, tl_cpl_sent_cnt))
+
+   //--------------------------------------------------------------------------
+   // CHECKS 5-6 : the 236 B completion holds the right type and tag
+   //   Called by the EP TL model once for every completion it forms.
+   //--------------------------------------------------------------------------
+   function automatic void tl_cpl_tx_check(
+      input bit [0:`PCIe_TLP_DATA_BYTE_W-1][7:0] tlp,
+      input bit          flit,
+      input bit          has_data,
+      input bit [13:0]   exp_tag);
+
+      bit [13:0] got_tag;
+
+      if (!tl_sample_valid || !tl_assert_en) return;
+
+      // CHECK 5 : CplD (4Ah) if it carries data, Cpl (0Ah) if not
+      TL_CPL_TYPE_CHECK : assert (tlp[0] == (has_data ? `PCIe_FLITTYPE_CPLD : `PCIe_FLITTYPE_CPL))
+      else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+         "[TL_CPL_TYPE_CHECK] FAILED : type byte = 0x%02h for a %s", tlp[0], has_data ? "CplD" : "Cpl"))
+
+      // CHECK 6 : completion tag = tag of the request
+      //   Flit : DW1[13:0] (bytes 6-7)   Non-Flit : {DW0[23], DW0[19], DW2[15:8]}
+      if (flit) got_tag = {tlp[6][5:0], tlp[7]};
+      else      got_tag = {4'h0, tlp[1][7], tlp[1][3], tlp[10]};
+      TL_CPL_TAG_CHECK : assert (flit ? (got_tag == exp_tag) : (got_tag[9:0] == exp_tag[9:0]))
+      else `uvm_error({SIDE,"_TL_ASSERT"}, $sformatf(
+         "[TL_CPL_TAG_CHECK] FAILED : completion tag = 0x%0h, request tag = 0x%0h", got_tag, exp_tag))
+   endfunction
+
+   // end of test : one summary line
+   final
+      `uvm_info({SIDE,"_TL_STATUS"}, $sformatf(
+         "TL summary : requests received=%0d processed=%0d | Non-Posted=%0d completed=%0d | completions formed=%0d sent=%0d",
+         tl_rx_cnt, tl_rx_done_cnt, tl_np_rx_cnt, tl_np_done_cnt, tl_cpl_formed_cnt, tl_cpl_sent_cnt), UVM_LOW)
+
+   // [TL_ASSERT] end of TL assertions
 
 endinterface

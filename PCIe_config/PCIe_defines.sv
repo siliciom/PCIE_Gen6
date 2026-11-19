@@ -772,6 +772,10 @@
 
 `define PCIe_ATOMIC_CPL_TIMEOUT_NS     200000     // sequence waits this long for the AtomicOp CplD
 
+// [TL_ASSERT] a TL "ready" flag must drop within this many pclk (1 pclk = 1 ns).
+//   The TL hands a TLP to the DL in zero time, so the flag normally drops at once.
+`define PCIe_TL_HANDOFF_CLKS          2
+
 `define PCIe_EP_BUS_NUMBER           8'h01
 `define PCIe_EP_DEVICE_NUMBER        5'h00
 `define PCIe_EP_FUNCTION_NUMBER      3'h0
@@ -783,23 +787,25 @@
 //   transition. Only Detect..L0 are covered (Recovery is out of scope).
 //   Time literals assume a 1ns/1ps timescale (1 PIPE cycle = 1ns).
 //==============================================================================
-`define PCIe_LTSSM_T_DETECT_QUIET            12ms
-`define PCIe_LTSSM_T_POLLING_ACTIVE          24ms
-`define PCIe_LTSSM_T_POLLING_CONFIGURATION   48ms
-`define PCIe_LTSSM_T_CFG_LINKWIDTH_START     24ms
-`define PCIe_LTSSM_T_CFG_LINKWIDTH_ACCEPT     2ms
-`define PCIe_LTSSM_T_CFG_LANENUM_WAIT         2ms
-`define PCIe_LTSSM_T_CFG_LANENUM_ACCEPT       2ms
-`define PCIe_LTSSM_T_CFG_COMPLETE             2ms
-`define PCIe_LTSSM_T_CFG_IDLE                 2ms
-`define PCIe_LTSSM_T_RCVRY_RCVRLOCK          24ms
-`define PCIe_LTSSM_T_RCVRY_EQ_PH1            12ms
-`define PCIe_LTSSM_T_RCVRY_EQ_PH2            24ms
-`define PCIe_LTSSM_T_RCVRY_EQ_PH2_64G        48ms
-`define PCIe_LTSSM_T_RCVRY_EQ_PH3            32ms
-`define PCIe_LTSSM_T_RCVRY_EQ_PH3_64G        64ms
-`define PCIe_LTSSM_T_RCVRY_RCVRCFG           48ms
-`define PCIe_LTSSM_T_RCVRY_IDLE               2ms
+// [SIM-FAST] LTSSM timers shortened for simulation: spec ms -> us (example: Detect.Quiet 12ms -> 12us).
+// Restore the original ms values for spec-accurate timing runs.
+`define PCIe_LTSSM_T_DETECT_QUIET            12us   // [SIM-FAST] was 12ms
+`define PCIe_LTSSM_T_POLLING_ACTIVE          24us   // [SIM-FAST] was 24ms
+`define PCIe_LTSSM_T_POLLING_CONFIGURATION   48us   // [SIM-FAST] was 48ms
+`define PCIe_LTSSM_T_CFG_LINKWIDTH_START     24us   // [SIM-FAST] was 24ms
+`define PCIe_LTSSM_T_CFG_LINKWIDTH_ACCEPT     2us   // [SIM-FAST] was 2ms
+`define PCIe_LTSSM_T_CFG_LANENUM_WAIT         2us   // [SIM-FAST] was 2ms
+`define PCIe_LTSSM_T_CFG_LANENUM_ACCEPT       2us   // [SIM-FAST] was 2ms
+`define PCIe_LTSSM_T_CFG_COMPLETE             2us   // [SIM-FAST] was 2ms
+`define PCIe_LTSSM_T_CFG_IDLE                 2us   // [SIM-FAST] was 2ms
+`define PCIe_LTSSM_T_RCVRY_RCVRLOCK          24us   // [SIM-FAST] was 24ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH1            12us   // [SIM-FAST] was 12ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH2            24us   // [SIM-FAST] was 24ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH2_64G        48us   // [SIM-FAST] was 48ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH3            32us   // [SIM-FAST] was 32ms
+`define PCIe_LTSSM_T_RCVRY_EQ_PH3_64G        64us   // [SIM-FAST] was 64ms
+`define PCIe_LTSSM_T_RCVRY_RCVRCFG           48us   // [SIM-FAST] was 48ms
+`define PCIe_LTSSM_T_RCVRY_IDLE               2us   // [SIM-FAST] was 2ms
 
 //==============================================================================
 // TS1 TRAINING CONTROL  (PCIe Base 6.0, Sec 4.2.7 - Symbol 5)
@@ -816,11 +822,11 @@
 `define PCIe_DISABLED_TS1_COUNT            16
 `define PCIe_LOOPBACK_ENTRY_TS1_COUNT      16
 `define PCIe_HOT_RESET_TS1_COUNT           16
-`define PCIe_LTSSM_T_LOOPBACK_ENTRY         5ms
-`define PCIe_LTSSM_T_LOOPBACK_ACTIVE        5ms
+`define PCIe_LTSSM_T_LOOPBACK_ENTRY         5us   // [SIM-FAST] was 5ms
+`define PCIe_LTSSM_T_LOOPBACK_ACTIVE        5us   // [SIM-FAST] was 5ms
 `define PCIe_LTSSM_T_LOOPBACK_EXIT_IDLE     10us
-`define PCIe_LTSSM_T_HOT_RESET              2ms
-`define PCIe_LTSSM_T_DISABLED               2ms
+`define PCIe_LTSSM_T_HOT_RESET              2us   // [SIM-FAST] was 2ms
+`define PCIe_LTSSM_T_DISABLED               2us   // [SIM-FAST] was 2ms
 
 
 `endif 
@@ -934,3 +940,4 @@
 //     in a row (strict priority can starve low VCs, Sec 6.3.3.2.1).
 `define PCIe_VC_ARB_COLLECT_NS       20 //driver waits 20 ns for more requests before picking
 `define PCIe_VC_ARB_STARVE_WARN      64 //If the count reaches 64 losses in a row for vc0 , the bench prints one warning
+

@@ -19,4 +19,5 @@
                          DETECT_ACTIVE,
                          RC_ltssm_timeout_detect_active_sequence,
                          EP_ltssm_timeout_detect_active_sequence,
-                         32ms)
+                         32us)   // [SIM-FAST] was 32ms
+

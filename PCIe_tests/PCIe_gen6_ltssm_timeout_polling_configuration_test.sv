@@ -19,4 +19,5 @@
                          POLLING_CONFIGURATION,
                          RC_ltssm_timeout_polling_configuration_sequence,
                          EP_ltssm_timeout_polling_configuration_sequence,
-                         68ms)
+                         68us)   // [SIM-FAST] was 68ms
+

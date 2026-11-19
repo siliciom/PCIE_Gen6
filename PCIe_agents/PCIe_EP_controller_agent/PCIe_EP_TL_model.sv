@@ -51,6 +51,9 @@ class PCIe_EP_TL_model extends uvm_component;
   PCIe_sequence_item item;
 
   PCIe_env_config    pcie_ecfg;
+
+  // [TL_ASSERT] TL assertions live inside PCIe_EP_interface (PCIe_top/PCIe_PIPE_interface.sv)
+  virtual PCIe_EP_interface tl_aif;
   //==========================================================================
   //                        THREE MEMORY MODELS
   //   Depth and width come from PCIe_defines.sv - there is not one hard coded
@@ -953,6 +956,9 @@ class PCIe_EP_TL_model extends uvm_component;
     fc_dl_ap   = new("fc_dl_ap",   this);
     fc_dl_imp  = new("fc_dl_imp",  this);
     fc_init();
+    // [TL_ASSERT] same interface handle the DL assertions use
+    if (!uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", tl_aif))
+      `uvm_warning("EP_TL_ASSERT", "PCIe_EP_INTERFACE not found :: TL assertions are OFF for EP")
 
   endfunction
 
@@ -960,6 +966,7 @@ class PCIe_EP_TL_model extends uvm_component;
   function void start_of_simulation_phase(uvm_phase phase);
     super.start_of_simulation_phase(phase);
     fc_publish_init();
+    if (tl_aif != null) tl_aif.tl_sample_valid = 1'b1;   // [TL_ASSERT] TL checks start
   endfunction
 
   // FLOW CONTROL : periodic UpdateFC refresh timer
@@ -1319,6 +1326,13 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
   //==========================================================================
   //  write      : original path, EP controller driver -> EP DL model
   //==========================================================================
+  // [TL_ASSERT] completion sent TL -> DL -> ready = 0
+  function void tl_aif_cpl_sent();
+    if (tl_aif == null) return;
+    tl_aif.tl_cpl_sent_cnt++;
+    tl_aif.tl_cpl_ready = 1'b0;
+  endfunction
+
   function void write(PCIe_sequence_item item);
     `uvm_info("EP_TL_MODEL",
       $sformatf("TL -> DL (driver path): drive_flit=%0d", item.drive_flit), UVM_MEDIUM)
@@ -1331,7 +1345,15 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
   //   The monitor has already stripped the 6 DLP bytes off the 242 byte flit,
   //   so what arrives here is the 236 byte TLP region and nothing else.
   //==========================================================================
+  // [TL_ASSERT] DL -> TL entry : count "received" before and "processed" after,
+  //   whichever return path the code below takes.
   function void write_mon(PCIe_sequence_item item);
+    if (tl_aif != null) tl_aif.tl_rx_cnt++;
+    write_mon_decode(item);
+    if (tl_aif != null) tl_aif.tl_rx_done_cnt++;
+  endfunction
+
+  function void write_mon_decode(PCIe_sequence_item item);
 
     PCIe_sequence_item cpl;
     int unsigned fc_c, fc_h, fc_d;
@@ -2309,6 +2331,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
                    d_txn_type.name(), d_dir.name()), UVM_LOW)
       return;
     end
+    if (tl_aif != null) tl_aif.tl_np_rx_cnt++;   // [TL_ASSERT] Non-Posted : a completion must follow
 
     // [FLIT_SEG] Deferrable Memory Write : each segment of a split DMWr is its
     // own request, so it gets its own Cpl (no data) in its own FLIT.
@@ -2347,6 +2370,8 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
 //    fc_account_cpl(cpl);          // FLOW CONTROL : completion credits consumed
     tl_ap.write(cpl);
+    tl_aif_cpl_sent();                              // [TL_ASSERT] sent TL -> DL : tl_cpl_ready = 0
+    if (tl_aif != null) tl_aif.tl_np_done_cnt++;    // [TL_ASSERT] Non-Posted request completed
 
   endfunction
 
@@ -2551,6 +2576,12 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     cpl.hdr_dw_count         = hdr.size();
 
     pack_completion_region(cpl);
+    // [TL_ASSERT] 236 B completion formed : tl_cpl_ready = 1 + checks 5-6
+    if (tl_aif != null) begin
+      tl_aif.tl_cpl_formed_cnt++;
+      tl_aif.tl_cpl_ready = 1'b1;
+      tl_aif.tl_cpl_tx_check(cpl.tlp_data, (d_mode == FLIT), with_data, 14'(d_tag));
+    end
 
   endfunction
 
@@ -2640,6 +2671,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
                   i + 1, n_part, len_dw, bc_left, n_cpl_sent), UVM_LOW)
   //    fc_account_cpl(cpl);
       tl_ap.write(cpl);
+      tl_aif_cpl_sent();             // [TL_ASSERT] CplD part sent TL -> DL
 
       bytes_this = (len_dw * `PCIe_TL_DW_BYTES) - ((i == 0) ? lead_off : 0);
       bc_left   -= bytes_this;
@@ -2662,6 +2694,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
         `PCIe_TL_CPL_HDR_DW, `PCIe_TL_CPL_HDR_DW * `PCIe_TL_DW_BYTES, first_needs_ohc ? 1 : 0,
         max_dw, max_dw * `PCIe_TL_DW_BYTES,
         total_dw, max_dw, n_part, rows), UVM_LOW)
+    if (tl_aif != null) tl_aif.tl_np_done_cnt++;   // [TL_ASSERT] all CplD parts sent -> request completed
   endfunction
 
   //--------------------------------------------------------------------------

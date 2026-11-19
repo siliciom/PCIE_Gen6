@@ -1,5 +1,5 @@
 #set testname "PCIe_base_test"
-#set testname "PCIe_3DW_flit_test"
+set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_IO_3DW_FLIT_test"
 #set testname "PCIe_gen6_ltssm_electrical_idle_during_training_test"
 #set testname "PCIe_gen6_ltssm_detect_no_receiver_test"
@@ -84,21 +84,8 @@
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_Random_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
 #set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
-# [ATOMIC] AtomicOp tests (4DW ones : use the FORCE_4DW+CONFIG_4DW vlog block below)
-#set testname "PCIe_gen6_3DW_Flit_FetchAdd_1dwPayload_test"
-#set testname "PCIe_gen6_3DW_Flit_FetchAdd_2dwPayload_test"
-#set testname "PCIe_gen6_3DW_Flit_swap_1dwPayload_test"
-#set testname "PCIe_gen6_3DW_Flit_swap_2dwPayload_test"
-#set testname "PCIe_gen6_3DW_Flit_CAS_1dwPayload_test"
-#set testname "PCIe_gen6_3DW_Flit_CAS_2dwPayload_test"
-#set testname "PCIe_gen6_4DW_Flit_FetchAdd_1dwPayload_test"
-#set testname "PCIe_gen6_4DW_Flit_FetchAdd_2dwPayload_test"
-#set testname "PCIe_gen6_4DW_Flit_swap_1dwPayload_test"
-#set testname "PCIe_gen6_4DW_Flit_swap_2dwPayload_test"
-#set testname "PCIe_gen6_4DW_Flit_CAS_1dwPayload_test"
-#set testname "PCIe_gen6_4DW_Flit_CAS_2dwPayload_test"
 # [DLL] Data Link Layer tests
-set testname "PCIe_gen6_dll_ack_nak_test"
+#set testname "PCIe_gen6_dll_ack_nak_test"
  
 vlib work
 vmap work work

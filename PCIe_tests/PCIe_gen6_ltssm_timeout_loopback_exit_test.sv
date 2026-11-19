@@ -19,4 +19,5 @@
                          LOOPBACK_EXIT,
                          RC_ltssm_timeout_loopback_exit_sequence,
                          EP_ltssm_timeout_loopback_exit_sequence,
-                         25ms)
+                         25us)   // [SIM-FAST] was 25ms
+

@@ -94,6 +94,9 @@ class PCIe_RC_TL_model extends uvm_component;
   // Outstanding non-posted requests, keyed by tag.
   protected PCIe_sequence_item outstanding [bit [`PCIe_TL_TAG_W-1:0]];
 
+  // [TL_ASSERT] TL assertions live inside PCIe_RC_interface (PCIe_top/PCIe_PIPE_interface.sv)
+  virtual PCIe_RC_interface tl_aif;
+
    //==========================================================================
   uvm_analysis_port #(PCIe_sequence_item) fc_dl_ap;
   uvm_analysis_imp_fc_from_dl #(PCIe_sequence_item, PCIe_RC_TL_model) fc_dl_imp;
@@ -856,6 +859,9 @@ class PCIe_RC_TL_model extends uvm_component;
      n_seg_tlp      = 0;
      n_seg_txn_done = 0;
      fc_init();
+     // [TL_ASSERT] same interface handle the DL assertions use
+     if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", tl_aif))
+       `uvm_warning("RC_TL_ASSERT", "PCIe_RC_INTERFACE not found :: TL assertions are OFF for RC")
     `uvm_info("RC_TL_MODEL","EXIT_FROM_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
   endfunction
 
@@ -863,6 +869,7 @@ class PCIe_RC_TL_model extends uvm_component;
   function void start_of_simulation_phase(uvm_phase phase);
     super.start_of_simulation_phase(phase);
     fc_publish_init();
+    if (tl_aif != null) tl_aif.tl_sample_valid = 1'b1;   // [TL_ASSERT] TL checks start
   endfunction
 
   // FLOW CONTROL : periodic UpdateFC refresh timer
@@ -910,7 +917,15 @@ class PCIe_RC_TL_model extends uvm_component;
     return {it.tlp_data[b], it.tlp_data[b+1], it.tlp_data[b+2], it.tlp_data[b+3]};
   endfunction
 
+  // [TL_ASSERT] DL -> TL entry : count "received" before and "decoded" after,
+  //   whichever return path the decode below takes.
   function void write_dl_rx(PCIe_sequence_item item);
+    if (tl_aif != null) tl_aif.tl_rx_cnt++;
+    write_dl_rx_decode(item);
+    if (tl_aif != null) tl_aif.tl_rx_done_cnt++;
+  endfunction
+
+  function void write_dl_rx_decode(PCIe_sequence_item item);
     bit [31:0]         dw0, dw1, dw2, dw3, d0;
     bit [7:0]          ftype;
     bit [2:0]          tc, ts, attr;
@@ -1038,6 +1053,12 @@ class PCIe_RC_TL_model extends uvm_component;
     cpl_it.lower_address = {dw1[14], la_hi,
                             ohc[0] ? dw3[`PCIe_TL_OHCA5_LA_HI : `PCIe_TL_OHCA5_LA_LO] : 2'b00};
     rx_decoded_ap.write(cpl_it);   // [TL_COV] -> PCIe_subscriber::write_rc_rx_tl()
+
+    // [TL_ASSERT] completion received : was its tag outstanding ?
+    if (tl_aif != null) begin
+      tl_aif.tl_rx_cpl_cnt++;
+      if (outstanding.exists(cpl_it.tag)) tl_aif.tl_rx_cpl_matched_cnt++;
+    end
 
     if (outstanding.exists(cpl_it.tag) && !cpl_req_of.exists(cpl_it.tag))
       cpl_req_of[cpl_it.tag] = outstanding[cpl_it.tag];
@@ -1660,6 +1681,37 @@ class PCIe_RC_TL_model extends uvm_component;
         rows), UVM_LOW)
   endfunction
 
+  //==========================================================================
+  // [TL_ASSERT] TX : 236 B TLP formed -> ready = 1, data checks 5-7
+  //==========================================================================
+  function void tl_aif_tx_formed(PCIe_sequence_item tr);
+    bit            pfx;
+    bit [7:0]      exp_type;
+    pcie_fmttype_e ft;
+    if (tl_aif == null) return;
+    tl_aif.tl_tx_formed_cnt++;
+    tl_aif.tl_tx_ready = 1'b1;
+
+    // a Flit Mode prefix (dedicated credits) may sit in front of the header
+    pfx = (tr.pkt_mode == FLIT) && (tr.tlp_data[0] == `PCIe_FLITTYPE_PREFIX);
+    // expected type byte (Non-Flit Msg carries its route in Type[2:0])
+    if (tr.pkt_mode == FLIT) exp_type = tr.get_flit_type();
+    else begin
+      ft       = tr.get_fmttype();
+      exp_type = (tr.txn_type == PCIe_TL_MSG) ? {ft[7:3], tr.msg_route} : ft;
+    end
+
+    tl_aif.tl_tx_tlp_check(tr.tlp_data, pfx, exp_type, tr.length,
+                           tr.tlp_header_dw_count - (pfx ? 1 : 0), tr.data);
+  endfunction
+
+  // [TL_ASSERT] TX : TLP sent TL -> DL -> ready = 0
+  function void tl_aif_tx_sent();
+    if (tl_aif == null) return;
+    tl_aif.tl_tx_sent_cnt++;
+    tl_aif.tl_tx_ready = 1'b0;
+  endfunction
+
   //--------------------------------------------------------------------------
   // FUNCTION: write (tx_tl_imp) - entry point from the RC controller driver.
   //--------------------------------------------------------------------------
@@ -1727,6 +1779,7 @@ class PCIe_RC_TL_model extends uvm_component;
     print_attr_table_check(tr);      // [ATTR] info : RO / IDO / NS table check (just before the 236B TL packet print)
 
     pack_to_tlp_data(tr);
+    tl_aif_tx_formed(tr);            // [TL_ASSERT] 236 B formed : tl_tx_ready = 1 + checks 5-7
 
     // [FLIT_SEG] byte layout of this segment inside its 236 B FLIT TLP region
     if (tr.is_flit_segment) print_flit_seg_layout(tr);
@@ -1743,6 +1796,7 @@ class PCIe_RC_TL_model extends uvm_component;
 
     `uvm_info(get_type_name(), "[TL->DL] TLP_SENT_TO_DL", UVM_MEDIUM);
      tlp_dl_ap.write(tr);
+     tl_aif_tx_sent();               // [TL_ASSERT] sent TL -> DL : tl_tx_ready = 0
 
   endfunction
 

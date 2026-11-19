@@ -19,4 +19,5 @@
                          CFG_LANENUM_ACCEPT,
                          RC_ltssm_timeout_config_lanenum_accept_sequence,
                          EP_ltssm_timeout_config_lanenum_accept_sequence,
-                         22ms)
+                         22us)   // [SIM-FAST] was 22ms
+
