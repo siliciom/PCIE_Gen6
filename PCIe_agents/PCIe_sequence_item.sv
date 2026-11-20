@@ -695,7 +695,7 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   // [TL_ERR_INJ] EP (Poisoned) defaults to 0 (soft, so the inline 'with' can
   //   override it). The EP TL model now answers EP = 1 with UR, so a random EP
   //   bit in the normal sequences would turn good traffic into Poisoned TLPs.
-  //   Only PCIe_RC_3DW_Flit_Poisoned_TLP_sequence sets ep == 1.
+  //   Only PCIe_RC_3DW_Flit_DefMemWr_Poisoned_TLP_sequence sets ep == 1.
   constraint c_ep_default { soft ep == 1'b0; }
 
   constraint c_atomic_rules {
