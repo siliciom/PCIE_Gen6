@@ -1055,11 +1055,10 @@ class PCIe_RC_TL_model extends uvm_component;
                             ohc[0] ? dw3[`PCIe_TL_OHCA5_LA_HI : `PCIe_TL_OHCA5_LA_LO] : 2'b00};
     rx_decoded_ap.write(cpl_it);   // [TL_COV] -> PCIe_subscriber::write_rc_rx_tl()
 
-    // [TL_ASSERT] completion received : was its tag outstanding ?
-    if (tl_aif != null) begin
-      tl_aif.tl_rx_cpl_cnt++;
-      if (outstanding.exists(cpl_it.tag)) tl_aif.tl_rx_cpl_matched_cnt++;
-    end
+    // [TL_ASSERT] completion received : save it for the TL assertions
+    if (tl_aif != null)
+      tl_aif.tl_cpl_sample(outstanding.exists(cpl_it.tag), cpl_it.cpl_status, has_data, tc,
+                           outstanding.exists(cpl_it.tag) ? outstanding[cpl_it.tag].tc : tc);
 
     if (outstanding.exists(cpl_it.tag) && !cpl_req_of.exists(cpl_it.tag))
       cpl_req_of[cpl_it.tag] = outstanding[cpl_it.tag];
@@ -1691,15 +1690,13 @@ class PCIe_RC_TL_model extends uvm_component;
   endfunction
 
   //==========================================================================
-  // [TL_ASSERT] TX : 236 B TLP formed -> ready = 1, data checks 5-7
+  // [TL_ASSERT] TX : 236 B TLP handed to the DL -> save it for the TL assertions
   //==========================================================================
   function void tl_aif_tx_formed(PCIe_sequence_item tr);
     bit            pfx;
     bit [7:0]      exp_type;
     pcie_fmttype_e ft;
     if (tl_aif == null) return;
-    tl_aif.tl_tx_formed_cnt++;
-    tl_aif.tl_tx_ready = 1'b1;
 
     // a Flit Mode prefix (dedicated credits) may sit in front of the header
     pfx = (tr.pkt_mode == FLIT) && (tr.tlp_data[0] == `PCIe_FLITTYPE_PREFIX);
@@ -1710,15 +1707,10 @@ class PCIe_RC_TL_model extends uvm_component;
       exp_type = (tr.txn_type == PCIe_TL_MSG) ? {ft[7:3], tr.msg_route} : ft;
     end
 
-    tl_aif.tl_tx_tlp_check(tr.tlp_data, pfx, exp_type, tr.length,
-                           tr.tlp_header_dw_count - (pfx ? 1 : 0), tr.data);
-  endfunction
-
-  // [TL_ASSERT] TX : TLP sent TL -> DL -> ready = 0
-  function void tl_aif_tx_sent();
-    if (tl_aif == null) return;
-    tl_aif.tl_tx_sent_cnt++;
-    tl_aif.tl_tx_ready = 1'b0;
+    tl_aif.tl_tx_sample(tr.tlp_data, (tr.pkt_mode == FLIT), pfx, exp_type, tr.length,
+                        !((tr.pkt_mode == FLIT) && (tr.txn_type == PCIe_TL_MSG)),   // Flit Msg : no Tag
+                        14'(tr.tag), tr.ep,
+                        tr.tlp_header_dw_count - (pfx ? 1 : 0), tr.data, is_non_posted(tr));
   endfunction
 
   //--------------------------------------------------------------------------
@@ -1790,7 +1782,7 @@ class PCIe_RC_TL_model extends uvm_component;
     print_attr_table_check(tr);      // [ATTR] info : RO / IDO / NS table check (just before the 236B TL packet print)
 
     pack_to_tlp_data(tr);
-    tl_aif_tx_formed(tr);            // [TL_ASSERT] 236 B formed : tl_tx_ready = 1 + checks 5-7
+    tl_aif_tx_formed(tr);            // [TL_ASSERT] save this TLP for the TL assertions
 
     // [FLIT_SEG] byte layout of this segment inside its 236 B FLIT TLP region
     if (tr.is_flit_segment) print_flit_seg_layout(tr);
@@ -1807,7 +1799,6 @@ class PCIe_RC_TL_model extends uvm_component;
 
     `uvm_info(get_type_name(), "[TL->DL] TLP_SENT_TO_DL", UVM_MEDIUM);
      tlp_dl_ap.write(tr);
-     tl_aif_tx_sent();               // [TL_ASSERT] sent TL -> DL : tl_tx_ready = 0
 
   endfunction
 

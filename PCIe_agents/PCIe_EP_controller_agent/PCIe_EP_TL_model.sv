@@ -1342,13 +1342,6 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
   //==========================================================================
   //  write      : original path, EP controller driver -> EP DL model
   //==========================================================================
-  // [TL_ASSERT] completion sent TL -> DL -> ready = 0
-  function void tl_aif_cpl_sent();
-    if (tl_aif == null) return;
-    tl_aif.tl_cpl_sent_cnt++;
-    tl_aif.tl_cpl_ready = 1'b0;
-  endfunction
-
   function void write(PCIe_sequence_item item);
     `uvm_info("EP_TL_MODEL",
       $sformatf("TL -> DL (driver path): drive_flit=%0d", item.drive_flit), UVM_MEDIUM)
@@ -1445,6 +1438,11 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     rx_err = rx_tl_error_check(item);
     rx_tl_error_report(rx_err);
     rx_force_ur = (rx_err == RX_ERR_ECRC) || (rx_err == RX_ERR_POISONED);
+
+    // [TL_ASSERT] request decoded : save it (and its error flags) for the TL assertions
+    if (tl_aif != null)
+      tl_aif.tl_req_sample(rx_is_non_posted(), (rx_err == RX_ERR_MALFORMED),
+                           (rx_err == RX_ERR_POISONED), (rx_err == RX_ERR_ECRC), 14'(d_tag));
 
     // ---- drive the memory models ------------------------------------------
     cpl = PCIe_sequence_item::type_id::create("ep_tl_completion");
@@ -2418,7 +2416,6 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
 //    fc_account_cpl(cpl);          // FLOW CONTROL : completion credits consumed
     tl_ap.write(cpl);
-    tl_aif_cpl_sent();                              // [TL_ASSERT] sent TL -> DL : tl_cpl_ready = 0
     if (tl_aif != null) tl_aif.tl_np_done_cnt++;    // [TL_ASSERT] Non-Posted request completed
 
   endfunction
@@ -2682,12 +2679,9 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     cpl.hdr_dw_count         = hdr.size();
 
     pack_completion_region(cpl);
-    // [TL_ASSERT] 236 B completion formed : tl_cpl_ready = 1 + checks 5-6
-    if (tl_aif != null) begin
-      tl_aif.tl_cpl_formed_cnt++;
-      tl_aif.tl_cpl_ready = 1'b1;
-      tl_aif.tl_cpl_tx_check(cpl.tlp_data, (d_mode == FLIT), with_data, 14'(d_tag));
-    end
+    // [TL_ASSERT] 236 B completion formed : save it for the TL assertions
+    if (tl_aif != null)
+      tl_aif.tl_cpl_sample(cpl.tlp_data, (d_mode == FLIT), with_data, cpl.cpl_status, 14'(d_tag));
 
   endfunction
 
@@ -2777,7 +2771,6 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
                   i + 1, n_part, len_dw, bc_left, n_cpl_sent), UVM_LOW)
   //    fc_account_cpl(cpl);
       tl_ap.write(cpl);
-      tl_aif_cpl_sent();             // [TL_ASSERT] CplD part sent TL -> DL
 
       bytes_this = (len_dw * `PCIe_TL_DW_BYTES) - ((i == 0) ? lead_off : 0);
       bc_left   -= bytes_this;
