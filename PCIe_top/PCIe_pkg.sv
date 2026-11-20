@@ -249,6 +249,10 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_CAS_1dwPayload_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_CAS_2dwPayload_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_dll_ack_nak_sequence.sv"
+	// [TL_ERR_INJ] Malformed / Poisoned / ECRC error sequences
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_Malformed_TLP_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_Poisoned_TLP_sequence.sv"
+	`include "../PCIe_sequences/PCIe_RC_3DW_Flit_ECRC_Error_sequence.sv"
 
 
 
@@ -422,6 +426,10 @@ package PCIe_pkg;
 	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_CAS_1dwPayload_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_CAS_2dwPayload_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_dll_ack_nak_test.sv"
+	// [TL_ERR_INJ] Malformed / Poisoned / ECRC error tests
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_Malformed_TLP_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_Poisoned_TLP_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_3DW_Flit_ECRC_Error_test.sv"
 
 
 endpackage

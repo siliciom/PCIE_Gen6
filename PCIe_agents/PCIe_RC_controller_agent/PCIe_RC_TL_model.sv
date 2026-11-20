@@ -46,6 +46,7 @@ class PCIe_RC_TL_model extends uvm_component;
   uvm_analysis_port #(PCIe_sequence_item) rx_decoded_ap;
   int unsigned n_tlp_rcvd;   // TLPs received from the DL model
   int unsigned n_cpl_rcvd;   // of which Cpl / CplD
+  int unsigned n_cpl_ur_rcvd; // [TL_ERR_INJ] of which completion status = UR
 
   // [ENUM] completions kept for a waiting sequence (e.g. enumeration)
   //   write_dl_rx() stores every decoded completion here (key = tag) and fires
@@ -1069,6 +1070,14 @@ class PCIe_RC_TL_model extends uvm_component;
 
     cpl_write(cpl_it);
 
+    // [TL_ERR_INJ] UR completion (Poisoned / ECRC error tests)
+    if (cpl_it.cpl_status == `PCIe_CPL_STATUS_UR) begin
+      n_cpl_ur_rcvd++;
+      `uvm_info("RC_TL_ERR_INJ",
+        $sformatf("UR_COMPLETION_RECEIVED : tag=0x%0h status=UR (Unsupported Request) #%0d",
+                  cpl_it.tag, n_cpl_ur_rcvd), UVM_LOW)
+    end
+
     // [FLIT_SEG] CplD split over several FLITs : Byte Count is the number of
     // bytes still to come INCLUDING this CplD (000h = 4096). Not the last part
     // -> keep the data and wait for the rest before publishing.
@@ -1738,6 +1747,7 @@ class PCIe_RC_TL_model extends uvm_component;
 
     serialize_header(tr, hdr);       // Header Base + OHC
     tr.hdr_dw_count = hdr.size();
+    if (tr.rsvd_bits != 4'h0) report_rsvd_injection(tr, hdr);   // [TL_ERR_INJ] Malformed TLP test
 
     build_complete_tlp(tr, hdr);     // Header + OHC + Payload -> serialized_tlp
 
@@ -1745,6 +1755,7 @@ class PCIe_RC_TL_model extends uvm_component;
     // Non-Flit Mode : appended as the TLP Digest when TD == 1
     // Flit Mode     : appended as a 1 DW Trailer when TS[2:0] == 001b
     append_ecrc(tr);
+    if (tr.inject_ecrc_err) inject_ecrc_error(tr);   // [TL_ERR_INJ] ECRC error test : ECRC + 1
     // ----------------------------------------------------------------------
 
     // [FC SHARED] pool of this TLP is known (gate). DEDICATED -> Flit Mode
@@ -2238,6 +2249,11 @@ class PCIe_RC_TL_model extends uvm_component;
                 dw = '0;
                 dw[7:4] = tr.last_dw_be;   // [7:4] = Last DW BE
                 dw[3:0] = tr.first_dw_be;  // [3:0] = First DW BE
+                // [TL_ERR_INJ] PV (bit 30) = 0 -> NW / PMR / ER are Reserved.
+                //              0 normally, driven only by the Malformed TLP test.
+                dw[31]  = tr.rsvd_bits[3]; // NW
+                dw[29]  = tr.rsvd_bits[2]; // PMR
+                dw[28]  = tr.rsvd_bits[1]; // ER
                 ohc_data = new[1];
                 ohc_data[0] = dw;
       end
@@ -2337,7 +2353,7 @@ class PCIe_RC_TL_model extends uvm_component;
     //======================================================================
     dw1[31:16] = tr.requester_id;
     dw1[15]    = tr.ep;
-    dw1[14]    = 1'b0;
+    dw1[14]    = tr.rsvd_bits[0];   // [TL_ERR_INJ] Reserved : 0 normally, 1 only in the Malformed TLP test
     dw1[13:0]  = tr.tag;
 
     //======================================================================
@@ -2805,6 +2821,75 @@ class PCIe_RC_TL_model extends uvm_component;
         digest,
         tr.serialized_tlp.size()), UVM_LOW)
 
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // [TL_ERR_INJ] inject_ecrc_error - ECRC error test.
+  //   The ECRC was already calculated by append_ecrc() and is the last DW of
+  //   serialized_tlp. Add +1 to it, so the receiver's recalculated ECRC will
+  //   not match -> EP : ECRC Check Failed -> Completion with status UR.
+  //--------------------------------------------------------------------------
+  virtual function void inject_ecrc_error(PCIe_sequence_item tr);
+    int unsigned                last;
+    bit [`PCIe_TL_ECRC_W-1:0]   good_ecrc;
+
+    if (!tr.ecrc_present || (tr.serialized_tlp.size() == 0)) begin
+      `uvm_warning("RC_TL_ERR_INJ",
+        "INJECT_ECRC_ERR=1 but this TLP has no ECRC (set ts == 3'b001 in Flit Mode / td == 1 in Non-Flit) - nothing corrupted")
+      return;
+    end
+
+    last                   = tr.serialized_tlp.size() - 1;
+    good_ecrc              = tr.serialized_tlp[last];
+    tr.serialized_tlp[last] = good_ecrc + 1;
+    tr.ecrc                = good_ecrc + 1;
+
+    `uvm_info("RC_TL_ERR_INJ",
+      $sformatf({"\n",
+        "         ============================================================\n",
+        "                    ECRC ERROR INJECTED BY THE RC TL MODEL\n",
+        "         ============================================================\n",
+        "         Transaction       : %s %s tag=0x%0h\n",
+        "         Calculated ECRC   : 0x%08h\n",
+        "         ECRC sent (+1)    : 0x%08h\n",
+        "         Expected at EP    : ECRC Check Failed -> Cpl with status UR\n",
+        "         ============================================================"},
+        tr.txn_type.name(), tr.dir.name(), tr.tag, good_ecrc, tr.ecrc), UVM_LOW)
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // [TL_ERR_INJ] report_rsvd_injection - Malformed TLP test.
+  //   serialize_flit_header() / serialize_ohc() already placed rsvd_bits into
+  //   the Reserved header bits. Only print what was done.
+  //--------------------------------------------------------------------------
+  virtual function void report_rsvd_injection(PCIe_sequence_item tr,
+                                              bit [`PCIe_TL_DATA_DW_W-1:0] hdr[]);
+    if (tr.pkt_mode != FLIT) begin
+      `uvm_warning("RC_TL_ERR_INJ",
+        $sformatf("RSVD_BITS=%04b ignored : Reserved bit injection is only modelled in Flit Mode", tr.rsvd_bits))
+      return;
+    end
+    if ((tr.rsvd_bits[3:1] != 3'b000) && (tr.ohc_a_type != OHC_A1))
+      `uvm_warning("RC_TL_ERR_INJ",
+        $sformatf("RSVD_BITS=%04b : bits [3:1] need OHC-A1 (explicit byte enables), only bit [0] (DW1[14]) is sent", tr.rsvd_bits))
+
+    `uvm_info("RC_TL_ERR_INJ",
+      $sformatf({"\n",
+        "         ============================================================\n",
+        "              MALFORMED TLP : RESERVED BITS SET BY THE RC TL MODEL\n",
+        "         ============================================================\n",
+        "         Transaction       : %s %s addr=0x%0h len=%0d DW\n",
+        "         Reserved bits     : %04b\n",
+        "           DW1[14]  (R)    : %0b   -> header DW1 = 0x%08h\n",
+        "           OHC-A1 [31] NW  : %0b\n",
+        "           OHC-A1 [29] PMR : %0b\n",
+        "           OHC-A1 [28] ER  : %0b   -> OHC DW = 0x%08h\n",
+        "         Expected at EP    : Malformed TLP -> ERR_FATAL, TLP dropped, no completion\n",
+        "         ============================================================"},
+        tr.txn_type.name(), tr.dir.name(), tr.address, tr.length, tr.rsvd_bits,
+        tr.rsvd_bits[0], (hdr.size() > 1) ? hdr[1] : 32'h0,
+        tr.rsvd_bits[3], tr.rsvd_bits[2], tr.rsvd_bits[1],
+        (tr.ohc_a_type == OHC_A1 && hdr.size() > 0) ? hdr[hdr.size()-1] : 32'h0), UVM_LOW)
   endfunction
 
   virtual function void build_idle_or_nop_flit(PCIe_sequence_item tr);

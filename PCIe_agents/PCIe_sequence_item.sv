@@ -61,6 +61,23 @@ class PCIe_sequence_item extends uvm_sequence_item;
   rand bit        ep;                // Poisoned / Error present
 
   //--------------------------------------------------------------------------
+  // [TL_ERR_INJ] TL error injection controls (NOT rand, default 0 = no error,
+  //              so every existing sequence behaves exactly as before)
+  //   rsvd_bits       : value written into Reserved bits of a Flit Mode request
+  //                     (Malformed TLP test). EP TL model : any non-zero value
+  //                     -> Malformed TLP -> ERR_FATAL, TLP dropped, no completion.
+  //                       rsvd_bits[0]   -> Header DW1[14]   (R bit next to EP)
+  //                       rsvd_bits[1]   -> OHC-A1 bit [28]  ER  (Reserved, PV = 0)
+  //                       rsvd_bits[2]   -> OHC-A1 bit [29]  PMR (Reserved, PV = 0)
+  //                       rsvd_bits[3]   -> OHC-A1 bit [31]  NW  (Reserved, not a Translation Req)
+  //                     (bits [3:1] need OHC-A1 in the TLP, i.e. explicit byte enables)
+  //   inject_ecrc_err : 1 -> RC TL model adds +1 to the 32-bit ECRC after it is
+  //                     calculated (ECRC error test). Needs ts == 001b (ECRC trailer).
+  //--------------------------------------------------------------------------
+  bit [3:0]       rsvd_bits       = 4'h0;
+  bit             inject_ecrc_err = 1'b0;
+
+  //--------------------------------------------------------------------------
   // Payload
   //--------------------------------------------------------------------------
   rand bit [`PCIe_TL_DATA_DW_W-1:0] data[];  // DW payload (writes / msg-w-data)
@@ -453,6 +470,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_int  (attr,           UVM_ALL_ON)
     `uvm_field_int  (td,             UVM_ALL_ON)
     `uvm_field_int  (ep,             UVM_ALL_ON)
+    `uvm_field_int  (rsvd_bits,      UVM_ALL_ON | UVM_BIN)     // [TL_ERR_INJ]
+    `uvm_field_int  (inject_ecrc_err,UVM_ALL_ON)               // [TL_ERR_INJ]
     `uvm_field_array_int (data,      UVM_ALL_ON | UVM_HEX)
     `uvm_field_int  (cfg_reg_num,    UVM_ALL_ON | UVM_HEX)
     `uvm_field_int  (cfg_ext_reg_num,UVM_ALL_ON | UVM_HEX)
@@ -672,6 +691,12 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   //     kept at their "implied" value (First = 1111b, Last = 1111b / 0000b)
   //--------------------------------------------------------------------------
   constraint c_atomic_default { soft atomic_op == PCIe_ATOMIC_NONE; }
+
+  // [TL_ERR_INJ] EP (Poisoned) defaults to 0 (soft, so the inline 'with' can
+  //   override it). The EP TL model now answers EP = 1 with UR, so a random EP
+  //   bit in the normal sequences would turn good traffic into Poisoned TLPs.
+  //   Only PCIe_RC_3DW_Flit_Poisoned_TLP_sequence sets ep == 1.
+  constraint c_ep_default { soft ep == 1'b0; }
 
   constraint c_atomic_rules {
     if (atomic_op != PCIe_ATOMIC_NONE) {

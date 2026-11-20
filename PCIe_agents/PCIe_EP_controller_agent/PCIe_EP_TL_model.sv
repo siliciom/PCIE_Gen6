@@ -135,6 +135,19 @@ class PCIe_EP_TL_model extends uvm_component;
   // but is intentionally generic so any other Request type can drive it the
   // same way later instead of build_completion() always hardcoding SC.
   bit [`PCIe_TL_CPL_STATUS_W-1:0]       cfg_status_override;
+
+  // [TL_ERR_INJ] receive side TL error checks
+  //   d_rsvd_val  : Reserved bits seen in the request (Flit Mode)
+  //                   [0] DW1[14]   [1] OHC-A1 ER   [2] OHC-A1 PMR   [3] OHC-A1 NW
+  //   rx_force_ur : 1 -> service_request() does no memory / IO access and
+  //                 answers a Non-Posted request with a Cpl, status UR
+  typedef enum {RX_ERR_NONE, RX_ERR_MALFORMED, RX_ERR_ECRC, RX_ERR_POISONED} rx_tl_err_e;
+  bit [3:0]                             d_rsvd_val;
+  bit                                   rx_force_ur;
+  int unsigned                          n_malformed;     // Malformed TLPs dropped (ERR_FATAL)
+  int unsigned                          n_poisoned;      // Poisoned requests (EP = 1)
+  int unsigned                          n_ecrc_err;      // requests with ECRC Check Failed
+  int unsigned                          n_ur_err_cpl;    // UR completions sent for the 2 above
   int                                   d_hdr_base_dw;
   int                                   d_ohc_dw;
   int                                   d_hdr_dw;
@@ -1321,6 +1334,9 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
                  n_dmwr_rcvd, n_cpl_split_txn, n_cpl_split_parts), UVM_LOW)
     `uvm_info("EP_TL_ATOMIC",
       $sformatf("EP_ATOMICOP_SUMMARY : AtomicOp requests executed=%0d", n_atomic_rcvd), UVM_LOW)   // [ATOMIC]
+    `uvm_info("EP_TL_ERR",
+      $sformatf("EP_TL_ERROR_SUMMARY : malformed(dropped)=%0d poisoned=%0d ecrc_failed=%0d ur_completions_sent=%0d",
+                 n_malformed, n_poisoned, n_ecrc_err, n_ur_err_cpl), UVM_LOW)                       // [TL_ERR_INJ]
   endfunction
 
   //==========================================================================
@@ -1359,6 +1375,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     int unsigned fc_c, fc_h, fc_d;
     int unsigned fc_v;                         // [TC_VC] VC of this request (from its TC)
     bit          fc_pool;                      // [FC SHARED] pool given by the prefix
+    rx_tl_err_e  rx_err;                       // [TL_ERR_INJ] result of the TL error checks
 
     n_tlp_rcvd++;
 
@@ -1421,9 +1438,19 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     fc_rx_account(fc_v, fc_c, fc_h, fc_d,
                   $sformatf("%s %s TC%0d len=%0d", d_txn_type.name(), d_dir.name(), d_tc, d_payload_dw), fc_pool);
 
+    // ---- [TL_ERR_INJ] TL error checks ---------------------------------------
+    //   Malformed (Reserved bits != 0) -> ERR_FATAL, TLP dropped, no completion
+    //   ECRC Check Failed / Poisoned   -> no memory / IO access,
+    //                                     Non-Posted : Cpl with status UR
+    rx_err = rx_tl_error_check(item);
+    rx_tl_error_report(rx_err);
+    rx_force_ur = (rx_err == RX_ERR_ECRC) || (rx_err == RX_ERR_POISONED);
+
     // ---- drive the memory models ------------------------------------------
     cpl = PCIe_sequence_item::type_id::create("ep_tl_completion");
-    service_request(item, cpl);
+    if (rx_err != RX_ERR_MALFORMED)
+      service_request(item, cpl);
+    rx_force_ur = 1'b0;
 
     // ---- FLOW CONTROL : request serviced -> buffer space is free again.
     //      CREDITS_ALLOCATED grows; UpdateFC only goes out when it is needed
@@ -1444,6 +1471,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
     d_valid          = 1'b0;
     d_ohc_dw         = 0;
+    d_rsvd_val       = 4'h0;                 // [TL_ERR_INJ]
     d_mem_locked     = 1'b0;
     d_mem_deferrable = 1'b0;
     d_atomic_op      = PCIe_ATOMIC_NONE;     // [ATOMIC]
@@ -1485,6 +1513,10 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       ohc_val       = get_dw(item, d_hdr_base_dw);
       d_last_dw_be  = ohc_val[7:4];
       d_first_dw_be = ohc_val[3:0];
+      // [TL_ERR_INJ] OHC-A1 (Memory Request, not AtomicOp) with PV = 0 :
+      //              NW [31], PMR [29], ER [28] are Reserved
+      if ((d_txn_type == PCIe_TL_MEM) && (d_atomic_op == PCIe_ATOMIC_NONE) && (ohc_val[30] == 1'b0))
+        d_rsvd_val[3:1] = {ohc_val[31], ohc_val[29], ohc_val[28]};
       `uvm_info("EP_TL_DECODE",
         $sformatf("OHC_DW=%08h -> first_dw_be=%04b last_dw_be=%04b",
                    ohc_val, d_first_dw_be, d_last_dw_be), UVM_LOW)
@@ -1564,6 +1596,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     d_length       = dw0[9:0];
     d_requester_id = dw1[31:16];
     d_ep           = dw1[15];
+    d_rsvd_val[0]  = dw1[14];                // [TL_ERR_INJ] Reserved bit of a request
     d_tag          = dw1[13:0];
 
     // ECRC is carried in a Trailer in Flit Mode, selected by TS[2:0]
@@ -2155,6 +2188,20 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     cpl_with_data        = 1'b0;
     cfg_status_override  = `PCIe_CPL_STATUS_SC;
 
+    // [TL_ERR_INJ] Poisoned request / ECRC Check Failed : the request is NOT
+    //   executed (no memory / IO / CFG access). Non-Posted -> Cpl (no data)
+    //   with status UR. Posted -> dropped, no completion.
+    if (rx_force_ur) begin
+      need_cpl            = rx_is_non_posted();
+      cpl_with_data       = 1'b0;
+      cfg_status_override = `PCIe_CPL_STATUS_UR;
+      if (need_cpl) n_ur_err_cpl++;
+      `uvm_info("EP_TL_ERR",
+        $sformatf("REQUEST_NOT_EXECUTED : %s %s addr=0x%0h tag=0x%0h -> %s",
+                   d_txn_type.name(), d_dir.name(), d_address, d_tag,
+                   need_cpl ? "Cpl with status UR (Unsupported Request)" : "Posted, dropped (no completion)"), UVM_LOW)
+    end
+    else
     case (d_txn_type)
 
       //------------------------------------------------------------------
@@ -2338,8 +2385,9 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     if (d_txn_type == PCIe_TL_MEM && d_dir == PCIe_TL_WRITE && d_mem_deferrable) begin
       n_dmwr_rcvd++;
       `uvm_info("EP_TL_FLIT_SEG",
-        $sformatf("DMWr #%0d received : addr=0x%0h len=%0d DW tag=0x%0h -> Cpl (SC, no data) sent in its own FLIT : 12 B Cpl header + 224 B zero (NOP) padding",
-                  n_dmwr_rcvd, d_address, d_payload_dw, d_tag), UVM_LOW)
+        $sformatf("DMWr #%0d received : addr=0x%0h len=%0d DW tag=0x%0h -> Cpl (%s, no data) sent in its own FLIT",
+                  n_dmwr_rcvd, d_address, d_payload_dw, d_tag,
+                  (cfg_status_override == `PCIe_CPL_STATUS_SC) ? "SC" : "UR"), UVM_LOW)
     end
 
     // [FLIT_SEG] Completion with data that does not fit one 236 B TLP region
@@ -2373,6 +2421,64 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     tl_aif_cpl_sent();                              // [TL_ASSERT] sent TL -> DL : tl_cpl_ready = 0
     if (tl_aif != null) tl_aif.tl_np_done_cnt++;    // [TL_ASSERT] Non-Posted request completed
 
+  endfunction
+
+  //==========================================================================
+  //  [TL_ERR_INJ] RECEIVE SIDE TL ERROR CHECKS (simple model)
+  //
+  //    Malformed TLP     : a Reserved bit of the request header / OHC-A1 is 1
+  //                        -> ERR_FATAL (Malformed TLP default severity is
+  //                           Fatal), TLP dropped, no completion.
+  //    ECRC Check Failed : recalculated ECRC != received ECRC
+  //                        -> request not executed, Non-Posted : Cpl UR
+  //                           (Sec 2.3.1 : the Completion must have UR status)
+  //    Poisoned TLP      : EP bit = 1
+  //                        -> request not executed, Non-Posted : Cpl UR
+  //    Error precedence (Sec 6.2.3.2.3) : Malformed > ECRC > Poisoned
+  //==========================================================================
+  function rx_tl_err_e rx_tl_error_check(PCIe_sequence_item item);
+    if ((d_mode == FLIT) && (d_rsvd_val != 4'h0)) return RX_ERR_MALFORMED;
+    if (item.ecrc_state == PCIe_ECRC_FAIL)         return RX_ERR_ECRC;
+    if (d_ep)                                      return RX_ERR_POISONED;
+    return RX_ERR_NONE;
+  endfunction
+
+  function void rx_tl_error_report(rx_tl_err_e err);
+    case (err)
+      RX_ERR_MALFORMED: begin
+        n_malformed++;
+        `uvm_error("EP_TL_MALFORMED_TLP",
+          $sformatf({"ERR_FATAL : MALFORMED_TLP received - %s %s addr=0x%0h tag=0x%0h has Reserved bits set ",
+                     "(DW1[14]=%0b OHC-A1 NW=%0b PMR=%0b ER=%0b) -> TLP dropped, no completion"},
+                     d_txn_type.name(), d_dir.name(), d_address, d_tag,
+                     d_rsvd_val[0], d_rsvd_val[3], d_rsvd_val[2], d_rsvd_val[1]))
+      end
+      RX_ERR_ECRC: begin
+        n_ecrc_err++;
+        `uvm_error("EP_TL_ECRC_ERROR",
+          $sformatf("ERR_NONFATAL : ECRC_CHECK_FAILED - %s %s addr=0x%0h tag=0x%0h -> request not executed%s",
+                     d_txn_type.name(), d_dir.name(), d_address, d_tag,
+                     rx_is_non_posted() ? ", Cpl with status UR" : ", Posted : dropped"))
+      end
+      RX_ERR_POISONED: begin
+        n_poisoned++;
+        `uvm_error("EP_TL_POISONED_TLP",
+          $sformatf("ERR_NONFATAL : POISONED_TLP_RECEIVED (EP=1) - %s %s addr=0x%0h tag=0x%0h -> request not executed%s",
+                     d_txn_type.name(), d_dir.name(), d_address, d_tag,
+                     rx_is_non_posted() ? ", Cpl with status UR" : ", Posted : dropped"))
+      end
+      default: ;
+    endcase
+  endfunction
+
+  // Non-Posted request (needs a completion) ?
+  function bit rx_is_non_posted();
+    case (d_txn_type)
+      PCIe_TL_MEM : return (d_dir == PCIe_TL_READ) || d_mem_deferrable || (d_atomic_op != PCIe_ATOMIC_NONE);
+      PCIe_TL_IO  : return 1'b1;
+      PCIe_TL_CFG : return 1'b1;
+      default     : return 1'b0;
+    endcase
   endfunction
 
   //==========================================================================
