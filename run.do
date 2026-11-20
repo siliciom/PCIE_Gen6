@@ -1,5 +1,5 @@
 #set testname "PCIe_base_test"
-set testname "PCIe_3DW_flit_test"
+#set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_IO_3DW_FLIT_test"
 #set testname "PCIe_gen6_ltssm_electrical_idle_during_training_test"
 #set testname "PCIe_gen6_ltssm_detect_no_receiver_test"
@@ -11,7 +11,7 @@ set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_gen6_dll_inactive_state_test"
 #set testname "PCIe_gen6_dll_initfc1_test"
 #set testname "PCIe_gen6_dll_initfc2_test"
- set testname "PCIe_gen6_dll_feature_negotiation_test"
+# set testname "PCIe_gen6_dll_feature_negotiation_test"
 #set testname "PCIe_gen6_dll_active_state_test"
 # --- LTSSM directed timeout tests ---
 #set testname "PCIe_gen6_ltssm_timeout_detect_quiet_test"
@@ -91,7 +91,7 @@ set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
 #set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
 # [DLL] Data Link Layer tests
-#set testname "PCIe_gen6_dll_ack_nak_test"
+set testname "PCIe_gen6_dll_ack_nak_test"
  
 vlib work
 vmap work work

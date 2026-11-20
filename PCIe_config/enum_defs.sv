@@ -383,6 +383,12 @@ typedef enum
      {
        INIT_FC1, INIT_FC2
      } dl_init_substate_e;
+
+// DL state with DL_INIT split into FC_INIT1 / FC_INIT2 (used by the DL assertions in PCIe_PIPE_interface.sv)
+typedef enum
+     {
+       STATE_INACTIVE, STATE_FEATURE, STATE_FC_INIT1, STATE_FC_INIT2, STATE_ACTIVE
+     } dl_curr_state_e;
 typedef struct {
     bit [`PCIe_TLP_DATA_BYTE_W-1:0][`PCIe_BYTE_W-1:0] tlp_data;
     bit [`PCIe_SEQ_NUM_W-1:0] seq_num;
@@ -408,4 +414,5 @@ typedef struct {
 
 
 endpackage
+
 

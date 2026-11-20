@@ -109,24 +109,10 @@ interface PCIe_RC_interface(input logic pclk);
 
    //==========================================================================
    //==========================================================================
-   // [DL_ASSERT] RC DL state machine assertions (DL_INACTIVE -> DL_FEATURE -> DL_INIT -> DL_ACTIVE)
-   //   Assertions cannot be written inside a class, so PCIe_RC_DL_model.sv copies its
-   //   DL state/counters/flags into the signals below on every pclk negedge (run_dl_assert_mirror).
-   //   The checks read them on every pclk posedge and give UVM_ERROR if a rule is broken.
-   //
-   //   Check name                            What it checks
-   //   DL_START_STATE_CHECK                  DL starts in DL_INACTIVE
-   //   DL_LINKUP_START_CHECK                 New link-up starts from DL_INACTIVE
-   //   DL_<state>_NEXT_STATE_CHECK (5)       Only legal state moves
-   //   DL_LINKDOWN_CHECK                     Link down -> DL_INACTIVE
-   //   DL_TLP_ONLY_IN_ACTIVE_CHECK           TLP sent only in DL_ACTIVE
-   //   DL_NO_DLLP_IN_INACTIVE_CHECK          No DLLP in DL_INACTIVE
-   //   DL_RESET_COUNTERS/FLAGS/BUFFERS_CHECK On DL_INACTIVE : all values reset
-   //   DL_START_DEFAULTS_CHECK               Default values at start
-   //   DL_LINK_ACTIVE_ONLY_IN_ACTIVE_CHECK   dl_link_active = 1 only in DL_ACTIVE
-   //   DL_ACTIVE_NEEDS_LINK_ACTIVE_CHECK     DL_ACTIVE always has dl_link_active = 1
-   //   On failure the log shows : UVM_ERROR ... [<check name>] FAILED : <reason>
-   //==========================================================================
+   // [DL_ASSERT] RC DL state machine assertions (PCIe 6.1 Sec 3.2)
+   //   PCIe_RC_DL_model.sv copies its state/counters/flags here every pclk negedge.
+   //   Checks run every pclk posedge : state moves, DL_Up/DL_Down, link up/down, reset values.
+   //   On failure : UVM_ERROR [RC_DL_ASSERT] [<check name>] FAILED : <reason>
    //==========================================================================
    import uvm_pkg::*;
    import typedef_enums::*;
@@ -135,33 +121,33 @@ interface PCIe_RC_interface(input logic pclk);
    //--------------------------------------------------------------------------
    // On / off
    //--------------------------------------------------------------------------
-   bit assert_en    = 1'b1;   // 1 = checks ON. A test can set 0 to switch all DL checks OFF
-   bit sample_valid = 1'b0;   // DL model sets 1 after its first copy. Checks wait for this
+   logic assert_en    = 1'b1;   // 1 = checks ON. A test can set 0 to switch all DL checks OFF
+   logic sample_valid = 1'b0;   // DL model sets 1 after its first copy. Checks wait for this
 
    //--------------------------------------------------------------------------
    // DL state : copied from the DL model on every falling edge of pclk
    //--------------------------------------------------------------------------
    dl_state_e          dl_state       = DL_INACTIVE;
    dl_init_substate_e  dl_init_sub    = INIT_FC1;
-   bit                 dl_link_active;
-   bit                 phy_linkup;
+   logic               dl_link_active;
+   logic               phy_linkup;
 
    // Sequence number counters (value in comment = value they must have in DL_INACTIVE)
-   bit [`PCIe_SEQ_NUM_W-1:0]        next_tx_seq;        // NEXT_TX_FLIT_SEQ_NUM          default 001h
-   bit [`PCIe_SEQ_NUM_W-1:0]        tx_acknak_seq;      // TX_ACKNAK_FLIT_SEQ_NUM        default 3FFh (1023)
-   bit [`PCIe_SEQ_NUM_W-1:0]        ackd_seq;           // ACKD_FLIT_SEQ_NUM             default 3FFh
-   bit [`PCIe_SEQ_NUM_W-1:0]        next_exp_rx_seq;    // NEXT_EXPECTED_RX_FLIT_SEQ_NUM default 001h
-   bit [`PCIe_SEQ_NUM_W-1:0]        implicit_rx_seq;    // IMPLICIT_RX_FLIT_SEQ_NUM      default 000h
-   bit [`PCIe_SEQ_NUM_W-1:0]        tx_replay_seq;      // TX_REPLAY_FLIT_SEQ_NUM        default 000h
-   bit [`PCIe_SEQ_NUM_W-1:0]        nak_ignore_seq;     // NAK_IGNORE_FLIT_SEQ_NUM       default 000h
-   bit [`PCIe_FLIT_REPLAY_NUM_W-1:0] flit_replay_num;   // FLIT_REPLAY_NUM               default 000b
+   logic [`PCIe_SEQ_NUM_W-1:0]      next_tx_seq;        // NEXT_TX_FLIT_SEQ_NUM          default 001h
+   logic [`PCIe_SEQ_NUM_W-1:0]      tx_acknak_seq;      // TX_ACKNAK_FLIT_SEQ_NUM        default 3FFh (1023)
+   logic [`PCIe_SEQ_NUM_W-1:0]      ackd_seq;           // ACKD_FLIT_SEQ_NUM             default 3FFh
+   logic [`PCIe_SEQ_NUM_W-1:0]      next_exp_rx_seq;    // NEXT_EXPECTED_RX_FLIT_SEQ_NUM default 001h
+   logic [`PCIe_SEQ_NUM_W-1:0]      implicit_rx_seq;    // IMPLICIT_RX_FLIT_SEQ_NUM      default 000h
+   logic [`PCIe_SEQ_NUM_W-1:0]      tx_replay_seq;      // TX_REPLAY_FLIT_SEQ_NUM        default 000h
+   logic [`PCIe_SEQ_NUM_W-1:0]      nak_ignore_seq;     // NAK_IGNORE_FLIT_SEQ_NUM       default 000h
+   logic [`PCIe_FLIT_REPLAY_NUM_W-1:0] flit_replay_num;   // FLIT_REPLAY_NUM               default 000b
 
    // ACK / NAK / replay flags (all must be 0 in DL_INACTIVE)
-   bit nak_scheduled;
-   bit ack_scheduled;
-   bit replay_scheduled;
-   bit replay_in_progress;
-   bit nak_withdrawal_allowed;
+   logic nak_scheduled;
+   logic ack_scheduled;
+   logic replay_scheduled;
+   logic replay_in_progress;
+   logic nak_withdrawal_allowed;
 
    // Number of entries in the TX / RX retry buffers (must be 0 in DL_INACTIVE)
    int unsigned tx_retry_size;
@@ -176,33 +162,75 @@ interface PCIe_RC_interface(input logic pclk);
    dl_state_e   tx_payload_dl_state = DL_INACTIVE;
    int unsigned tx_dllp_cnt;               // + 1 for every DLLP flit sent to PL
    dl_state_e   tx_dllp_dl_state    = DL_INACTIVE;
-   bit [31:0]   tx_dllp_content;
+   logic [`PCIe_DLLP_CONTENT_W-1:0] tx_dllp_content;
 
    //--------------------------------------------------------------------------
-   // dl_check_state : same as dl_state, but DL_INIT is split into
-   //                  FC_INIT1 / FC_INIT2 so every state move can be checked
+   // dl_curr_state : DL state NOW (same as dl_state, but DL_INIT is split into
+   //                 FC_INIT1 / FC_INIT2 so every state move can be checked)
    //                  (STATE_ names : DL_ names already exist in enum_defs.sv)
    //--------------------------------------------------------------------------
-   typedef enum {STATE_INACTIVE, STATE_FEATURE, STATE_FC_INIT1, STATE_FC_INIT2, STATE_ACTIVE} dl_check_state_e;
-   dl_check_state_e dl_check_state;
+   dl_curr_state_e dl_curr_state;
 
    always_comb begin
       case (dl_state)
-         DL_INACTIVE : dl_check_state = STATE_INACTIVE;
-         DL_FEATURE  : dl_check_state = STATE_FEATURE;
-         DL_INIT     : dl_check_state = (dl_init_sub == INIT_FC2) ? STATE_FC_INIT2 : STATE_FC_INIT1;
-         default     : dl_check_state = STATE_ACTIVE;
+         DL_INACTIVE : dl_curr_state = STATE_INACTIVE;
+         DL_FEATURE  : dl_curr_state = STATE_FEATURE;
+         DL_INIT     : dl_curr_state = (dl_init_sub == INIT_FC2) ? STATE_FC_INIT2 : STATE_FC_INIT1;
+         default     : dl_curr_state = STATE_ACTIVE;
       endcase
    end
 
+   // DL status reported to the TL (spec Sec 3.2.1)
+   //   DL_Down : DL_INACTIVE, DL_FEATURE, FC_INIT1
+   //   DL_Up   : FC_INIT2, DL_ACTIVE
+   logic dl_up;
+   logic dl_down;
+
+   always_comb begin
+      case (dl_curr_state)
+         STATE_INACTIVE : begin dl_down = 1'b1; dl_up = 1'b0; end
+         STATE_FEATURE  : begin dl_down = 1'b1; dl_up = 1'b0; end
+         STATE_FC_INIT1 : begin dl_down = 1'b1; dl_up = 1'b0; end
+         STATE_FC_INIT2 : begin dl_down = 1'b0; dl_up = 1'b1; end
+         STATE_ACTIVE   : begin dl_down = 1'b0; dl_up = 1'b1; end
+         default        : begin dl_down = 1'b1; dl_up = 1'b0; end
+      endcase
+   end
+
+   // values in the last pclk (to see "what was it before")
+   dl_curr_state_e dl_prev_state = STATE_INACTIVE;
+   logic            dl_prev_up    = 1'b0;
+   logic            dl_prev_down  = 1'b1;
+
+   always @(posedge pclk) begin
+      dl_prev_state <= dl_curr_state;
+      dl_prev_up    <= dl_up;
+      dl_prev_down  <= dl_down;
+   end
+
    // Helper signals : 1 when all values are at their DL_INACTIVE default (used by DL_RESET_... checks)
-   wire seq_default = (next_tx_seq     == 10'h001) && (tx_acknak_seq  == 10'h3FF) &&
-                      (ackd_seq        == 10'h3FF) && (next_exp_rx_seq == 10'h001) &&
-                      (implicit_rx_seq == 10'h000) && (tx_replay_seq   == 10'h000) &&
-                      (nak_ignore_seq  == 10'h000) && (flit_replay_num == '0);
-   wire flags_clear = !nak_scheduled && !ack_scheduled && !replay_scheduled &&
-                      !replay_in_progress && !nak_withdrawal_allowed;
-   wire buffers_empty = (tx_retry_size == 0) && (rx_retry_size == 0);
+   logic seq_default;      // 1 = all 8 sequence counters are at reset value
+   logic flags_clear;      // 1 = all 5 Ack / Nak / replay flags are 0
+   logic buffers_empty;    // 1 = TX and RX retry buffers are empty
+
+   always_comb begin
+      seq_default   = (next_tx_seq     == `PCIe_INIT_NEXT_TX_FLIT_SEQ_NUM)          &&
+                      (tx_acknak_seq   == `PCIe_INIT_TX_ACKNAK_SEQ_NUM)             &&
+                      (ackd_seq        == `PCIe_INIT_ACKD_FLIT_SEQ_NUM)             &&
+                      (next_exp_rx_seq == `PCIe_INIT_NEXT_EXPECTED_RX_FLIT_SEQ_NUM) &&
+                      (implicit_rx_seq == `PCIe_INIT_IMPLICIT_RX_FLIT_SEQ_NUM)      &&
+                      (tx_replay_seq   == `PCIe_INIT_TX_REPLAY_FLIT_SEQ_NUM)        &&
+                      (nak_ignore_seq  == `PCIe_INIT_NAK_IGNORE_FLIT_SEQ_NUM)       &&
+                      (flit_replay_num == `PCIe_INIT_FLIT_REPLAY_NUM);
+
+      flags_clear   = (nak_scheduled          == 1'b0) &&
+                      (ack_scheduled          == 1'b0) &&
+                      (replay_scheduled       == 1'b0) &&
+                      (replay_in_progress     == 1'b0) &&
+                      (nak_withdrawal_allowed == 1'b0);
+
+      buffers_empty = (tx_retry_size == 0) && (rx_retry_size == 0);
+   end
 
    //--------------------------------------------------------------------------
    // Every check below runs on the rising edge of pclk, and is OFF while
@@ -222,46 +250,64 @@ interface PCIe_RC_interface(input logic pclk);
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
       "[DL_START_STATE_CHECK] FAILED : at start DL state must be DL_INACTIVE, but it is %s", dl_state.name()))
 
-   // When the link comes up (phy_linkup 0 -> 1), DL must still be in DL_INACTIVE
-   // (DL_FEATURE is also OK : the model leaves DL_INACTIVE in zero time).
+   // Before the link comes up, DL must be in DL_INACTIVE with DL_Down = 1, DL_Up = 0.
+   // So when phy_linkup goes 0 -> 1, the values in the last pclk are checked.
    DL_LINKUP_START_CHECK : assert property (
-      $rose(phy_linkup) |-> (dl_check_state inside {STATE_INACTIVE, STATE_FEATURE}))
+      $rose(phy_linkup) |-> (dl_prev_state == STATE_INACTIVE) && (dl_prev_down == 1'b1) && (dl_prev_up == 1'b0))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_LINKUP_START_CHECK] FAILED : link came up but DL state is %s (expected DL_INACTIVE)", dl_check_state.name()))
+      "[DL_LINKUP_START_CHECK] FAILED : link came up but before it DL was %s, DL_Down=%0b, DL_Up=%0b (expected DL_INACTIVE, 1, 0)",
+      dl_prev_state.name(), dl_prev_down, dl_prev_up))
 
    //==========================================================================
-   // CHECK 2 : Only legal state moves
-   //   INACTIVE -> FEATURE -> FC_INIT1 -> FC_INIT2 -> ACTIVE , any -> INACTIVE
+   // CHECK 2 : One check for each state move (spec Figure 3-2, Sec 3.2.1)
+   //
+   //   DL_INACTIVE -> DL_FEATURE -> FC_INIT1 -> FC_INIT2 -> DL_ACTIVE
+   //   (link down from any state -> DL_INACTIVE : see CHECK 3)
+   //
+   //   dl_prev_state = state in the last pclk
+   //   dl_curr_state = state now
+   //   "left X"       = dl_prev_state is X and dl_curr_state is not X
    //==========================================================================
-   // From DL_INACTIVE, next state must be DL_INACTIVE or DL_FEATURE
-   DL_INACTIVE_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_INACTIVE) |=> (dl_check_state inside {STATE_INACTIVE, STATE_FEATURE}))
-   else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_INACTIVE_NEXT_STATE_CHECK] FAILED : from DL_INACTIVE only DL_FEATURE is allowed, but moved to %s", dl_check_state.name()))
 
-   // From DL_FEATURE, next state must be DL_FEATURE, FC_INIT1 or DL_INACTIVE
-   DL_FEATURE_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_FEATURE) |=> (dl_check_state inside {STATE_FEATURE, STATE_FC_INIT1, STATE_INACTIVE}))
+   // DL_INACTIVE -> DL_FEATURE  (DL_Down = 1, DL_Up = 0)
+   DL_INACTIVE_TO_FEATURE_CHECK : assert property (
+      (dl_prev_state == STATE_INACTIVE) && (dl_curr_state != STATE_INACTIVE)
+      |-> (dl_curr_state == STATE_FEATURE) && (dl_down == 1'b1) && (dl_up == 1'b0))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_FEATURE_NEXT_STATE_CHECK] FAILED : from DL_FEATURE only FC_INIT1 or DL_INACTIVE is allowed, but moved to %s", dl_check_state.name()))
+      "[DL_INACTIVE_TO_FEATURE_CHECK] FAILED : left DL_INACTIVE, expected DL_FEATURE / DL_Down=1 / DL_Up=0, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
 
-   // From FC_INIT1, next state must be FC_INIT1, FC_INIT2 or DL_INACTIVE
-   DL_FC_INIT1_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_FC_INIT1) |=> (dl_check_state inside {STATE_FC_INIT1, STATE_FC_INIT2, STATE_INACTIVE}))
+   // DL_FEATURE -> FC_INIT1  (link still up)  (DL_Down = 1, DL_Up = 0)
+   DL_FEATURE_TO_FC_INIT1_CHECK : assert property (
+      (dl_prev_state == STATE_FEATURE) && (dl_curr_state != STATE_FEATURE) && (phy_linkup == 1'b1)
+      |-> (dl_curr_state == STATE_FC_INIT1) && (dl_down == 1'b1) && (dl_up == 1'b0))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_FC_INIT1_NEXT_STATE_CHECK] FAILED : from FC_INIT1 only FC_INIT2 or DL_INACTIVE is allowed, but moved to %s", dl_check_state.name()))
+      "[DL_FEATURE_TO_FC_INIT1_CHECK] FAILED : left DL_FEATURE, expected FC_INIT1 / DL_Down=1 / DL_Up=0, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
 
-   // From FC_INIT2, next state must be FC_INIT2, DL_ACTIVE or DL_INACTIVE
-   DL_FC_INIT2_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_FC_INIT2) |=> (dl_check_state inside {STATE_FC_INIT2, STATE_ACTIVE, STATE_INACTIVE}))
+   // FC_INIT1 -> FC_INIT2  (link still up)  (DL_Down = 0, DL_Up = 1)
+   DL_FC_INIT1_TO_FC_INIT2_CHECK : assert property (
+      (dl_prev_state == STATE_FC_INIT1) && (dl_curr_state != STATE_FC_INIT1) && (phy_linkup == 1'b1)
+      |-> (dl_curr_state == STATE_FC_INIT2) && (dl_down == 1'b0) && (dl_up == 1'b1))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_FC_INIT2_NEXT_STATE_CHECK] FAILED : from FC_INIT2 only DL_ACTIVE or DL_INACTIVE is allowed, but moved to %s", dl_check_state.name()))
+      "[DL_FC_INIT1_TO_FC_INIT2_CHECK] FAILED : left FC_INIT1, expected FC_INIT2 / DL_Down=0 / DL_Up=1, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
 
-   // From DL_ACTIVE, next state must be DL_ACTIVE or DL_INACTIVE
-   DL_ACTIVE_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_ACTIVE) |=> (dl_check_state inside {STATE_ACTIVE, STATE_INACTIVE}))
+   // FC_INIT2 -> DL_ACTIVE  (link still up)  (DL_Down = 0, DL_Up = 1)
+   DL_FC_INIT2_TO_ACTIVE_CHECK : assert property (
+      (dl_prev_state == STATE_FC_INIT2) && (dl_curr_state != STATE_FC_INIT2) && (phy_linkup == 1'b1)
+      |-> (dl_curr_state == STATE_ACTIVE) && (dl_down == 1'b0) && (dl_up == 1'b1))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_ACTIVE_NEXT_STATE_CHECK] FAILED : from DL_ACTIVE only DL_INACTIVE is allowed, but moved to %s", dl_check_state.name()))
+      "[DL_FC_INIT2_TO_ACTIVE_CHECK] FAILED : left FC_INIT2, expected DL_ACTIVE / DL_Down=0 / DL_Up=1, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
+
+   // DL_ACTIVE -> DL_INACTIVE  (DL_Down = 1, DL_Up = 0)
+   DL_ACTIVE_TO_INACTIVE_CHECK : assert property (
+      (dl_prev_state == STATE_ACTIVE) && (dl_curr_state != STATE_ACTIVE)
+      |-> (dl_curr_state == STATE_INACTIVE) && (dl_down == 1'b1) && (dl_up == 1'b0))
+   else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
+      "[DL_ACTIVE_TO_INACTIVE_CHECK] FAILED : left DL_ACTIVE, expected DL_INACTIVE / DL_Down=1 / DL_Up=0, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
 
    //==========================================================================
    // CHECK 3 : Link down -> DL_INACTIVE
@@ -272,9 +318,10 @@ interface PCIe_RC_interface(input logic pclk);
    // in the same cycle phy_linkup rises, and a level-based antecedent would
    // falsely flag that legal transition as a link-down failure.
    DL_LINKDOWN_CHECK : assert property (
-      $fell(phy_linkup) |=> (dl_state == DL_INACTIVE))
+      $fell(phy_linkup) |=> (dl_state == DL_INACTIVE) && (dl_down == 1'b1) && (dl_up == 1'b0))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_LINKDOWN_CHECK] FAILED : link went down (phy_linkup 1->0) but DL state is %s (expected DL_INACTIVE)", dl_check_state.name()))
+      "[DL_LINKDOWN_CHECK] FAILED : link went down but DL is %s, DL_Down=%0b, DL_Up=%0b (expected DL_INACTIVE, 1, 0)",
+      dl_curr_state.name(), dl_down, dl_up))
 
    //==========================================================================
    // CHECK 4 : TLP (payload flit) only in DL_ACTIVE
@@ -297,7 +344,7 @@ interface PCIe_RC_interface(input logic pclk);
 
    //==========================================================================
    // CHECK 6 : On entering DL_INACTIVE, reset everything to default
-   //   counters / flags / retry buffers. One pclk of grace (##[0:1]).
+   //   counters / flags / retry buffers. Grace time : `PCIe_DL_RESET_GRACE_CLKS pclk.
    //==========================================================================
    // s_enter_inactive : DL state is DL_INACTIVE now, and was NOT DL_INACTIVE in the last clock
    sequence s_enter_inactive;
@@ -306,21 +353,28 @@ interface PCIe_RC_interface(input logic pclk);
 
    // On entering DL_INACTIVE, all sequence counters must go back to default
    DL_RESET_COUNTERS_CHECK : assert property (
-      s_enter_inactive |-> ##[0:1] seq_default)
+      s_enter_inactive |-> ##[0:`PCIe_DL_RESET_GRACE_CLKS] seq_default)
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_RESET_COUNTERS_CHECK] FAILED : DL went to DL_INACTIVE but counters are not reset : NEXT_TX=%0d(exp 1) TX_ACKNAK=%0d(exp 1023) ACKD=%0d(exp 1023) NEXT_EXP_RX=%0d(exp 1) IMPLICIT_RX=%0d(exp 0) TX_REPLAY=%0d(exp 0) NAK_IGNORE=%0d(exp 0) FLIT_REPLAY_NUM=%0d(exp 0)",
-      next_tx_seq, tx_acknak_seq, ackd_seq, next_exp_rx_seq, implicit_rx_seq, tx_replay_seq, nak_ignore_seq, flit_replay_num))
+      "[DL_RESET_COUNTERS_CHECK] FAILED : DL went to DL_INACTIVE but counters are not reset : NEXT_TX=%0d(exp %0d) TX_ACKNAK=%0d(exp %0d) ACKD=%0d(exp %0d) NEXT_EXP_RX=%0d(exp %0d) IMPLICIT_RX=%0d(exp %0d) TX_REPLAY=%0d(exp %0d) NAK_IGNORE=%0d(exp %0d) FLIT_REPLAY_NUM=%0d(exp %0d)",
+      next_tx_seq,     `PCIe_INIT_NEXT_TX_FLIT_SEQ_NUM,
+      tx_acknak_seq,   `PCIe_INIT_TX_ACKNAK_SEQ_NUM,
+      ackd_seq,        `PCIe_INIT_ACKD_FLIT_SEQ_NUM,
+      next_exp_rx_seq, `PCIe_INIT_NEXT_EXPECTED_RX_FLIT_SEQ_NUM,
+      implicit_rx_seq, `PCIe_INIT_IMPLICIT_RX_FLIT_SEQ_NUM,
+      tx_replay_seq,   `PCIe_INIT_TX_REPLAY_FLIT_SEQ_NUM,
+      nak_ignore_seq,  `PCIe_INIT_NAK_IGNORE_FLIT_SEQ_NUM,
+      flit_replay_num, `PCIe_INIT_FLIT_REPLAY_NUM))
 
    // On entering DL_INACTIVE, all ACK / NAK / replay flags must be 0
    DL_RESET_FLAGS_CHECK : assert property (
-      s_enter_inactive |-> ##[0:1] flags_clear)
+      s_enter_inactive |-> ##[0:`PCIe_DL_RESET_GRACE_CLKS] flags_clear)
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
       "[DL_RESET_FLAGS_CHECK] FAILED : DL went to DL_INACTIVE but flags are not cleared : NAK_SCHEDULED=%0b ACK_SCHEDULED=%0b REPLAY_SCHEDULED=%0b REPLAY_IN_PROGRESS=%0b NAK_WITHDRAWAL_ALLOWED=%0b",
       nak_scheduled, ack_scheduled, replay_scheduled, replay_in_progress, nak_withdrawal_allowed))
 
    // On entering DL_INACTIVE, TX and RX retry buffers must be empty
    DL_RESET_BUFFERS_CHECK : assert property (
-      s_enter_inactive |-> ##[0:1] buffers_empty)
+      s_enter_inactive |-> ##[0:`PCIe_DL_RESET_GRACE_CLKS] buffers_empty)
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
       "[DL_RESET_BUFFERS_CHECK] FAILED : DL went to DL_INACTIVE but retry buffers are not empty : TX_RETRY_BUFFER=%0d RX_RETRY_BUFFER=%0d entries",
       tx_retry_size, rx_retry_size))
@@ -340,7 +394,7 @@ interface PCIe_RC_interface(input logic pclk);
    DL_LINK_ACTIVE_ONLY_IN_ACTIVE_CHECK : assert property (
       dl_link_active |-> (dl_state == DL_ACTIVE))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_LINK_ACTIVE_ONLY_IN_ACTIVE_CHECK] FAILED : dl_link_active=1 but DL state is %s", dl_check_state.name()))
+      "[DL_LINK_ACTIVE_ONLY_IN_ACTIVE_CHECK] FAILED : dl_link_active=1 but DL state is %s", dl_curr_state.name()))
 
    // If DL state is DL_ACTIVE, dl_link_active must be 1
    DL_ACTIVE_NEEDS_LINK_ACTIVE_CHECK : assert property (
@@ -351,65 +405,44 @@ interface PCIe_RC_interface(input logic pclk);
    //==========================================================================
    // Covers : count how many times each state move happened (0 = that move was never tested)
    //==========================================================================
-   DL_COVER_INACTIVE_TO_FEATURE : cover property ((dl_check_state == STATE_INACTIVE) ##1 (dl_check_state == STATE_FEATURE));
-   DL_COVER_FEATURE_TO_FC_INIT1 : cover property ((dl_check_state == STATE_FEATURE)  ##1 (dl_check_state == STATE_FC_INIT1));
-   DL_COVER_FC_INIT1_TO_FC_INIT2: cover property ((dl_check_state == STATE_FC_INIT1) ##1 (dl_check_state == STATE_FC_INIT2));
-   DL_COVER_FC_INIT2_TO_ACTIVE  : cover property ((dl_check_state == STATE_FC_INIT2) ##1 (dl_check_state == STATE_ACTIVE));
-   DL_COVER_ACTIVE_TO_INACTIVE  : cover property ((dl_check_state == STATE_ACTIVE)   ##1 (dl_check_state == STATE_INACTIVE));
+   DL_COVER_INACTIVE_TO_FEATURE : cover property ((dl_curr_state == STATE_INACTIVE) ##1 (dl_curr_state == STATE_FEATURE));
+   DL_COVER_FEATURE_TO_FC_INIT1 : cover property ((dl_curr_state == STATE_FEATURE)  ##1 (dl_curr_state == STATE_FC_INIT1));
+   DL_COVER_FC_INIT1_TO_FC_INIT2: cover property ((dl_curr_state == STATE_FC_INIT1) ##1 (dl_curr_state == STATE_FC_INIT2));
+   DL_COVER_FC_INIT2_TO_ACTIVE  : cover property ((dl_curr_state == STATE_FC_INIT2) ##1 (dl_curr_state == STATE_ACTIVE));
+   DL_COVER_ACTIVE_TO_INACTIVE  : cover property ((dl_curr_state == STATE_ACTIVE)   ##1 (dl_curr_state == STATE_INACTIVE));
    DL_COVER_TLP_IN_ACTIVE       : cover property ($changed(tx_payload_cnt) && (tx_payload_dl_state == DL_ACTIVE));
 
    //==========================================================================
-   // [DL_ASSERT] STATUS MESSAGES : show in the log that the DL checks are running
-   //   Search "DL_STATUS" in the log. A summary is printed at the end of the test.
+   // STATUS MESSAGES : search "DL_STATUS" in the log
    //==========================================================================
-   int unsigned     dl_moves_checked     = 0;  // DL state changes checked
-   int unsigned     dl_tlps_checked      = 0;  // TLP flits checked
-   int unsigned     dl_dllps_checked     = 0;  // DLLP flits checked
-   int unsigned     dl_linkdowns_checked = 0;  // link-down events checked
-   bit              dl_checks_started    = 0;  // 1 after the first check cycle
-   dl_check_state_e prev_dl_check_state  = STATE_INACTIVE;
-   int unsigned     prev_tx_payload_cnt  = 0;
-   int unsigned     prev_tx_dllp_cnt     = 0;
-   bit              prev_phy_linkup      = 0;
+   logic dl_checks_started = 1'b0;   // 1 after the first check clock
 
-   // Every pclk rising edge : count what the checks looked at, print each DL state move
+   // Print when the checks start, and print every DL state move
    always @(posedge pclk) begin
       if (sample_valid && assert_en) begin
-         if (!dl_checks_started) begin
-            dl_checks_started = 1;
+         if (dl_checks_started == 1'b0) begin
+            dl_checks_started = 1'b1;
             `uvm_info({SIDE,"_DL_STATUS"}, "DL assertions STARTED checking", UVM_LOW)
          end
-         else begin
-            if (dl_check_state != prev_dl_check_state) begin
-               dl_moves_checked++;
-               `uvm_info({SIDE,"_DL_STATUS"}, $sformatf("DL state move checked : %s -> %s",
-                         prev_dl_check_state.name(), dl_check_state.name()), UVM_LOW)
-            end
-            dl_tlps_checked  += (tx_payload_cnt - prev_tx_payload_cnt);
-            dl_dllps_checked += (tx_dllp_cnt    - prev_tx_dllp_cnt);
-            if (prev_phy_linkup && !phy_linkup) dl_linkdowns_checked++;
+         else if (dl_curr_state != dl_prev_state) begin
+            `uvm_info({SIDE,"_DL_STATUS"}, $sformatf("DL state move checked : %s -> %s",
+                      dl_prev_state.name(), dl_curr_state.name()), UVM_LOW)
          end
-         prev_dl_check_state = dl_check_state;
-         prev_tx_payload_cnt = tx_payload_cnt;
-         prev_tx_dllp_cnt    = tx_dllp_cnt;
-         prev_phy_linkup     = phy_linkup;
       end
    end
 
-   // End of test : print a summary with the number of checks, failures and final result
+   // End of test : count the DL assertion errors and print PASSED / FAILED
    final begin
       uvm_report_server svr;
-      int               fail_cnt;
+      int unsigned      fail_cnt;
       string            result;
       svr      = uvm_report_server::get_server();
-      fail_cnt = svr.get_id_count({SIDE,"_DL_ASSERT"});   // number of DL assertion UVM_ERRORs
-      if (!dl_checks_started) result = "NOT CHECKED";
-      else if (fail_cnt == 0) result = "PASSED";
-      else                    result = "FAILED";
-      `uvm_info({SIDE,"_DL_STATUS"}, $sformatf({"\n",
-         "  DL assertion failures    : %0d\n",
-         "  DL assertions            : %s\n"},
-         fail_cnt, result), UVM_LOW)
+      fail_cnt = svr.get_id_count({SIDE,"_DL_ASSERT"});
+      if      (dl_checks_started == 1'b0) result = "NOT CHECKED";
+      else if (fail_cnt == 0)             result = "PASSED";
+      else                                result = "FAILED";
+      `uvm_info({SIDE,"_DL_STATUS"}, $sformatf("\n  DL assertion failures    : %0d\n  DL assertions            : %s\n",
+                fail_cnt, result), UVM_LOW)
    end
 
    // [DL_ASSERT] end of DL assertions
@@ -616,24 +649,10 @@ interface PCIe_EP_interface(input logic pclk);
 
    //==========================================================================
    //==========================================================================
-   // [DL_ASSERT] EP DL state machine assertions (DL_INACTIVE -> DL_FEATURE -> DL_INIT -> DL_ACTIVE)
-   //   Assertions cannot be written inside a class, so PCIe_EP_DL_model.sv copies its
-   //   DL state/counters/flags into the signals below on every pclk negedge (run_dl_assert_mirror).
-   //   The checks read them on every pclk posedge and give UVM_ERROR if a rule is broken.
-   //
-   //   Check name                            What it checks
-   //   DL_START_STATE_CHECK                  DL starts in DL_INACTIVE
-   //   DL_LINKUP_START_CHECK                 New link-up starts from DL_INACTIVE
-   //   DL_<state>_NEXT_STATE_CHECK (5)       Only legal state moves
-   //   DL_LINKDOWN_CHECK                     Link down -> DL_INACTIVE
-   //   DL_TLP_ONLY_IN_ACTIVE_CHECK           TLP sent only in DL_ACTIVE
-   //   DL_NO_DLLP_IN_INACTIVE_CHECK          No DLLP in DL_INACTIVE
-   //   DL_RESET_COUNTERS/FLAGS/BUFFERS_CHECK On DL_INACTIVE : all values reset
-   //   DL_START_DEFAULTS_CHECK               Default values at start
-   //   DL_LINK_ACTIVE_ONLY_IN_ACTIVE_CHECK   dl_link_active = 1 only in DL_ACTIVE
-   //   DL_ACTIVE_NEEDS_LINK_ACTIVE_CHECK     DL_ACTIVE always has dl_link_active = 1
-   //   On failure the log shows : UVM_ERROR ... [<check name>] FAILED : <reason>
-   //==========================================================================
+   // [DL_ASSERT] EP DL state machine assertions (PCIe 6.1 Sec 3.2)
+   //   PCIe_EP_DL_model.sv copies its state/counters/flags here every pclk negedge.
+   //   Checks run every pclk posedge : state moves, DL_Up/DL_Down, link up/down, reset values.
+   //   On failure : UVM_ERROR [EP_DL_ASSERT] [<check name>] FAILED : <reason>
    //==========================================================================
    import uvm_pkg::*;
    import typedef_enums::*;
@@ -642,33 +661,33 @@ interface PCIe_EP_interface(input logic pclk);
    //--------------------------------------------------------------------------
    // On / off
    //--------------------------------------------------------------------------
-   bit assert_en    = 1'b1;   // 1 = checks ON. A test can set 0 to switch all DL checks OFF
-   bit sample_valid = 1'b0;   // DL model sets 1 after its first copy. Checks wait for this
+   logic assert_en    = 1'b1;   // 1 = checks ON. A test can set 0 to switch all DL checks OFF
+   logic sample_valid = 1'b0;   // DL model sets 1 after its first copy. Checks wait for this
 
    //--------------------------------------------------------------------------
    // DL state : copied from the DL model on every falling edge of pclk
    //--------------------------------------------------------------------------
    dl_state_e          dl_state       = DL_INACTIVE;
    dl_init_substate_e  dl_init_sub    = INIT_FC1;
-   bit                 dl_link_active;
-   bit                 phy_linkup;
+   logic               dl_link_active;
+   logic               phy_linkup;
 
    // Sequence number counters (value in comment = value they must have in DL_INACTIVE)
-   bit [`PCIe_SEQ_NUM_W-1:0]        next_tx_seq;        // NEXT_TX_FLIT_SEQ_NUM          default 001h
-   bit [`PCIe_SEQ_NUM_W-1:0]        tx_acknak_seq;      // TX_ACKNAK_FLIT_SEQ_NUM        default 3FFh (1023)
-   bit [`PCIe_SEQ_NUM_W-1:0]        ackd_seq;           // ACKD_FLIT_SEQ_NUM             default 3FFh
-   bit [`PCIe_SEQ_NUM_W-1:0]        next_exp_rx_seq;    // NEXT_EXPECTED_RX_FLIT_SEQ_NUM default 001h
-   bit [`PCIe_SEQ_NUM_W-1:0]        implicit_rx_seq;    // IMPLICIT_RX_FLIT_SEQ_NUM      default 000h
-   bit [`PCIe_SEQ_NUM_W-1:0]        tx_replay_seq;      // TX_REPLAY_FLIT_SEQ_NUM        default 000h
-   bit [`PCIe_SEQ_NUM_W-1:0]        nak_ignore_seq;     // NAK_IGNORE_FLIT_SEQ_NUM       default 000h
-   bit [`PCIe_FLIT_REPLAY_NUM_W-1:0] flit_replay_num;   // FLIT_REPLAY_NUM               default 000b
+   logic [`PCIe_SEQ_NUM_W-1:0]      next_tx_seq;        // NEXT_TX_FLIT_SEQ_NUM          default 001h
+   logic [`PCIe_SEQ_NUM_W-1:0]      tx_acknak_seq;      // TX_ACKNAK_FLIT_SEQ_NUM        default 3FFh (1023)
+   logic [`PCIe_SEQ_NUM_W-1:0]      ackd_seq;           // ACKD_FLIT_SEQ_NUM             default 3FFh
+   logic [`PCIe_SEQ_NUM_W-1:0]      next_exp_rx_seq;    // NEXT_EXPECTED_RX_FLIT_SEQ_NUM default 001h
+   logic [`PCIe_SEQ_NUM_W-1:0]      implicit_rx_seq;    // IMPLICIT_RX_FLIT_SEQ_NUM      default 000h
+   logic [`PCIe_SEQ_NUM_W-1:0]      tx_replay_seq;      // TX_REPLAY_FLIT_SEQ_NUM        default 000h
+   logic [`PCIe_SEQ_NUM_W-1:0]      nak_ignore_seq;     // NAK_IGNORE_FLIT_SEQ_NUM       default 000h
+   logic [`PCIe_FLIT_REPLAY_NUM_W-1:0] flit_replay_num;   // FLIT_REPLAY_NUM               default 000b
 
    // ACK / NAK / replay flags (all must be 0 in DL_INACTIVE)
-   bit nak_scheduled;
-   bit ack_scheduled;
-   bit replay_scheduled;
-   bit replay_in_progress;
-   bit nak_withdrawal_allowed;
+   logic nak_scheduled;
+   logic ack_scheduled;
+   logic replay_scheduled;
+   logic replay_in_progress;
+   logic nak_withdrawal_allowed;
 
    // Number of entries in the TX / RX retry buffers (must be 0 in DL_INACTIVE)
    int unsigned tx_retry_size;
@@ -683,33 +702,75 @@ interface PCIe_EP_interface(input logic pclk);
    dl_state_e   tx_payload_dl_state = DL_INACTIVE;
    int unsigned tx_dllp_cnt;               // + 1 for every DLLP flit sent to PL
    dl_state_e   tx_dllp_dl_state    = DL_INACTIVE;
-   bit [31:0]   tx_dllp_content;
+   logic [`PCIe_DLLP_CONTENT_W-1:0] tx_dllp_content;
 
    //--------------------------------------------------------------------------
-   // dl_check_state : same as dl_state, but DL_INIT is split into
-   //                  FC_INIT1 / FC_INIT2 so every state move can be checked
+   // dl_curr_state : DL state NOW (same as dl_state, but DL_INIT is split into
+   //                 FC_INIT1 / FC_INIT2 so every state move can be checked)
    //                  (STATE_ names : DL_ names already exist in enum_defs.sv)
    //--------------------------------------------------------------------------
-   typedef enum {STATE_INACTIVE, STATE_FEATURE, STATE_FC_INIT1, STATE_FC_INIT2, STATE_ACTIVE} dl_check_state_e;
-   dl_check_state_e dl_check_state;
+   dl_curr_state_e dl_curr_state;
 
    always_comb begin
       case (dl_state)
-         DL_INACTIVE : dl_check_state = STATE_INACTIVE;
-         DL_FEATURE  : dl_check_state = STATE_FEATURE;
-         DL_INIT     : dl_check_state = (dl_init_sub == INIT_FC2) ? STATE_FC_INIT2 : STATE_FC_INIT1;
-         default     : dl_check_state = STATE_ACTIVE;
+         DL_INACTIVE : dl_curr_state = STATE_INACTIVE;
+         DL_FEATURE  : dl_curr_state = STATE_FEATURE;
+         DL_INIT     : dl_curr_state = (dl_init_sub == INIT_FC2) ? STATE_FC_INIT2 : STATE_FC_INIT1;
+         default     : dl_curr_state = STATE_ACTIVE;
       endcase
    end
 
+   // DL status reported to the TL (spec Sec 3.2.1)
+   //   DL_Down : DL_INACTIVE, DL_FEATURE, FC_INIT1
+   //   DL_Up   : FC_INIT2, DL_ACTIVE
+   logic dl_up;
+   logic dl_down;
+
+   always_comb begin
+      case (dl_curr_state)
+         STATE_INACTIVE : begin dl_down = 1'b1; dl_up = 1'b0; end
+         STATE_FEATURE  : begin dl_down = 1'b1; dl_up = 1'b0; end
+         STATE_FC_INIT1 : begin dl_down = 1'b1; dl_up = 1'b0; end
+         STATE_FC_INIT2 : begin dl_down = 1'b0; dl_up = 1'b1; end
+         STATE_ACTIVE   : begin dl_down = 1'b0; dl_up = 1'b1; end
+         default        : begin dl_down = 1'b1; dl_up = 1'b0; end
+      endcase
+   end
+
+   // values in the last pclk (to see "what was it before")
+   dl_curr_state_e dl_prev_state = STATE_INACTIVE;
+   logic            dl_prev_up    = 1'b0;
+   logic            dl_prev_down  = 1'b1;
+
+   always @(posedge pclk) begin
+      dl_prev_state <= dl_curr_state;
+      dl_prev_up    <= dl_up;
+      dl_prev_down  <= dl_down;
+   end
+
    // Helper signals : 1 when all values are at their DL_INACTIVE default (used by DL_RESET_... checks)
-   wire seq_default = (next_tx_seq     == 10'h001) && (tx_acknak_seq  == 10'h3FF) &&
-                      (ackd_seq        == 10'h3FF) && (next_exp_rx_seq == 10'h001) &&
-                      (implicit_rx_seq == 10'h000) && (tx_replay_seq   == 10'h000) &&
-                      (nak_ignore_seq  == 10'h000) && (flit_replay_num == '0);
-   wire flags_clear = !nak_scheduled && !ack_scheduled && !replay_scheduled &&
-                      !replay_in_progress && !nak_withdrawal_allowed;
-   wire buffers_empty = (tx_retry_size == 0) && (rx_retry_size == 0);
+   logic seq_default;      // 1 = all 8 sequence counters are at reset value
+   logic flags_clear;      // 1 = all 5 Ack / Nak / replay flags are 0
+   logic buffers_empty;    // 1 = TX and RX retry buffers are empty
+
+   always_comb begin
+      seq_default   = (next_tx_seq     == `PCIe_INIT_NEXT_TX_FLIT_SEQ_NUM)          &&
+                      (tx_acknak_seq   == `PCIe_INIT_TX_ACKNAK_SEQ_NUM)             &&
+                      (ackd_seq        == `PCIe_INIT_ACKD_FLIT_SEQ_NUM)             &&
+                      (next_exp_rx_seq == `PCIe_INIT_NEXT_EXPECTED_RX_FLIT_SEQ_NUM) &&
+                      (implicit_rx_seq == `PCIe_INIT_IMPLICIT_RX_FLIT_SEQ_NUM)      &&
+                      (tx_replay_seq   == `PCIe_INIT_TX_REPLAY_FLIT_SEQ_NUM)        &&
+                      (nak_ignore_seq  == `PCIe_INIT_NAK_IGNORE_FLIT_SEQ_NUM)       &&
+                      (flit_replay_num == `PCIe_INIT_FLIT_REPLAY_NUM);
+
+      flags_clear   = (nak_scheduled          == 1'b0) &&
+                      (ack_scheduled          == 1'b0) &&
+                      (replay_scheduled       == 1'b0) &&
+                      (replay_in_progress     == 1'b0) &&
+                      (nak_withdrawal_allowed == 1'b0);
+
+      buffers_empty = (tx_retry_size == 0) && (rx_retry_size == 0);
+   end
 
    //--------------------------------------------------------------------------
    // Every check below runs on the rising edge of pclk, and is OFF while
@@ -729,46 +790,64 @@ interface PCIe_EP_interface(input logic pclk);
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
       "[DL_START_STATE_CHECK] FAILED : at start DL state must be DL_INACTIVE, but it is %s", dl_state.name()))
 
-   // When the link comes up (phy_linkup 0 -> 1), DL must still be in DL_INACTIVE
-   // (DL_FEATURE is also OK : the model leaves DL_INACTIVE in zero time).
+   // Before the link comes up, DL must be in DL_INACTIVE with DL_Down = 1, DL_Up = 0.
+   // So when phy_linkup goes 0 -> 1, the values in the last pclk are checked.
    DL_LINKUP_START_CHECK : assert property (
-      $rose(phy_linkup) |-> (dl_check_state inside {STATE_INACTIVE, STATE_FEATURE}))
+      $rose(phy_linkup) |-> (dl_prev_state == STATE_INACTIVE) && (dl_prev_down == 1'b1) && (dl_prev_up == 1'b0))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_LINKUP_START_CHECK] FAILED : link came up but DL state is %s (expected DL_INACTIVE)", dl_check_state.name()))
+      "[DL_LINKUP_START_CHECK] FAILED : link came up but before it DL was %s, DL_Down=%0b, DL_Up=%0b (expected DL_INACTIVE, 1, 0)",
+      dl_prev_state.name(), dl_prev_down, dl_prev_up))
 
    //==========================================================================
-   // CHECK 2 : Only legal state moves
-   //   INACTIVE -> FEATURE -> FC_INIT1 -> FC_INIT2 -> ACTIVE , any -> INACTIVE
+   // CHECK 2 : One check for each state move (spec Figure 3-2, Sec 3.2.1)
+   //
+   //   DL_INACTIVE -> DL_FEATURE -> FC_INIT1 -> FC_INIT2 -> DL_ACTIVE
+   //   (link down from any state -> DL_INACTIVE : see CHECK 3)
+   //
+   //   dl_prev_state = state in the last pclk
+   //   dl_curr_state = state now
+   //   "left X"       = dl_prev_state is X and dl_curr_state is not X
    //==========================================================================
-   // From DL_INACTIVE, next state must be DL_INACTIVE or DL_FEATURE
-   DL_INACTIVE_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_INACTIVE) |=> (dl_check_state inside {STATE_INACTIVE, STATE_FEATURE}))
-   else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_INACTIVE_NEXT_STATE_CHECK] FAILED : from DL_INACTIVE only DL_FEATURE is allowed, but moved to %s", dl_check_state.name()))
 
-   // From DL_FEATURE, next state must be DL_FEATURE, FC_INIT1 or DL_INACTIVE
-   DL_FEATURE_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_FEATURE) |=> (dl_check_state inside {STATE_FEATURE, STATE_FC_INIT1, STATE_INACTIVE}))
+   // DL_INACTIVE -> DL_FEATURE  (DL_Down = 1, DL_Up = 0)
+   DL_INACTIVE_TO_FEATURE_CHECK : assert property (
+      (dl_prev_state == STATE_INACTIVE) && (dl_curr_state != STATE_INACTIVE)
+      |-> (dl_curr_state == STATE_FEATURE) && (dl_down == 1'b1) && (dl_up == 1'b0))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_FEATURE_NEXT_STATE_CHECK] FAILED : from DL_FEATURE only FC_INIT1 or DL_INACTIVE is allowed, but moved to %s", dl_check_state.name()))
+      "[DL_INACTIVE_TO_FEATURE_CHECK] FAILED : left DL_INACTIVE, expected DL_FEATURE / DL_Down=1 / DL_Up=0, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
 
-   // From FC_INIT1, next state must be FC_INIT1, FC_INIT2 or DL_INACTIVE
-   DL_FC_INIT1_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_FC_INIT1) |=> (dl_check_state inside {STATE_FC_INIT1, STATE_FC_INIT2, STATE_INACTIVE}))
+   // DL_FEATURE -> FC_INIT1  (link still up)  (DL_Down = 1, DL_Up = 0)
+   DL_FEATURE_TO_FC_INIT1_CHECK : assert property (
+      (dl_prev_state == STATE_FEATURE) && (dl_curr_state != STATE_FEATURE) && (phy_linkup == 1'b1)
+      |-> (dl_curr_state == STATE_FC_INIT1) && (dl_down == 1'b1) && (dl_up == 1'b0))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_FC_INIT1_NEXT_STATE_CHECK] FAILED : from FC_INIT1 only FC_INIT2 or DL_INACTIVE is allowed, but moved to %s", dl_check_state.name()))
+      "[DL_FEATURE_TO_FC_INIT1_CHECK] FAILED : left DL_FEATURE, expected FC_INIT1 / DL_Down=1 / DL_Up=0, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
 
-   // From FC_INIT2, next state must be FC_INIT2, DL_ACTIVE or DL_INACTIVE
-   DL_FC_INIT2_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_FC_INIT2) |=> (dl_check_state inside {STATE_FC_INIT2, STATE_ACTIVE, STATE_INACTIVE}))
+   // FC_INIT1 -> FC_INIT2  (link still up)  (DL_Down = 0, DL_Up = 1)
+   DL_FC_INIT1_TO_FC_INIT2_CHECK : assert property (
+      (dl_prev_state == STATE_FC_INIT1) && (dl_curr_state != STATE_FC_INIT1) && (phy_linkup == 1'b1)
+      |-> (dl_curr_state == STATE_FC_INIT2) && (dl_down == 1'b0) && (dl_up == 1'b1))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_FC_INIT2_NEXT_STATE_CHECK] FAILED : from FC_INIT2 only DL_ACTIVE or DL_INACTIVE is allowed, but moved to %s", dl_check_state.name()))
+      "[DL_FC_INIT1_TO_FC_INIT2_CHECK] FAILED : left FC_INIT1, expected FC_INIT2 / DL_Down=0 / DL_Up=1, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
 
-   // From DL_ACTIVE, next state must be DL_ACTIVE or DL_INACTIVE
-   DL_ACTIVE_NEXT_STATE_CHECK : assert property (
-      (dl_check_state == STATE_ACTIVE) |=> (dl_check_state inside {STATE_ACTIVE, STATE_INACTIVE}))
+   // FC_INIT2 -> DL_ACTIVE  (link still up)  (DL_Down = 0, DL_Up = 1)
+   DL_FC_INIT2_TO_ACTIVE_CHECK : assert property (
+      (dl_prev_state == STATE_FC_INIT2) && (dl_curr_state != STATE_FC_INIT2) && (phy_linkup == 1'b1)
+      |-> (dl_curr_state == STATE_ACTIVE) && (dl_down == 1'b0) && (dl_up == 1'b1))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_ACTIVE_NEXT_STATE_CHECK] FAILED : from DL_ACTIVE only DL_INACTIVE is allowed, but moved to %s", dl_check_state.name()))
+      "[DL_FC_INIT2_TO_ACTIVE_CHECK] FAILED : left FC_INIT2, expected DL_ACTIVE / DL_Down=0 / DL_Up=1, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
+
+   // DL_ACTIVE -> DL_INACTIVE  (DL_Down = 1, DL_Up = 0)
+   DL_ACTIVE_TO_INACTIVE_CHECK : assert property (
+      (dl_prev_state == STATE_ACTIVE) && (dl_curr_state != STATE_ACTIVE)
+      |-> (dl_curr_state == STATE_INACTIVE) && (dl_down == 1'b1) && (dl_up == 1'b0))
+   else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
+      "[DL_ACTIVE_TO_INACTIVE_CHECK] FAILED : left DL_ACTIVE, expected DL_INACTIVE / DL_Down=1 / DL_Up=0, got %s / DL_Down=%0b / DL_Up=%0b",
+      dl_curr_state.name(), dl_down, dl_up))
 
    //==========================================================================
    // CHECK 3 : Link down -> DL_INACTIVE
@@ -779,9 +858,10 @@ interface PCIe_EP_interface(input logic pclk);
    // in the same cycle phy_linkup rises, and a level-based antecedent would
    // falsely flag that legal transition as a link-down failure.
    DL_LINKDOWN_CHECK : assert property (
-      $fell(phy_linkup) |=> (dl_state == DL_INACTIVE))
+      $fell(phy_linkup) |=> (dl_state == DL_INACTIVE) && (dl_down == 1'b1) && (dl_up == 1'b0))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_LINKDOWN_CHECK] FAILED : link went down (phy_linkup 1->0) but DL state is %s (expected DL_INACTIVE)", dl_check_state.name()))
+      "[DL_LINKDOWN_CHECK] FAILED : link went down but DL is %s, DL_Down=%0b, DL_Up=%0b (expected DL_INACTIVE, 1, 0)",
+      dl_curr_state.name(), dl_down, dl_up))
 
    //==========================================================================
    // CHECK 4 : TLP (payload flit) only in DL_ACTIVE
@@ -804,7 +884,7 @@ interface PCIe_EP_interface(input logic pclk);
 
    //==========================================================================
    // CHECK 6 : On entering DL_INACTIVE, reset everything to default
-   //   counters / flags / retry buffers. One pclk of grace (##[0:1]).
+   //   counters / flags / retry buffers. Grace time : `PCIe_DL_RESET_GRACE_CLKS pclk.
    //==========================================================================
    // s_enter_inactive : DL state is DL_INACTIVE now, and was NOT DL_INACTIVE in the last clock
    sequence s_enter_inactive;
@@ -813,21 +893,28 @@ interface PCIe_EP_interface(input logic pclk);
 
    // On entering DL_INACTIVE, all sequence counters must go back to default
    DL_RESET_COUNTERS_CHECK : assert property (
-      s_enter_inactive |-> ##[0:1] seq_default)
+      s_enter_inactive |-> ##[0:`PCIe_DL_RESET_GRACE_CLKS] seq_default)
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_RESET_COUNTERS_CHECK] FAILED : DL went to DL_INACTIVE but counters are not reset : NEXT_TX=%0d(exp 1) TX_ACKNAK=%0d(exp 1023) ACKD=%0d(exp 1023) NEXT_EXP_RX=%0d(exp 1) IMPLICIT_RX=%0d(exp 0) TX_REPLAY=%0d(exp 0) NAK_IGNORE=%0d(exp 0) FLIT_REPLAY_NUM=%0d(exp 0)",
-      next_tx_seq, tx_acknak_seq, ackd_seq, next_exp_rx_seq, implicit_rx_seq, tx_replay_seq, nak_ignore_seq, flit_replay_num))
+      "[DL_RESET_COUNTERS_CHECK] FAILED : DL went to DL_INACTIVE but counters are not reset : NEXT_TX=%0d(exp %0d) TX_ACKNAK=%0d(exp %0d) ACKD=%0d(exp %0d) NEXT_EXP_RX=%0d(exp %0d) IMPLICIT_RX=%0d(exp %0d) TX_REPLAY=%0d(exp %0d) NAK_IGNORE=%0d(exp %0d) FLIT_REPLAY_NUM=%0d(exp %0d)",
+      next_tx_seq,     `PCIe_INIT_NEXT_TX_FLIT_SEQ_NUM,
+      tx_acknak_seq,   `PCIe_INIT_TX_ACKNAK_SEQ_NUM,
+      ackd_seq,        `PCIe_INIT_ACKD_FLIT_SEQ_NUM,
+      next_exp_rx_seq, `PCIe_INIT_NEXT_EXPECTED_RX_FLIT_SEQ_NUM,
+      implicit_rx_seq, `PCIe_INIT_IMPLICIT_RX_FLIT_SEQ_NUM,
+      tx_replay_seq,   `PCIe_INIT_TX_REPLAY_FLIT_SEQ_NUM,
+      nak_ignore_seq,  `PCIe_INIT_NAK_IGNORE_FLIT_SEQ_NUM,
+      flit_replay_num, `PCIe_INIT_FLIT_REPLAY_NUM))
 
    // On entering DL_INACTIVE, all ACK / NAK / replay flags must be 0
    DL_RESET_FLAGS_CHECK : assert property (
-      s_enter_inactive |-> ##[0:1] flags_clear)
+      s_enter_inactive |-> ##[0:`PCIe_DL_RESET_GRACE_CLKS] flags_clear)
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
       "[DL_RESET_FLAGS_CHECK] FAILED : DL went to DL_INACTIVE but flags are not cleared : NAK_SCHEDULED=%0b ACK_SCHEDULED=%0b REPLAY_SCHEDULED=%0b REPLAY_IN_PROGRESS=%0b NAK_WITHDRAWAL_ALLOWED=%0b",
       nak_scheduled, ack_scheduled, replay_scheduled, replay_in_progress, nak_withdrawal_allowed))
 
    // On entering DL_INACTIVE, TX and RX retry buffers must be empty
    DL_RESET_BUFFERS_CHECK : assert property (
-      s_enter_inactive |-> ##[0:1] buffers_empty)
+      s_enter_inactive |-> ##[0:`PCIe_DL_RESET_GRACE_CLKS] buffers_empty)
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
       "[DL_RESET_BUFFERS_CHECK] FAILED : DL went to DL_INACTIVE but retry buffers are not empty : TX_RETRY_BUFFER=%0d RX_RETRY_BUFFER=%0d entries",
       tx_retry_size, rx_retry_size))
@@ -847,7 +934,7 @@ interface PCIe_EP_interface(input logic pclk);
    DL_LINK_ACTIVE_ONLY_IN_ACTIVE_CHECK : assert property (
       dl_link_active |-> (dl_state == DL_ACTIVE))
    else `uvm_error({SIDE,"_DL_ASSERT"}, $sformatf(
-      "[DL_LINK_ACTIVE_ONLY_IN_ACTIVE_CHECK] FAILED : dl_link_active=1 but DL state is %s", dl_check_state.name()))
+      "[DL_LINK_ACTIVE_ONLY_IN_ACTIVE_CHECK] FAILED : dl_link_active=1 but DL state is %s", dl_curr_state.name()))
 
    // If DL state is DL_ACTIVE, dl_link_active must be 1
    DL_ACTIVE_NEEDS_LINK_ACTIVE_CHECK : assert property (
@@ -858,65 +945,44 @@ interface PCIe_EP_interface(input logic pclk);
    //==========================================================================
    // Covers : count how many times each state move happened (0 = that move was never tested)
    //==========================================================================
-   DL_COVER_INACTIVE_TO_FEATURE : cover property ((dl_check_state == STATE_INACTIVE) ##1 (dl_check_state == STATE_FEATURE));
-   DL_COVER_FEATURE_TO_FC_INIT1 : cover property ((dl_check_state == STATE_FEATURE)  ##1 (dl_check_state == STATE_FC_INIT1));
-   DL_COVER_FC_INIT1_TO_FC_INIT2: cover property ((dl_check_state == STATE_FC_INIT1) ##1 (dl_check_state == STATE_FC_INIT2));
-   DL_COVER_FC_INIT2_TO_ACTIVE  : cover property ((dl_check_state == STATE_FC_INIT2) ##1 (dl_check_state == STATE_ACTIVE));
-   DL_COVER_ACTIVE_TO_INACTIVE  : cover property ((dl_check_state == STATE_ACTIVE)   ##1 (dl_check_state == STATE_INACTIVE));
+   DL_COVER_INACTIVE_TO_FEATURE : cover property ((dl_curr_state == STATE_INACTIVE) ##1 (dl_curr_state == STATE_FEATURE));
+   DL_COVER_FEATURE_TO_FC_INIT1 : cover property ((dl_curr_state == STATE_FEATURE)  ##1 (dl_curr_state == STATE_FC_INIT1));
+   DL_COVER_FC_INIT1_TO_FC_INIT2: cover property ((dl_curr_state == STATE_FC_INIT1) ##1 (dl_curr_state == STATE_FC_INIT2));
+   DL_COVER_FC_INIT2_TO_ACTIVE  : cover property ((dl_curr_state == STATE_FC_INIT2) ##1 (dl_curr_state == STATE_ACTIVE));
+   DL_COVER_ACTIVE_TO_INACTIVE  : cover property ((dl_curr_state == STATE_ACTIVE)   ##1 (dl_curr_state == STATE_INACTIVE));
    DL_COVER_TLP_IN_ACTIVE       : cover property ($changed(tx_payload_cnt) && (tx_payload_dl_state == DL_ACTIVE));
 
    //==========================================================================
-   // [DL_ASSERT] STATUS MESSAGES : show in the log that the DL checks are running
-   //   Search "DL_STATUS" in the log. A summary is printed at the end of the test.
+   // STATUS MESSAGES : search "DL_STATUS" in the log
    //==========================================================================
-   int unsigned     dl_moves_checked     = 0;  // DL state changes checked
-   int unsigned     dl_tlps_checked      = 0;  // TLP flits checked
-   int unsigned     dl_dllps_checked     = 0;  // DLLP flits checked
-   int unsigned     dl_linkdowns_checked = 0;  // link-down events checked
-   bit              dl_checks_started    = 0;  // 1 after the first check cycle
-   dl_check_state_e prev_dl_check_state  = STATE_INACTIVE;
-   int unsigned     prev_tx_payload_cnt  = 0;
-   int unsigned     prev_tx_dllp_cnt     = 0;
-   bit              prev_phy_linkup      = 0;
+   logic dl_checks_started = 1'b0;   // 1 after the first check clock
 
-   // Every pclk rising edge : count what the checks looked at, print each DL state move
+   // Print when the checks start, and print every DL state move
    always @(posedge pclk) begin
       if (sample_valid && assert_en) begin
-         if (!dl_checks_started) begin
-            dl_checks_started = 1;
+         if (dl_checks_started == 1'b0) begin
+            dl_checks_started = 1'b1;
             `uvm_info({SIDE,"_DL_STATUS"}, "DL assertions STARTED checking", UVM_LOW)
          end
-         else begin
-            if (dl_check_state != prev_dl_check_state) begin
-               dl_moves_checked++;
-               `uvm_info({SIDE,"_DL_STATUS"}, $sformatf("DL state move checked : %s -> %s",
-                         prev_dl_check_state.name(), dl_check_state.name()), UVM_LOW)
-            end
-            dl_tlps_checked  += (tx_payload_cnt - prev_tx_payload_cnt);
-            dl_dllps_checked += (tx_dllp_cnt    - prev_tx_dllp_cnt);
-            if (prev_phy_linkup && !phy_linkup) dl_linkdowns_checked++;
+         else if (dl_curr_state != dl_prev_state) begin
+            `uvm_info({SIDE,"_DL_STATUS"}, $sformatf("DL state move checked : %s -> %s",
+                      dl_prev_state.name(), dl_curr_state.name()), UVM_LOW)
          end
-         prev_dl_check_state = dl_check_state;
-         prev_tx_payload_cnt = tx_payload_cnt;
-         prev_tx_dllp_cnt    = tx_dllp_cnt;
-         prev_phy_linkup     = phy_linkup;
       end
    end
 
-   // End of test : print a summary with the number of checks, failures and final result
+   // End of test : count the DL assertion errors and print PASSED / FAILED
    final begin
       uvm_report_server svr;
-      int               fail_cnt;
+      int unsigned      fail_cnt;
       string            result;
       svr      = uvm_report_server::get_server();
-      fail_cnt = svr.get_id_count({SIDE,"_DL_ASSERT"});   // number of DL assertion UVM_ERRORs
-      if (!dl_checks_started) result = "NOT CHECKED";
-      else if (fail_cnt == 0) result = "PASSED";
-      else                    result = "FAILED";
-      `uvm_info({SIDE,"_DL_STATUS"}, $sformatf({"\n",
-         "  DL assertion failures    : %0d\n",
-         "  DL assertions            : %s\n"},
-         fail_cnt, result), UVM_LOW)
+      fail_cnt = svr.get_id_count({SIDE,"_DL_ASSERT"});
+      if      (dl_checks_started == 1'b0) result = "NOT CHECKED";
+      else if (fail_cnt == 0)             result = "PASSED";
+      else                                result = "FAILED";
+      `uvm_info({SIDE,"_DL_STATUS"}, $sformatf("\n  DL assertion failures    : %0d\n  DL assertions            : %s\n",
+                fail_cnt, result), UVM_LOW)
    end
 
    // [DL_ASSERT] end of DL assertions
@@ -1019,3 +1085,4 @@ interface PCIe_EP_interface(input logic pclk);
    // [TL_ASSERT] end of TL assertions
 
 endinterface
+

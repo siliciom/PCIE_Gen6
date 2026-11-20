@@ -776,6 +776,9 @@
 //   The TL hands a TLP to the DL in zero time, so the flag normally drops at once.
 `define PCIe_TL_HANDOFF_CLKS          2
 
+// [DL_ASSERT] on entering DL_INACTIVE, the DL model must reset its values within this many pclk
+`define PCIe_DL_RESET_GRACE_CLKS      1
+
 `define PCIe_EP_BUS_NUMBER           8'h01
 `define PCIe_EP_DEVICE_NUMBER        5'h00
 `define PCIe_EP_FUNCTION_NUMBER      3'h0
@@ -940,4 +943,5 @@
 //     in a row (strict priority can starve low VCs, Sec 6.3.3.2.1).
 `define PCIe_VC_ARB_COLLECT_NS       20 //driver waits 20 ns for more requests before picking
 `define PCIe_VC_ARB_STARVE_WARN      64 //If the count reaches 64 losses in a row for vc0 , the bench prints one warning
+
 
