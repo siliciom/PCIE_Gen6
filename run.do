@@ -90,8 +90,13 @@
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_Random_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
 #set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
+#set testname "PCIe_gen6_3DW_Flit_IOWr_ECRC_Error_test"
+#set testname "PCIe_gen6_3DW_Flit_MemWr_Malformed_TLP_test"
+#set testname "PCIe_gen6_3DW_Flit_DefMemWr_Poisoned_TLP_test" 
+set testname "PCIe_gen6_3DW_LPRFX_Flit_MemWR_Random_test"
+#set testname "PCIe_gen6_3DW_E2E_PRFX_Flit__MemWr_Random_test"
 # [DLL] Data Link Layer tests
-set testname "PCIe_gen6_dll_ack_nak_test"
+#set testname "PCIe_gen6_dll_ack_nak_test"
  
 vlib work
 vmap work work
