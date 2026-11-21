@@ -1507,7 +1507,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     // Base and carries [7:4] Last DW BE, [3:0] First DW BE. When no OHC is
     // present the byte enables are implied (all bytes enabled).
     //----------------------------------------------------------------------
-    if ((d_mode == FLIT) && (d_ohc_dw != 0)) begin
+    if ((d_mode == FLIT) && (d_ohc[0] == 1'b1)) begin     // [TLP_PREFIX] OHC-A only (not OHC-E)
       ohc_val       = get_dw(item, d_hdr_base_dw);
       d_last_dw_be  = ohc_val[7:4];
       d_first_dw_be = ohc_val[3:0];
@@ -1518,6 +1518,15 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       `uvm_info("EP_TL_DECODE",
         $sformatf("OHC_DW=%08h -> first_dw_be=%04b last_dw_be=%04b",
                    ohc_val, d_first_dw_be, d_last_dw_be), UVM_LOW)
+    end
+
+    // [TLP_PREFIX] OHC-E1 : 1 DW right after the Header Base (+ OHC-A)
+    if ((d_mode == FLIT) && (d_ohc[4:3] == 2'b01)) begin
+      ohc_val = get_dw(item, d_hdr_base_dw + d_ohc[0]);
+      `uvm_info("EP_TL_DECODE",
+        $sformatf("OHC-E1_DW=%08h -> entry=%04b (%s) E[3:0]=%04b content=%06h",
+                   ohc_val, ohc_val[31:28], (ohc_val[31:28] == 4'b0001) ? "E-E Prefix DW" : "No Entry",
+                   ohc_val[27:24], ohc_val[23:0]), UVM_LOW)
     end
 
     //----------------------------------------------------------------------
@@ -1601,6 +1610,13 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     d_td = (d_ts == `PCIe_TL_TS_1DW_ECRC);
 
     d_ohc_dw = (d_ohc[0] == 1'b1) ? `PCIe_TL_OHC_A_DW : 0;
+    // [TLP_PREFIX] OHC-E size : 01b = E1 (1 DW), 10b = E2 (2 DW), 11b = E4 (4 DW)
+    case (d_ohc[4:3])
+      2'b01   : d_ohc_dw = d_ohc_dw + 1;
+      2'b10   : d_ohc_dw = d_ohc_dw + 2;
+      2'b11   : d_ohc_dw = d_ohc_dw + 4;
+      default : ;
+    endcase
 
     case (d_byte0)
       `PCIe_FLITTYPE_MRD_32   : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_READ;  d_is_4dw=0; d_has_data=0; end

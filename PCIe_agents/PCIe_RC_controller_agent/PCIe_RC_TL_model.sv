@@ -1755,6 +1755,9 @@ class PCIe_RC_TL_model extends uvm_component;
     // Prefix is not covered by ECRC.
     fc_tx_prepare_pool(tr);
 
+    // [TLP_PREFIX] Flit Mode Local TLP Prefix asked by the sequence
+    if (tr.lprfx_en) add_local_prefix(tr);
+
     // FLIT MODE : pack the TLP into the 236 byte FLIT TLP region and pad the
     // remainder with NOP TLPs (Sec 2.2.1.2). Non-Flit Mode has no such region.
     if (tr.pkt_mode == FLIT)
@@ -1800,6 +1803,29 @@ class PCIe_RC_TL_model extends uvm_component;
     `uvm_info(get_type_name(), "[TL->DL] TLP_SENT_TO_DL", UVM_MEDIUM);
      tlp_dl_ap.write(tr);
 
+  endfunction
+
+  //--------------------------------------------------------------------------
+  // [TLP_PREFIX] add_local_prefix
+  //   Flit Mode Local TLP Prefix (Sec 2.2.10.3, Fig 2-77) : 1 DW in front of
+  //   the TLP, Type = 8Dh, TLP Uses Dedicated Credits = 0 (shared credits).
+  //   Added after the ECRC : a Local TLP Prefix is not covered by ECRC.
+  //   Skipped when the FC logic already put the (dedicated) prefix there.
+  //--------------------------------------------------------------------------
+  function void add_local_prefix(PCIe_sequence_item tr);
+    bit [`PCIe_TL_DATA_DW_W-1:0] tmp[];
+    if (tr.pkt_mode != FLIT) return;
+    if (tr.serialized_tlp[0][31:24] == `PCIe_FLITTYPE_PREFIX) return;
+
+    tmp    = new[tr.serialized_tlp.size() + 1];
+    tmp[0] = {`PCIe_FLITTYPE_PREFIX, 24'h000000};
+    foreach (tr.serialized_tlp[i]) tmp[i+1] = tr.serialized_tlp[i];
+
+    tr.serialized_tlp      = tmp;
+    tr.tlp_header_dw_count = tr.tlp_header_dw_count + 1;   // prefix shown with the header
+    tr.tlp_total_dw_count  = tr.serialized_tlp.size();
+
+    `uvm_info("RC_TL_PREFIX", $sformatf("Flit Mode Local TLP Prefix added : DW=%08h", tmp[0]), UVM_LOW)
   endfunction
 
   //--------------------------------------------------------------------------
@@ -2448,6 +2474,17 @@ class PCIe_RC_TL_model extends uvm_component;
 
       hdr = tmp;
 
+    end
+
+    //======================================================================
+    // [TLP_PREFIX] OHC-E1 (Sec 2.2.11) : 1 DW, last in A-B-C-E order
+    //======================================================================
+    if (tr.ohc[4:3] == 2'b01) begin
+      hdr = new[hdr.size() + 1](hdr);
+      hdr[hdr.size() - 1] = tr.ohc_e1_dw;
+      ohc_dw = ohc_dw + 1;
+      `uvm_info("FLIT_HEADER", $sformatf("OHC-E1 added : DW=%08h (E-E Prefix E[3:0]=%04b)",
+                 tr.ohc_e1_dw, tr.ohc_e1_dw[27:24]), UVM_LOW)
     end
 
     total_header_dw = hdr.size();
