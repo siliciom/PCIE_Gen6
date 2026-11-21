@@ -316,6 +316,8 @@ endtask
     PCIe_sequence_item segs[$];
     bit                fc_allowed_saved;
 
+    wait_dl_tx_ready();   // [DLL_TEST] replay running or Tx retry buffer full -> wait
+
     if (!rc_tl_model.flit_needs_segmentation(req)) begin
       rc_tl_model.wait_for_fc_credits(req);
       tx_tl_ap.write(req);
@@ -343,6 +345,42 @@ endtask
                 segs.size(), segs.size(), req.data.size()), UVM_LOW)
 
     rc_dl_model.fc_tx_allowed = fc_allowed_saved;
+  endtask
+
+  // [DLL_TEST] A new TLP waits while (1) a replay is running or (2) the Tx
+  // retry buffer is full (no Ack yet). Flits the DL model hands over in the
+  // meantime (replayed flits, UpdateFC) are put on the PIPE here.
+  function bit dl_tx_blocked();
+    return rc_dl_model.RC_REPLAY_IN_PROGRESS ||
+           (rc_dl_model.tx_retry_buffer.size() >= rc_dl_model.tx_retry_depth);
+  endfunction
+
+  task wait_dl_tx_ready();
+    bit     saved;
+    longint waited_ns;
+    if (!dl_tx_blocked()) return;
+    rc_dl_model.n_tx_stall++;
+    `uvm_info("RC_DLL_DRV", $sformatf("TLP_STALLED : replay_in_progress=%0b tx_retry_buffer=%0d/%0d",
+              rc_dl_model.RC_REPLAY_IN_PROGRESS, rc_dl_model.tx_retry_buffer.size(), rc_dl_model.tx_retry_depth), UVM_NONE)
+    saved     = rc_dl_model.fc_tx_allowed;
+    waited_ns = 0;
+    rc_dl_model.fc_tx_allowed = 1'b1;                       // the DL model may use the link now
+    while (dl_tx_blocked() || rc_dl_model.dllp_tx_pending || rc_dl_model.fc_batch_busy) begin
+      if (rc_dl_model.dllp_tx_pending && rc_pl_model.pl_sent) begin
+        drive_flit(pcie_seq_item);                          // replayed flit / UpdateFC
+        rc_dl_model.dllp_tx_pending = 1'b0;
+      end
+      else begin
+        #1ns;
+        waited_ns++;
+        if (waited_ns > 1000000) begin
+          `uvm_error("RC_DLL_DRV", "TLP_STALLED_FOR_1MS : no Ack received / replay did not finish")
+          break;
+        end
+      end
+    end
+    rc_dl_model.fc_tx_allowed = saved;
+    `uvm_info("RC_DLL_DRV", "TLP_RELEASED", UVM_NONE)
   endtask
 
   // [ENUM] Drive every DLLP flit (UpdateFC) the DL model has already queued,

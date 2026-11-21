@@ -28,6 +28,18 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
    // and 6B FEC) in dlp_flit_out + is_valid (0 = FEC&CRC match, 1 = no match)
    uvm_analysis_port #(PCIe_sequence_item) ep_mon_dl_242b_ap;
    int rc_to_ep_flit_cnt = 0;   // [ADDED] RC->EP flit number for the DL write print
+
+   // [DLL_TEST] error injection on received RC->EP payload flits (before FEC decode)
+   //   inj_type 1 : 1 byte error                       -> FEC corrects it, CRC passes
+   //   inj_type 2 : 2 bytes, same ECC group, same value -> FEC cannot fix it -> CRC error
+   //   inj_type 3 : Check + Parity byte of ECC group 0  -> FEC reports UNCORRECTABLE
+   int unsigned inj_type  = 0;
+   int unsigned inj_skip  = 0;          // payload flits to let through first
+   int unsigned inj_count = 0;          // payload flits to corrupt (0 = off)
+   int unsigned inj_done  = 0;          // payload flits corrupted so far
+   int unsigned n_crc_ok, n_crc_bad;    // CRC check result of every RC->EP flit
+   bit          fec_unc_is_invalid = 1'b1;   // Sec 4.2.3.4.2 : ECC uncorrectable -> flit is not valid
+   bit          last_fec_unc;
    PCIe_sequence_item            pcie_seq_item;
    PCIe_RC_PL_model              rc_pl_model;
    PCIe_EP_TL_model              ep_tl_model;
@@ -1209,6 +1221,28 @@ if (pcie_seq_item.tx_valid) begin
          ep_con_rx_256b_mon_ap.write(pcie_seq_item);
       end : rc_to_ep_256b_rx_flit_to_scoreboard
 
+      // ---- [DLL_TEST] error injection (after the scoreboard copy, before FEC decode) ----
+      if ((inj_count != 0) && (ep_mon_256b_flit_received_from_rc[`PCIe_TLP_DATA_BYTE_W][7:6] == 2'b01)) begin
+         if (inj_skip != 0) inj_skip--;
+         else begin
+            case (inj_type)
+              1 : ep_mon_256b_flit_received_from_rc[3] ^= 8'h5A;
+              2 : begin
+                    ep_mon_256b_flit_received_from_rc[3] ^= 8'h5A;
+                    ep_mon_256b_flit_received_from_rc[6] ^= 8'h5A;
+                  end
+              3 : begin
+                    ep_mon_256b_flit_received_from_rc[252] ^= 8'h5A;   // Check  byte of ECC group 0
+                    ep_mon_256b_flit_received_from_rc[255] ^= 8'h5A;   // Parity byte of ECC group 0
+                  end
+            endcase
+            inj_count--;
+            inj_done++;
+            `uvm_info("DLL_ERR_INJ", $sformatf("INJECTED_ERROR type=%0d on RC->EP flit %0d (seq=%0d)", inj_type, rc_to_ep_flit_cnt,
+                      {ep_mon_256b_flit_received_from_rc[`PCIe_TLP_DATA_BYTE_W][1:0],
+                       ep_mon_256b_flit_received_from_rc[`PCIe_TLP_DATA_BYTE_W+1]}), UVM_NONE)
+         end
+      end
       // ---- split received 256B flit : 242B payload + 8B CRC + 6B FEC ----
       received_242b_payload_from_rc.delete();
       for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
@@ -1246,6 +1280,7 @@ if (pcie_seq_item.tx_valid) begin
          bit                    fec_unc_any;
          int                    fec_corrected_syms;
          fec_decode_flit_256b(ep_mon_256b_flit_received_from_rc, corrected_256b_flit, fec_unc_any, fec_corrected_syms);
+         last_fec_unc = fec_unc_any;   // [DLL_TEST]
          received_242b_payload_from_rc.delete();
          for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
             received_242b_payload_from_rc.push_back(corrected_256b_flit[i]);
@@ -1333,6 +1368,7 @@ if (pcie_seq_item.tx_valid) begin
          end
 
          pcie_seq_item.rc_to_ep_flit_fec_match = fec_6b_match;
+         if (crc_8b_match) n_crc_ok++; else n_crc_bad++;   // [DLL_TEST]
           pcie_seq_item.rc_to_ep_flit_crc_match = crc_8b_match;
          `uvm_info("EP_CONTROLLER_MONITOR",
                    $sformatf("RC_TO_EP_FLIT_MATCH_VALUES : rc_to_ep_flit_fec_match=%0b rc_to_ep_flit_crc_match=%0b | FEC_MATCH_VALUE=%0b CRC_MATCH_VALUE=%0b",
@@ -1357,7 +1393,8 @@ if (pcie_seq_item.tx_valid) begin
       begin : rc_to_ep_flit_rx_retry_gate
          // [FEC] Spec Appendix J.5 : after FEC correction, the 8B CRC check
          // decides if the flit is consumed (is_valid=1) or replayed (is_valid=0).
-         if (pcie_seq_item.rc_to_ep_flit_crc_match == 1'b1) begin
+         // [DLL_TEST] valid flit = CRC passes AND no ECC group is uncorrectable
+         if ((pcie_seq_item.rc_to_ep_flit_crc_match == 1'b1) && !(fec_unc_is_invalid && last_fec_unc)) begin
             is_valid = 1'b1;
             `uvm_info("EP_CONTROLLER_MONITOR",
                       $sformatf("RC_TO_EP_GATE : CRC_MATCH_AFTER_FEC (fec_match=%0b) => is_valid=1",

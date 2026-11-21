@@ -90,6 +90,14 @@ class PCIe_RC_DL_model extends uvm_component;
   bit NAK_WITHDRAWAL_ALLOWED;
   bit RC_REPLAY_IN_PROGRESS;
 
+  // [DLL_TEST] Flit replay / Tx retry buffer controls (default = old behaviour)
+  bit          replay_on_wire_en = 1'b0;                  // 1 = a received Nak replays the retry buffer on the link
+  int unsigned tx_retry_depth    = `PCIe_MAX_UNACK_FLITS; // Tx retry buffer size in flits : the driver stalls when full
+  int unsigned n_replay_events;                           // replays started (REPLAY_NUM style counter)
+  int unsigned n_tx_stall;                                // TLPs that had to wait (replay running / retry buffer full)
+  int unsigned tx_retry_peak;                             // highest Tx retry buffer occupancy seen
+  bit          fc_batch_busy;                             // an UpdateFC batch is on its way to the PL model
+
   // Payload related information
   bit last_flit_was_payload;
 
@@ -378,6 +386,12 @@ endfunction
   // Standard replay: all flits with seq_num >= the replay start point.
   // Selective replay: only the single NAKed flit.
   task handle_replay_from_buffer();
+     // [DLL_TEST] real replay on the link
+     if (replay_on_wire_en) begin
+        replay_retry_buffer_on_wire();
+        RC_REPLAY_IN_PROGRESS = 1'b0;
+        return;
+     end
      foreach (tx_retry_buffer[i]) begin
         if ((REPLAY_SCHEDULED_TYPE == STANDARD_REPLAY) &&
             (tx_retry_buffer[i].seq_num >= TX_REPLAY_FLIT_SEQ_NUM)) begin
@@ -389,6 +403,48 @@ endfunction
         end
      end
      RC_REPLAY_IN_PROGRESS = 1'b0;
+  endtask
+
+  // [DLL_TEST] Standard Flit replay (Sec 4.2.3.4.2.1) : every flit of the Tx
+  // retry buffer from TX_REPLAY_FLIT_SEQ_NUM onwards is sent again, in order,
+  // with its ORIGINAL sequence number.
+  task replay_retry_buffer_on_wire();
+     tx_buffer_t q[$];
+     foreach (tx_retry_buffer[i])            // snapshot : an Ack may purge the buffer meanwhile
+        if (mod1023_sub(tx_retry_buffer[i].seq_num, TX_REPLAY_FLIT_SEQ_NUM) < 512)
+           q.push_back(tx_retry_buffer[i]);
+     n_replay_events++;
+     FLIT_REPLAY_NUM = FLIT_REPLAY_NUM + 1'b1;
+     `uvm_info("RC_DL_REPLAY", $sformatf("REPLAY_START #%0d : from seq %0d : %0d flit(s) to resend (retry buffer = %0d)",
+               n_replay_events, TX_REPLAY_FLIT_SEQ_NUM, q.size(), tx_retry_buffer.size()), UVM_NONE)
+     foreach (q[i]) send_replay_flit(q[i]);
+     `uvm_info("RC_DL_REPLAY", $sformatf("REPLAY_DONE #%0d", n_replay_events), UVM_NONE)
+  endtask
+
+  // [DLL_TEST] one replayed flit : same 236B TLP bytes, same sequence number
+  task send_replay_flit(tx_buffer_t e);
+     PCIe_sequence_item r;
+     bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp;
+     r = PCIe_sequence_item::type_id::create("rc_replay_item");
+     r.pkt_mode   = FLIT;
+     r.is_payload = 1'b1;
+     r.drive_flit = 1'b1;
+     r.tlp_data   = e.tlp_data;
+     r.seq_num    = e.seq_num;
+     // wait until the link is free (no TLP / UpdateFC flit in the PL model)
+     while (!(fc_tx_allowed && !dllp_tx_pending && !fc_batch_busy)) #1ns;
+     dlp    = '0;
+     dlp[0] = {2'b01, last_flit_was_payload, 1'b0, 2'b00, e.seq_num[`PCIe_SEQ_NUM_W-1 -: 2]};  // payload, explicit seq
+     dlp[1] = e.seq_num[`PCIe_SEQ_NUM_W-3:0];
+     for (int i = 0; i < `PCIe_TLP_DATA_BYTE_W; i++) r.dlp_flit_out[i] = r.tlp_data[i];
+     for (int i = 0; i < `PCIe_DLP_BYTE_W; i++)      r.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W+i] = dlp[i];
+     last_flit_was_payload = 1'b1;
+     flit_cnt_count(1'b1, r.dlp_flit_out);   // [FLIT_CNT] TX
+     flit_tx_replay++;
+     `uvm_info("RC_DL_REPLAY", $sformatf("REPLAY_FLIT seq=%0d", e.seq_num), UVM_NONE)
+     dllp_tx_pending = 1'b1;                 // same handshake as a DLLP flit : the driver drives it
+     dlp_pl_ap.write(r);
+     wait (dllp_tx_pending == 1'b0);
   endtask
 
   // Re-forms a single retry-buffer entry as a payload flit and writes it to PL,
@@ -710,7 +766,10 @@ endfunction
 
     `uvm_info("RC_DL_MODEL",$sformatf("replay_cmd=%d :: is_payload=%d :: dllp_sequence_number=%0h :: dlp=%p",replay_command,is_payload,{dlp[0][1:0],dlp[1]},dl_flit_out),UVM_LOW);
 
-    store_tx_retry_buffer(tlp_data,seq_num_to_send);
+    // [DLL_TEST] only payload flits with an explicit sequence number are kept for replay
+    if ((replay_command == 2'b00) && is_payload)
+      store_tx_retry_buffer(tlp_data,seq_num_to_send);
+    if (tx_retry_buffer.size() > tx_retry_peak) tx_retry_peak = tx_retry_buffer.size();
   endfunction
 
   
@@ -1598,7 +1657,12 @@ endfunction
     end
     `uvm_info("RC_DL_FC", "[FC_DL] DL_ACTIVE :: INITIAL UpdateFC (dedicated + shared) FOR P/NP/CPL (completes FC_INIT2 at the peer)", UVM_LOW)
     forever begin
-      if (fc_any_pending() && fc_tx_allowed) fc_send_pending_updates();
+      // [DLL_TEST] no UpdateFC batch while a replay is running
+      if (fc_any_pending() && fc_tx_allowed && !RC_REPLAY_IN_PROGRESS) begin
+        fc_batch_busy = 1'b1;
+        fc_send_pending_updates();
+        fc_batch_busy = 1'b0;
+      end
       else #1ns;
     end
   endtask
