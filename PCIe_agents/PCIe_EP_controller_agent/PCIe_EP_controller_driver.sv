@@ -87,8 +87,15 @@ task run_phase(uvm_phase phase);
       end
     end
     else begin                         // SECOND else - CHANGED
+      // [DL_RESET] DL re-initialisation after a link down : the DLCMSM sends
+      // FEATURE / InitFC DLLP flits again and waits for dllp_tx_pending = 0
+      if (!ep_dl_model.dl_link_active && ep_dl_model.dllp_tx_pending && ep_pl_model.pl_sent) begin
+        `uvm_info("EP_CONTROLLER",$sformatf("DL_REINIT :: DL_STATE=%s :: DRIVING_DLLP_FLIT",ep_dl_model.DL_STATE.name()),UVM_LOW)
+        drive_flit(pcie_seq_item);
+        ep_dl_model.dllp_tx_pending = 1'b0;
+      end
       // Link is up : if the EP PL has a flit ready (e.g. Completion), drive it
-      if (ep_dl_model.dl_link_active && ep_pl_model.pl_sent) begin
+      else if (ep_dl_model.dl_link_active && ep_pl_model.pl_sent) begin
         `uvm_info("EP_CONTROLLER","LINK_UP=1 :: FLIT_READY_IN_EP_PL :: DRIVING_ON_PIPE (e.g. COMPLETION)",UVM_LOW)
         drive_flit(pcie_seq_item);
       end

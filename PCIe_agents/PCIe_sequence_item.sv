@@ -1300,3 +1300,44 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   endfunction
 
 endclass
+
+
+// =========================================================================
+// [FLOW] TEST FLOW LOG
+//
+//   One SHORT line for every important event of the test :
+//     LTSSM L0, DL state, FC init, enumeration, test steps, error injection,
+//     NAK, replay, replay timeout, DL errors, bad completions, checks.
+//
+//   Use from any file (no handle needed) :
+//     PCIe_flow_log::print("REPLAY", "RC STD seq 41 42 43");
+//
+//   Log line (one line, no UVM_INFO prefix) :
+//     [FLOW] @   27574ns REPLAY      : RC STD seq 41 42 43
+//
+//   At the end of the test the scoreboard prints all [FLOW] lines again in
+//   one block (TEST FLOW), so the whole flow is in one place.
+// =========================================================================
+class PCIe_flow_log;
+
+  static string timeline[$];   // every [FLOW] line, in time order
+
+  // Prints one [FLOW] line and keeps it for the end-of-test TEST FLOW block
+  //   area : short name of the event group (LTSSM, DLCMSM, NAK, REPLAY, CPL ...)
+  //   msg  : what happened, in a few words
+  static function void print(string area, string msg);
+    string line;
+    line = $sformatf("[FLOW] @%8.0fns %-12s: %s", $realtime / 1ns, area, msg);
+    $display("%s", line);
+    timeline.push_back(line);
+  endfunction
+
+  // Prints all [FLOW] lines again in one block (end of test)
+  static function void print_timeline();
+    $display("");
+    $display("==================== TEST FLOW ====================");
+    foreach (timeline[i]) $display("%s", timeline[i]);
+    $display("===================================================");
+  endfunction
+
+endclass

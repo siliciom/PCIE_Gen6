@@ -103,6 +103,7 @@ class PCIe_RC_DL_model extends uvm_component;
     // [FLIT_CNT] flit summary counters (logic + report at the end of the class)
   typedef enum int {FLTC_FEATURE, FLTC_INITFC1, FLTC_INITFC2, FLTC_UPDATEFC,
                     FLTC_ACK, FLTC_NAK, FLTC_NOP, FLTC_OTHER_DLLP,
+                    FLTC_OPT_UPDATEFC, FLTC_NOP_DLLP, FLTC_LINK_MGMT_DLLP,   // [FLOW_SUM]
                     FLTC_MWR, FLTC_MRD, FLTC_CFGRD, FLTC_CFGWR, FLTC_MSG, FLTC_MSGD,
                     FLTC_CPL, FLTC_CPLD, FLTC_OTHER_TLP, FLTC_NUM} flit_cnt_e;
 
@@ -112,6 +113,32 @@ class PCIe_RC_DL_model extends uvm_component;
   int unsigned flit_rx_bad;                          // RX flits with CRC / FEC error
   int unsigned flit_tx_replay;                       // replayed TLP flits (also counted in their TLP type)
   int unsigned flit_tx_nak_piggy, flit_rx_nak_piggy; // NAK carried on a DLLP / TLP flit
+  int unsigned flit_tx_new_cnt [FLTC_NUM];           // [FLOW_SUM] TX flits WITHOUT replays / duplicates
+  int unsigned rx_accept_cnt   [FLTC_NUM];           // [FLOW_SUM] RX TLPs given to the TL, per TLP type
+
+  // [FLOW_SUM] numbers for the end-of-test RC FLIT SUMMARY (flit_summary_report)
+  int unsigned              n_tx_new_payload;        // NEW payload flits sent (replays not counted)
+  bit [`PCIe_SEQ_NUM_W-1:0] first_tx_seq, last_tx_seq;
+  int unsigned              n_rx_tlp_to_tl;          // RX payload flits accepted and given to the RC TL
+  int unsigned              max_tx_retry_used;       // biggest TX retry buffer size seen
+  int unsigned              n_ack_rcvd, n_std_nak_rcvd, n_sel_nak_rcvd, n_nak_ignored;
+  bit [`PCIe_SEQ_NUM_W-1:0] nak_rcvd_lost_seq_q[$];  // lost flit (N+1) of every NAK(N) received
+  int unsigned              n_ack_sent, n_std_nak_sent, n_sel_nak_sent;
+  bit [`PCIe_SEQ_NUM_W-1:0] nak_sent_lost_seq_q[$];  // lost flit (N+1) of every NAK(N) sent
+  int                       last_rx_acknak_key = -1; // {cmd, seq} of the last ACK/NAK received
+  int                       last_tx_acknak_key = -1; // {cmd, seq} of the last ACK/NAK sent
+  bit                       acknak_rx_is_new;        // 1 : the ACK/NAK just received is a NEW one
+
+  // Declared here (before their first use) : Questa needs a class variable
+  // to be declared before the first line that uses it.
+  int unsigned n_tx_flits_dropped_on_reset;            // [DL_RESET] unACKed flits thrown away by the last reset
+  int unsigned REPLAY_TIMEOUT_FLIT_COUNT;              // [REPLAY_TIMER] spec counter : 11 bit, saturates at 7FFh
+  int unsigned REPLAY_TIMEOUT_LIMIT = 1500;            // [REPLAY_TIMER] spec value (test may lower it)
+  int unsigned n_replay_timeouts;                      // [REPLAY_TIMER] Replay Timer Timeout errors logged
+  tx_buffer_t  last_tx_payload_flit;                   // [DUP_FLIT] last NEW payload flit sent
+  bit          last_tx_payload_valid;                  // [DUP_FLIT]
+  bit          duplicate_flit_request;                 // [DUP_FLIT] test sets it : send the last flit again
+  int unsigned n_duplicate_flits_sent;                 // [DUP_FLIT]
 
    // localparam bit [31:0] INITFC1_DLLP = 32'h0200_0000;
     //localparam bit [31:0] INITFC2_DLLP = 32'h0300_0000;
@@ -140,6 +167,9 @@ class PCIe_RC_DL_model extends uvm_component;
     // DLCMSM waits for it to clear, so every DLLP flit is really transmitted
     // (in order) before the next DLCMSM state runs.
     bit   dllp_tx_pending;
+    // [DLLP_LOCK] only ONE DLLP flit at a time in the RC PL model : the DLCMSM,
+    // the UpdateFC loop and a test (DLLP injection) all use send_dllp_flit()
+    semaphore dllp_tx_lock;
     // --------------------------------------------------------------------
 
     // ---- FLOW CONTROL (dedicated + shared credits, PER VC) ------------------
@@ -193,6 +223,7 @@ function void build_phase(uvm_phase phase);
     uvm_rc_l0_to_dl_ev = uvm_event_pool::get_global("rc_l0_to_dl_event");
     fc_tl_imp = new("fc_tl_imp", this);
     fc_tl_ap  = new("fc_tl_ap",  this);
+    dllp_tx_lock = new(1);   // [DLLP_LOCK]
     fc_dl_init();
 
     void'(uvm_config_db#(pkt_mode_e)::get(this, "", "link_mode", dl_rx_pkt_mode));
@@ -310,6 +341,7 @@ endfunction
       `uvm_info("RC_DLCMSM","DLCMSM_RC_TO_DL_EVENT_TRIGGRED",UVM_LOW)
         wait(phy_linkup == 1);
         `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] rc_l0_to_dl_event_FIRED :: LTSSM_REACHED_L0 :: STARTING_DLCMSM_FSM",UVM_LOW)
+        PCIe_flow_log::print("LTSSM", "RC L0, LINK_UP=1");   // [FLOW]
         // Reset FSM state on every (re)start so a re-training link re-runs FC-Init cleanly.
         DL_STATE       = DL_INACTIVE;
         dl_link_active = 1'b0;
@@ -320,6 +352,7 @@ endfunction
         ACK_SCHEDULED          = 1'b0;
         REPLAY_SCHEDULED       = 1'b0;
         RC_REPLAY_IN_PROGRESS  = 1'b0;
+        dl_reset_state("DL_INACTIVE (link up, DLCMSM starts)");   // [DL_RESET]
         // Run the DLCMSM FSM and the concurrent DL data-processing thread
         // (ACK/NAK/REPLAY) together. The fork returns as soon as run_dlcmsm()
         // exits - which only happens in DL_ACTIVE when phy_linkup drops - and
@@ -330,23 +363,28 @@ endfunction
            run_dlcmsm();
            run_dl_data_processing();
            run_fc_update_loop();
+           run_replay_timer();     // [REPLAY_TIMER]
         join_any
         disable fork;
         DL_STATE       = DL_INACTIVE;
         dl_link_active = 1'b0;
+        dl_reset_state("DL_INACTIVE (Physical LinkUp = 0)");      // [DL_RESET]
+        PCIe_flow_log::print("DLCMSM", $sformatf("RC DL_Inactive (link down), %0d unACKed flit(s) dropped", n_tx_flits_dropped_on_reset));   // [FLOW]
         `uvm_info("RC_DLCMSM","[DLCMSM_TRACE] phy_linkup=0 :: DL_RUN_TERMINATED :: WAITING_FOR_NEXT_LINKUP",UVM_LOW)
      end
   endtask
 
+  // ===========================================================================
+  // DL DATA PROCESSING THREAD  (runs while DL_ACTIVE)
+  //   [REPLAY] The replay is NOT done here. The RC PL model holds ONE flit, so
+  //   the RC controller driver drives the replay flits one by one
+  //   (PCIe_RC_controller_driver::drive_replay -> start_replay / send_replay_flit).
+  // ===========================================================================
   task run_dl_data_processing();
      wait(dl_link_active);
-     `uvm_info("RC_DL_PROC","[DL_DATA_PROC] DL_ACTIVE :: STARTING_ACK_NAK_REPLAY_PROCESSING",UVM_LOW)
+     `uvm_info("RC_DL_PROC","[DL_DATA_PROC] DL_ACTIVE :: STARTING_ACK_NAK_PROCESSING (replay is driven by the RC driver)",UVM_LOW)
      forever begin
-        if (RC_REPLAY_IN_PROGRESS) begin
-           `uvm_info("RC_DL_PROC","[DL_DATA_PROC] REPLAY_IN_PROGRESS :: REPLAYING_TX_RETRY_BUFFER",UVM_LOW)
-           handle_replay_from_buffer();
-        end
-        else if (NAK_SCHEDULED) begin
+        if (NAK_SCHEDULED) begin
            `uvm_info("RC_DL_PROC","[DL_DATA_PROC] NAK_SCHEDULED :: SENDING_NAK_FLIT",UVM_LOW)
            send_dl_control_flit();
            // Transmitted: once a NAK is put on the wire it is consumed. Any
@@ -369,39 +407,388 @@ endfunction
   // scheduled state, and pushes it to the PL model.
   task send_dl_control_flit();
      PCIe_sequence_item ctl_item;
+     bit                prior_payload_saved;
      ctl_item = PCIe_sequence_item::type_id::create("ctl_item");
+     // [REPLAY] This flit is NOT put on the wire (write below is commented),
+     // so it must not change the "Prior Flit was Payload" bit of the next flit.
+     prior_payload_saved = last_flit_was_payload;
      form_dl_packet(ctl_item.tlp_data, 1'b0, ctl_item.dlp_flit_out);
+     last_flit_was_payload = prior_payload_saved;
      //dlp_pl_ap.write(ctl_item);
   endtask
 
-  // Re-sends flits from the TX retry buffer that the peer has NAKed.
-  // Standard replay: all flits with seq_num >= the replay start point.
-  // Selective replay: only the single NAKed flit.
-  task handle_replay_from_buffer();
+  // ===========================================================================
+  // [REPLAY] TX REPLAY  (PCIe 6.1 Sec 4.2.3.4.2.1.6 and 4.2.3.4.2.1.7)
+  //
+  //   Step 1 : EP sends NAK(N) -> process_received_ack_nak() -> schedule_replay_on_nak()
+  //              REPLAY_SCHEDULED = 1, TX_REPLAY_FLIT_SEQ_NUM = N+1
+  //   Step 2 : RC driver sees REPLAY_SCHEDULED -> drive_replay() :
+  //              start_replay()      : list of flits from the TX retry buffer
+  //                                    STANDARD_REPLAY  : flit N+1 and every flit after it
+  //                                    SELECTIVE_REPLAY : only flit N+1
+  //              send_replay_flit()  : ONE flit -> RC PL model, then the driver drives it
+  //                                    * ORIGINAL sequence number (Explicit Sequence
+  //                                      Number flit, Replay Command 00b)
+  //                                    * NEXT_TX_FLIT_SEQ_NUM does not change
+  //                                    * flit is NOT stored again
+  //              finish_replay()
+  //   Step 3 : EP sends ACK -> purge_tx_retry_buffer() removes the flits
+  // ===========================================================================
+  bit [`PCIe_SEQ_NUM_W-1:0] replayed_seq_q[$];          // seq num of every replayed flit (for tests)
+  int unsigned n_std_replay, n_sel_replay;             // replays started
+  real         NAK_IGNORE_WINDOW_NS = 300.0;           // spec : lesser of Ack/Nak latency + 2 flits, or 300 ns
+  real         nak_ignore_window_start_ns = -1.0;      // -1 : window not started
+
+  // Makes the list of flits to replay. REPLAY_SCHEDULED -> RC_REPLAY_IN_PROGRESS.
+  function void start_replay(output tx_buffer_t replay_q[$]);
+     int    start_idx = -1;
+     string seq_list  = "";
+
+     replay_q.delete();
+     REPLAY_SCHEDULED      = 1'b0;
+     RC_REPLAY_IN_PROGRESS = 1'b1;
+
      foreach (tx_retry_buffer[i]) begin
-        if ((REPLAY_SCHEDULED_TYPE == STANDARD_REPLAY) &&
-            (tx_retry_buffer[i].seq_num >= TX_REPLAY_FLIT_SEQ_NUM)) begin
-           send_replayed_buffer_entry(i);
-        end
-        else if (REPLAY_SCHEDULED_TYPE == SELECTIVE_REPLAY) begin
-           send_replayed_buffer_entry(i);
+        if (tx_retry_buffer[i].seq_num == TX_REPLAY_FLIT_SEQ_NUM) begin
+           start_idx = i;
            break;
         end
      end
+
+     if (start_idx < 0) begin
+        `uvm_warning("RC_REPLAY", $sformatf("REPLAY_SKIPPED :: flit SEQ_NUM=%0d is not in the TX retry buffer (already ACKed)",
+                     TX_REPLAY_FLIT_SEQ_NUM))
+        return;
+     end
+
+     if (REPLAY_SCHEDULED_TYPE == SELECTIVE_REPLAY)
+        replay_q.push_back(tx_retry_buffer[start_idx]);
+     else
+        for (int i = start_idx; i < tx_retry_buffer.size(); i++)
+           replay_q.push_back(tx_retry_buffer[i]);
+
+     count_replay_num();   // [DL_ERR] FLIT_REPLAY_NUM + rollover rule
+
+     foreach (replay_q[i]) seq_list = {seq_list, $sformatf("%0d ", replay_q[i].seq_num)};
+     `uvm_info("RC_REPLAY", $sformatf({"\n",
+        "  ==================== RC REPLAY START ====================\n",
+        "   Replay type        : %s\n",
+        "   Flits to replay    : %0d\n",
+        "   Sequence numbers   : %s\n",
+        "   FLIT_REPLAY_NUM    : %0d\n",
+        "  =========================================================="},
+        REPLAY_SCHEDULED_TYPE.name(), replay_q.size(), seq_list, FLIT_REPLAY_NUM), UVM_NONE)
+     PCIe_flow_log::print("REPLAY", $sformatf("RC %s seq %s", (REPLAY_SCHEDULED_TYPE == SELECTIVE_REPLAY) ? "SEL" : "STD", seq_list));   // [FLOW]
+  endfunction
+
+  // Sends ONE replayed flit to the RC PL model, with its ORIGINAL sequence number.
+  // The caller (RC driver) must drive it on the PIPE before calling this again.
+  function void send_replay_flit(tx_buffer_t entry, int unsigned num, int unsigned total);
+     PCIe_sequence_item r_item;
+     r_item = PCIe_sequence_item::type_id::create("rc_replay_item");
+     r_item.tlp_data   = entry.tlp_data;
+     r_item.seq_num    = entry.seq_num;
+     r_item.is_payload = 1'b1;
+     form_replay_flit(r_item.tlp_data, entry.seq_num, r_item.dlp_flit_out);
+     nak_ignore_window_check_start(entry.seq_num);
+     flit_cnt_count(1'b1, r_item.dlp_flit_out, 1'b1, 1'b1);   // [FLIT_CNT] TX (replayed flit)
+     flit_tx_replay++;                             // [FLIT_CNT] replayed flit
+     replayed_seq_q.push_back(entry.seq_num);
+     `uvm_info("RC_REPLAY", $sformatf("REPLAY_FLIT %0d/%0d :: SEQ_NUM=%0d :: %s :: sent to RC PL",
+               num, total, entry.seq_num, REPLAY_SCHEDULED_TYPE.name()), UVM_NONE)
+     dlp_pl_ap.write(r_item);
+  endfunction
+
+  function void finish_replay(int unsigned n_flits);
      RC_REPLAY_IN_PROGRESS = 1'b0;
+     `uvm_info("RC_REPLAY", $sformatf("REPLAY_DONE :: %0d flit(s) replayed :: waiting for ACK from EP", n_flits), UVM_NONE)
+  endfunction
+
+  // Builds a replayed payload flit : 236B TLP + 6B DLP with the ORIGINAL seq num.
+  //   DLP0[7:6] Flit Usage            = 01b (payload)
+  //   DLP0[5]   Prior Flit was Payload
+  //   DLP0[3:2] Replay Command        = 00b (Explicit Sequence Number)
+  //   DLP0[1:0] + DLP1 = 10-bit Flit Sequence Number
+  //   DLP2..5   = 0 (no DLLP in a replayed flit)
+  function void form_replay_flit(
+    input  bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,
+    input  bit [`PCIe_SEQ_NUM_W-1:0]                         seq_num,
+    output bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] dl_flit_out
+  );
+     bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp;
+     dlp = '0;
+     dlp[0][7:6]           = 2'b01;
+     dlp[0][5]             = last_flit_was_payload;
+     dlp[0][4]             = 1'b0;
+     dlp[0][3:2]           = 2'b00;
+     {dlp[0][1:0], dlp[1]} = seq_num;
+     last_flit_was_payload = 1'b1;
+     for (int i = 0; i < `PCIe_TLP_DATA_BYTE_W; i++) dl_flit_out[i] = tlp_data[i];
+     for (int i = 0; i < `PCIe_DLP_BYTE_W; i++)      dl_flit_out[`PCIe_TLP_DATA_BYTE_W+i] = dlp[i];
+  endfunction
+
+  // Nak Ignore Window : started when payload flit NAK_IGNORE_FLIT_SEQ_NUM+1 is sent
+  function void nak_ignore_window_check_start(bit [`PCIe_SEQ_NUM_W-1:0] seq_num);
+     if ((NAK_IGNORE_FLIT_SEQ_NUM != 10'h0) && (seq_num == mod1023_add(NAK_IGNORE_FLIT_SEQ_NUM, 10'h1)))
+        nak_ignore_window_start_ns = $realtime / 1ns;
+  endfunction
+
+  // 1 : a NAK for NAK_IGNORE_FLIT_SEQ_NUM must still be ignored
+  function bit nak_ignore_window_open();
+     if (nak_ignore_window_start_ns < 0.0) return 1'b0;    // not started
+     return (($realtime / 1ns) - nak_ignore_window_start_ns) <= NAK_IGNORE_WINDOW_NS;
+  endfunction
+
+  // ===========================================================================
+  // [DL_ERR] Data Link Layer error log  (PCIe 6.1 Sec 6.2, Table 6-4)
+  //   Each counter is one error the spec says must be LOGGED (reported) :
+  //     err_invalid_flit          correctable   receiver    : invalid flit (CRC fails after FEC)
+  //                                                           -> NAK + replay (Sec 4.2.3.4.2)
+  //     err_replay_timer_timeout  correctable   transmitter : no ACK progress for 1500 flits
+  //     err_replay_num_rollover   correctable   transmitter : too many replays, Port must enter Recovery
+  //     err_dl_protocol           uncorrectable receiver    : Data Link Protocol Error
+  //   Tests read the counters. A NOP / unsupported DLLP or a duplicate flit is
+  //   NOT an error : dl_error_total() must not change for them.
+  // ===========================================================================
+  int unsigned err_invalid_flit;
+  int unsigned err_replay_timer_timeout;
+  int unsigned err_replay_num_rollover;
+  int unsigned err_dl_protocol;
+
+  function void log_dl_error(string error_name, string detail);
+    `uvm_info("RC_DL_ERROR", $sformatf("DL ERROR LOGGED :: %s :: %s (total DL errors = %0d)",
+              error_name, detail, dl_error_total()), UVM_NONE)
+    PCIe_flow_log::print("DL_ERROR", $sformatf("RC %s", error_name));   // [FLOW]
+  endfunction
+
+  function int unsigned dl_error_total();
+    return err_invalid_flit + err_replay_timer_timeout + err_replay_num_rollover + err_dl_protocol;
+  endfunction
+
+  // [REPLAY] FLIT_REPLAY_NUM rules at the start of a replay (spec Flit Replay Transmit Rules 0/1/2, 64.0 GT/s)
+  //   FLIT_REPLAY_NUM <  111b : FLIT_REPLAY_NUM + 1, replay
+  //   FLIT_REPLAY_NUM == 111b : rollover to 000b, REPLAY_NUM Rollover error logged,
+  //                             the Port must enter Recovery (Recovery is NOT modelled :
+  //                             the replay is done right away)
+  function void count_replay_num();
+    if (FLIT_REPLAY_NUM == 3'b111) begin
+      FLIT_REPLAY_NUM = 3'b000;
+      err_replay_num_rollover++;
+      log_dl_error("REPLAY_NUM_ROLLOVER", "8 replays without forward progress -> Port must enter Recovery (not modelled, replay continues)");
+    end
+    else begin
+      FLIT_REPLAY_NUM++;
+    end
+  endfunction
+
+
+  // ===========================================================================
+  // [DL_RESET] DL_Inactive state reset  (PCIe 6.1 Sec 4.2.3.4.2.1 "Set to ... in DL_Inactive")
+  //   Called when the DLCMSM starts and when Physical LinkUp goes to 0.
+  //   All sequence numbers go back to their start values, all ACK/NAK/replay
+  //   flags are cleared and BOTH retry buffers are emptied (unACKed flits are lost).
+  // ===========================================================================
+  // (declaration moved to the top of the class : Questa needs it before its first use)
+
+  function void dl_reset_state(string why);
+    n_tx_flits_dropped_on_reset = tx_retry_buffer.size();
+    NEXT_TX_FLIT_SEQ_NUM                = 10'h001;
+    TX_ACKNAK_FLIT_SEQ_NUM              = 10'h3FF;
+    NEXT_EXPECTED_RX_FLIT_SEQ_NUM       = 10'h001;
+    IMPLICIT_RX_FLIT_SEQ_NUM            = 10'h000;
+    ACKD_FLIT_SEQ_NUM                   = 10'h3FF;
+    TX_REPLAY_FLIT_SEQ_NUM              = 10'h000;
+    NAK_IGNORE_FLIT_SEQ_NUM             = 10'h000;
+    FLIT_REPLAY_NUM                     = '0;
+    REPLAY_TIMEOUT_FLIT_COUNT           = 0;
+    NON_IDLE_EXPLICIT_SEQ_NUM_FLIT_RCVD = 1'b0;
+    NAK_SCHEDULED                       = 1'b0;
+    ACK_SCHEDULED                       = 1'b0;
+    REPLAY_SCHEDULED                    = 1'b0;
+    RC_REPLAY_IN_PROGRESS               = 1'b0;
+    NAK_WITHDRAWAL_ALLOWED              = 1'b0;
+    RX_RETRY_BUFFER_LAST_FLIT_SEQ_NUM   = 10'h000;
+    NEXT_RX_FLIT_SEQ_NUM_TO_STORE       = 10'h000;
+    RX_RETRY_BUFFER_OVERFLOW            = 1'b0;
+    last_flit_was_payload               = 1'b0;
+    nak_ignore_window_start_ns          = -1.0;
+    duplicate_flit_request              = 1'b0;
+    last_tx_payload_valid               = 1'b0;
+    dllp_tx_pending                     = 1'b0;
+    dllp_tx_lock                        = new(1);   // a killed sender may have kept the key
+    tx_retry_buffer.delete();
+    rx_retry_buffer.delete();
+    `uvm_info("RC_DL_RESET", $sformatf("DL_RESET :: %s :: sequence numbers back to start (NEXT_TX=1, ACKD=1023), flags cleared, retry buffers emptied (%0d unACKed flit(s) dropped)",
+              why, n_tx_flits_dropped_on_reset), UVM_LOW)
+  endfunction
+
+  // ===========================================================================
+  // [REPLAY_TIMER] Replay timeout  (PCIe 6.1 Sec 4.2.3.4.2.1.6, Replay Schedule Rule 0)
+  //   REPLAY_TIMEOUT_FLIT_COUNT counts the flits sent while the TX retry buffer
+  //   is not empty. It goes back to 0 when an ACK/NAK purges a flit.
+  //   When it reaches REPLAY_TIMEOUT_LIMIT (1500 flits) a STANDARD replay of all
+  //   unACKed flits is scheduled, starting at ACKD_FLIT_SEQ_NUM + 1.
+  //
+  //   Model : a real link sends a flit in every flit time (NOP flits when it is
+  //   idle), so the counter goes up once per flit time
+  //   (`PCIe_LANES_PER_FLIT pclk cycles) while the TX retry buffer is not empty.
+  // ===========================================================================
+  // (declaration moved to the top of the class : Questa needs it before its first use)
+
+  task run_replay_timer();
+    wait (dl_link_active);
+    forever begin
+      wait_one_flit_time();
+      if ((tx_retry_buffer.size() > 0) && (REPLAY_TIMEOUT_FLIT_COUNT < 11'h7FF))
+        REPLAY_TIMEOUT_FLIT_COUNT++;
+      if ((REPLAY_TIMEOUT_FLIT_COUNT >= REPLAY_TIMEOUT_LIMIT) && !REPLAY_SCHEDULED && !RC_REPLAY_IN_PROGRESS) begin
+        REPLAY_SCHEDULED          = 1'b1;
+        REPLAY_SCHEDULED_TYPE     = STANDARD_REPLAY;
+        TX_REPLAY_FLIT_SEQ_NUM    = mod1023_add(ACKD_FLIT_SEQ_NUM, 10'h1);
+        REPLAY_TIMEOUT_FLIT_COUNT = 0;
+        n_replay_timeouts++;
+        err_replay_timer_timeout++;   // [DL_ERR]
+        log_dl_error("REPLAY_TIMER_TIMEOUT", $sformatf("no ACK progress for %0d flits -> STANDARD replay", REPLAY_TIMEOUT_LIMIT));
+        `uvm_info("RC_REPLAY", $sformatf({"\n",
+           "  ==================== RC REPLAY TIMER TIMEOUT ====================\n",
+           "   No ACK for %0d flit times with %0d flit(s) waiting in the TX retry buffer\n",
+           "   Replay Timer Timeout error logged (correctable, Sec 6.2)\n",
+           "   -> STANDARD_REPLAY scheduled from SEQ_NUM=%0d (ACKD_FLIT_SEQ_NUM + 1)\n",
+           "  ================================================================"},
+           REPLAY_TIMEOUT_LIMIT, tx_retry_buffer.size(), TX_REPLAY_FLIT_SEQ_NUM), UVM_NONE)
+        PCIe_flow_log::print("REPLAY_TIMER", $sformatf("RC timeout (%0d flits, no ACK) -> STD replay from seq %0d", REPLAY_TIMEOUT_LIMIT, TX_REPLAY_FLIT_SEQ_NUM));   // [FLOW]
+      end
+    end
   endtask
 
-  // Re-forms a single retry-buffer entry as a payload flit and writes it to PL,
-  // bypassing the TL (the original driver sent replays back through tx_ap).
-  task send_replayed_buffer_entry(int unsigned idx);
-     PCIe_sequence_item r_item;
-     r_item = PCIe_sequence_item::type_id::create("r_item");
-     r_item.tlp_data = tx_retry_buffer[idx].tlp_data;
-     r_item.seq_num  = tx_retry_buffer[idx].seq_num;
-     form_dl_packet(r_item.tlp_data, 1'b1, r_item.dlp_flit_out);
-     `uvm_info("RC_DL_MODEL",$sformatf("SENDING_DLP_TO_PL_MODEL"),UVM_LOW)
-     //dlp_pl_ap.write(r_item);
+  task wait_one_flit_time();
+    if (dl_aif != null) repeat (`PCIe_LANES_PER_FLIT) @(posedge dl_aif.pclk);
+    else                #(`PCIe_LANES_PER_FLIT * 1ns);
   endtask
+
+  // ===========================================================================
+  // [TX_BUF_LIMIT] TX retry buffer limit
+  //   Spec : at most 511 flits may be unACKed (MAX_UNACKNOWLEDGED_FLITS). When
+  //   the TX retry buffer is full the transmitter must not send a NEW payload
+  //   flit. The RC driver waits on tx_retry_buffer_full() before each TLP.
+  //   A test may lower TX_RETRY_BUFFER_MAX_FLITS to reach the limit quickly.
+  // ===========================================================================
+  int unsigned TX_RETRY_BUFFER_MAX_FLITS = `PCIe_MAX_UNACK_FLITS;
+  int unsigned n_tx_retry_buffer_full_waits;           // TLPs that had to wait for space
+
+  function bit tx_retry_buffer_full();
+    return (tx_retry_buffer.size() >= TX_RETRY_BUFFER_MAX_FLITS);
+  endfunction
+
+  // ===========================================================================
+  // [SEQ_LOG] Sequence number of every NEW payload flit sent (tests read it)
+  //   and a test helper to move the sequence numbers near the wrap point.
+  // ===========================================================================
+  bit [`PCIe_SEQ_NUM_W-1:0] tx_payload_seq_q[$];
+
+  // Only when nothing is waiting for an ACK : NEXT_TX = next_seq, ACKD = next_seq - 1
+  function void set_tx_seq_for_test(bit [`PCIe_SEQ_NUM_W-1:0] next_seq);
+    if (tx_retry_buffer.size() != 0)
+      `uvm_error("RC_SEQ_TEST", $sformatf("set_tx_seq_for_test : %0d flit(s) still unACKed", tx_retry_buffer.size()))
+    NEXT_TX_FLIT_SEQ_NUM    = next_seq;
+    ACKD_FLIT_SEQ_NUM       = mod1023_sub(next_seq, 10'h1);
+    TX_REPLAY_FLIT_SEQ_NUM  = 10'h000;
+    NAK_IGNORE_FLIT_SEQ_NUM = 10'h000;
+    `uvm_info("RC_SEQ_TEST", $sformatf("TX SEQUENCE NUMBER MOVED :: NEXT_TX_FLIT_SEQ_NUM=%0d ACKD_FLIT_SEQ_NUM=%0d",
+              NEXT_TX_FLIT_SEQ_NUM, ACKD_FLIT_SEQ_NUM), UVM_NONE)
+  endfunction
+
+  // ===========================================================================
+  // [DUP_FLIT] Duplicate flit injection (test only)
+  //   The last NEW payload flit is kept. When a test sets duplicate_flit_request,
+  //   the RC driver sends it once more with its ORIGINAL sequence number.
+  //   The EP has already ACKed it, so it must drop it (Flit Discard 0).
+  // ===========================================================================
+  // (declaration moved to the top of the class : Questa needs it before its first use)
+
+  function void send_duplicate_flit();
+    PCIe_sequence_item d_item;
+    if (!last_tx_payload_valid) begin
+      `uvm_warning("RC_DUP_FLIT", "no payload flit sent yet : nothing to duplicate")
+      return;
+    end
+    d_item = PCIe_sequence_item::type_id::create("rc_duplicate_item");
+    d_item.tlp_data   = last_tx_payload_flit.tlp_data;
+    d_item.seq_num    = last_tx_payload_flit.seq_num;
+    d_item.is_payload = 1'b1;
+    form_replay_flit(d_item.tlp_data, last_tx_payload_flit.seq_num, d_item.dlp_flit_out);
+    flit_cnt_count(1'b1, d_item.dlp_flit_out, 1'b1, 1'b1);   // [FLIT_CNT] TX (duplicate flit)
+    n_duplicate_flits_sent++;
+    PCIe_flow_log::print("TEST", $sformatf("RC sent duplicate seq %0d", last_tx_payload_flit.seq_num));                                   // [FLOW]
+    `uvm_info("RC_DUP_FLIT", $sformatf("DUPLICATE_FLIT :: SEQ_NUM=%0d sent again (already ACKed by EP)",
+              last_tx_payload_flit.seq_num), UVM_NONE)
+    dlp_pl_ap.write(d_item);
+  endfunction
+
+  // ===========================================================================
+  // [OPT_UPDATE_FC] Optimized_Update_FC receive  (PCIe 6.1 Table 4-17 / Table 4-18)
+  //   DLP0[4] = 1 : DLP2..5 hold an Optimized_Update_FC (bit 31 = 0) or a
+  //                 Flit_Marker (bit 31 = 1), NOT a DLLP.
+  //   Optimized_Update_FC : [30:28] VC  [27:20] Shared NPH  [19:12] Shared PH
+  //                         [11:0] Shared PD
+  //   The new SHARED limits go to the TL like a shared UpdateFC
+  //   (P : PH + PD, NP : NPH + last known NPD).
+  // ===========================================================================
+  int unsigned n_opt_updfc_rx;
+
+  function void fc_rx_opt_update(bit [31:0] v);
+    bit [2:0]          vc;
+    PCIe_sequence_item p_item, np_item;
+    vc = v[30:28];
+    n_opt_updfc_rx++;
+    `uvm_info("RC_DL_FC", $sformatf("[FC_DL_RX] OPTIMIZED_UPDATE_FC VC%0d : SHARED NPH=%0d PH=%0d PD=%0d (raw %08h)",
+              vc, v[27:20], v[19:12], v[11:0], v), UVM_LOW)
+    if (!fc_vc_on(vc)) begin
+      n_fc_dllp_dis_vc++;
+      `uvm_info("RC_DL_FC", $sformatf("[FC_DL_RX] VC%0d is not enabled on this Port -> Optimized_Update_FC ignored", vc), UVM_LOW)
+      return;
+    end
+    fi2[vc] = 1'b1;
+    peer_h_shr[vc][0] = v[19:12];
+    peer_d_shr[vc][0] = v[11:0];
+    peer_h_shr[vc][1] = v[27:20];
+
+    p_item = PCIe_sequence_item::type_id::create("fc_opt_p_item");
+    p_item.fc_kind   = FC_PEER_UPDATE;
+    p_item.fc_vc     = vc;
+    p_item.fc_origin = "RC_DL";
+    p_item.fc_reason = "OPTIMIZED_UPDATE_FC";
+    p_item.set_fc_cls_shr(0, peer_h_shr[vc][0], peer_d_shr[vc][0]);
+    p_item.fc_hdr_inf_shr[0] = peer_hinf_shr[vc][0];
+    p_item.fc_dat_inf_shr[0] = peer_dinf_shr[vc][0];
+    fc_tl_ap.write(p_item);
+
+    np_item = PCIe_sequence_item::type_id::create("fc_opt_np_item");
+    np_item.fc_kind   = FC_PEER_UPDATE;
+    np_item.fc_vc     = vc;
+    np_item.fc_origin = "RC_DL";
+    np_item.fc_reason = "OPTIMIZED_UPDATE_FC";
+    np_item.set_fc_cls_shr(1, peer_h_shr[vc][1], peer_d_shr[vc][1]);
+    np_item.fc_hdr_inf_shr[1] = peer_hinf_shr[vc][1];
+    np_item.fc_dat_inf_shr[1] = peer_dinf_shr[vc][1];
+    fc_tl_ap.write(np_item);
+  endfunction
+
+  // ===========================================================================
+  // [LOST_UPDATEFC] Test knob : while drop_p_updatefc = 1 every received
+  //   UpdateFC for the Posted class is thrown away (as if the DLLP was lost).
+  //   The EP must recover the credits with its periodic UpdateFC (30 us).
+  // ===========================================================================
+  bit          drop_p_updatefc;
+  int unsigned n_p_updatefc_dropped;
+
+  // ===========================================================================
+  // [LOST_NAK] Test knob : while drop_naks = 1 every received NAK is thrown
+  //   away (as if it was lost on the link). No NAK replay happens, so the
+  //   REPLAY TIMER must recover the lost flit (Replay Schedule Rule 0).
+  // ===========================================================================
+  bit          drop_naks;
+  int unsigned n_naks_dropped;
 
    task run_dlcmsm();
       forever begin
@@ -511,6 +898,7 @@ endfunction
       `uvm_info("RC_DLCMSM",$sformatf("[DL_INIT.FC_INIT2] ROUND_%0d_DONE :: FI2=%0b",fc2_sent_count,fi2_done()),UVM_LOW)
       if (fi2_done()) begin
          `uvm_info("RC_DLCMSM","[DL_INIT.FC_INIT2] FI2_SET :: TRANSITION -> DL_ACTIVE",UVM_LOW)
+         PCIe_flow_log::print("FC_INIT", "RC FC init done");   // [FLOW]
          DL_STATE = DL_ACTIVE;
       end
       else if (fc2_sent_count >= `PCIe_FC_INIT_MAX_ROUNDS) begin
@@ -526,6 +914,7 @@ endfunction
    // ---------------- DL_ACTIVE ----------------
    task dlcmsm_state_dl_active();
       `uvm_info("RC_DLCMSM","ENTERED_INTO_DL_ACTIVE_STATE",UVM_LOW)
+      PCIe_flow_log::print("DLCMSM", "RC DL_Active");   // [FLOW]
       dl_link_active = 1'b1;
          dl_active_event.trigger();
       `uvm_info("RC_DLCMSM",$sformatf("[DL_ACTIVE] dl_active_event_TRIGGERED :: TL_MAY_NOW_SEND_TLPs link_active=%0d",dl_link_active),UVM_LOW)
@@ -539,6 +928,9 @@ endfunction
     // PL model.
     task send_dllp_flit(bit [31:0] content);
        PCIe_sequence_item dcm_item;
+       semaphore          my_lock;
+       my_lock = dllp_tx_lock;   // [DLLP_LOCK] keep the handle : a reset may create a new one
+       my_lock.get(1);           // [DLLP_LOCK] one DLLP flit at a time
        dcm_item = PCIe_sequence_item::type_id::create("dcm_item");
        dllp_content = content;
        form_dl_packet(dcm_item.tlp_data, 1'b0, dcm_item.dlp_flit_out); // is_payload=0
@@ -560,6 +952,7 @@ endfunction
        `uvm_info("RC_DLCMSM",$sformatf("SENT_DLLP_FLIT content=%08h :: WAITING_FOR_DRIVER_TO_DRIVE_IT_ON_PIPE",content),UVM_LOW)
        wait (dllp_tx_pending == 1'b0);
        `uvm_info("RC_DLCMSM",$sformatf("DLLP_FLIT_DRIVEN_ON_PIPE content=%08h",content),UVM_LOW)
+       my_lock.put(1);           // [DLLP_LOCK]
     endtask
   // =========================================================================
   // END DLCMSM FSM BLOCK
@@ -669,6 +1062,7 @@ endfunction
       replay_command = 2'b01;
       seq_num_to_send = TX_ACKNAK_FLIT_SEQ_NUM;
     end
+    note_acknak_sent(seq_num_to_send, replay_command);   // [FLOW_SUM]
 
     // Construct DLP0
     dlp[0][7:6] = is_payload ? 2'b01 : 2'b00;
@@ -687,7 +1081,20 @@ endfunction
     dlp[5] = dllp_content[7:0];
 
     // Update DL Internal State
-    if((replay_command == 2'b00) && is_payload) begin
+    // [REPLAY] A NEW payload flit always gets NEXT_TX_FLIT_SEQ_NUM (also when it
+    // carries an ACK/NAK) and only payload flits are stored in the TX retry
+    // buffer. Replayed flits do NOT come here (see form_replay_flit).
+    if(is_payload) begin
+      store_tx_retry_buffer(tlp_data,NEXT_TX_FLIT_SEQ_NUM);
+      nak_ignore_window_check_start(NEXT_TX_FLIT_SEQ_NUM);
+      tx_payload_seq_q.push_back(NEXT_TX_FLIT_SEQ_NUM);                       // [SEQ_LOG]
+      if (n_tx_new_payload == 0) first_tx_seq = NEXT_TX_FLIT_SEQ_NUM;          // [FLOW_SUM]
+      last_tx_seq = NEXT_TX_FLIT_SEQ_NUM;
+      n_tx_new_payload++;
+      last_tx_payload_flit  = '{tlp_data:tlp_data, seq_num:NEXT_TX_FLIT_SEQ_NUM};   // [DUP_FLIT]
+      last_tx_payload_valid = 1'b1;
+      `uvm_info("RC_DL_MODEL",$sformatf("TX_RETRY_BUFFER_STORE :: new payload flit SEQ_NUM=%0d stored (buffer size=%0d)",
+                NEXT_TX_FLIT_SEQ_NUM, tx_retry_buffer.size()),UVM_LOW);
       NEXT_TX_FLIT_SEQ_NUM = mod1023_add(NEXT_TX_FLIT_SEQ_NUM,{{(`PCIe_SEQ_NUM_W-1){1'b0}},1'b1});
       `uvm_info("RC_DL_MODEL",$sformatf("NEXT_TX_FLIT_SEQ_NUM INSIDE THE DL INTERNAL STATE IS %d",NEXT_TX_FLIT_SEQ_NUM),UVM_LOW);
     end
@@ -709,8 +1116,6 @@ endfunction
       dl_flit_out[`PCIe_TLP_DATA_BYTE_W+i] = dlp[i];
 
     `uvm_info("RC_DL_MODEL",$sformatf("replay_cmd=%d :: is_payload=%d :: dllp_sequence_number=%0h :: dlp=%p",replay_command,is_payload,{dlp[0][1:0],dlp[1]},dl_flit_out),UVM_LOW);
-
-    store_tx_retry_buffer(tlp_data,seq_num_to_send);
   endfunction
 
   
@@ -844,7 +1249,8 @@ endfunction
 
   // Log the receiver error in register
   task log_data_link_protocol_error();
-    `uvm_info("RC_DL_MODEL","ERROR: Data Link Protocol Error Logged",UVM_LOW);
+    err_dl_protocol++;   // [DL_ERR]
+    log_dl_error("DATA_LINK_PROTOCOL_ERROR", "bad ACK/NAK sequence number or protocol violation");
   endtask
 
 
@@ -1147,6 +1553,8 @@ endfunction
                   dump),
                 UVM_LOW);
 
+      n_rx_tlp_to_tl++;                                                       // [FLOW_SUM]
+      rx_accept_cnt[tlp_kind(received_tlp[0], received_tlp[4])]++;
       rc_dl_tl_ap.write(tl_item);
     end
     else begin
@@ -1193,6 +1601,8 @@ endfunction
 
     // Invalid Flit Handling
     if(!is_valid) begin
+      err_invalid_flit++;   // [DL_ERR]
+      log_dl_error("INVALID_FLIT", "CRC fails after FEC correction -> flit dropped");
       if(NAK_SCHEDULED) begin
         if(NAK_SCHEDULED_TYPE == STANDARD_NAK)
           discard_flit(1);
@@ -1273,23 +1683,25 @@ endfunction
     bit is_ack;
     bit is_nak;
 
-    is_ack = 1'b0;
-    is_nak = 1'b0;
-
-    if(replay_cmd == 2'b01)
-      is_ack = 1'b1;
-    else if(replay_cmd == 2'b10) begin
-      is_nak = 1'b1;
-      REPLAY_SCHEDULED_TYPE = STANDARD_REPLAY;
-    end
-    else if(replay_cmd == 2'b11) begin
-      is_nak = 1'b1;
-      REPLAY_SCHEDULED_TYPE = SELECTIVE_REPLAY;
-    end
+    is_ack = (replay_cmd == 2'b01);
+    is_nak = (replay_cmd == 2'b10) || (replay_cmd == 2'b11);   // 10b Standard NAK, 11b Selective NAK
 
     // ACK/NAK with Sequence Number 0 must be ignored
     if(N == '0)
       return;
+
+    note_acknak_rcvd(N, replay_cmd);   // [FLOW_SUM] counts + [FLOW] line for a new NAK
+
+    // [LOST_NAK] test knob : while drop_naks = 1 every received NAK is thrown
+    // away (as if the flit with the NAK was lost). The replay timer must recover.
+    if (is_nak && drop_naks) begin
+      n_naks_dropped++;
+      if (acknak_rx_is_new)
+        PCIe_flow_log::print("TEST", $sformatf("RC dropped NAK(%0d) (lost-NAK test)", N));   // [FLOW]
+      `uvm_info("RC_DL_MODEL", $sformatf("TEST : %s(%0d) DROPPED (lost NAK) :: waiting for the replay timer",
+                (replay_cmd == 2'b11) ? "SELECTIVE_NAK" : "STANDARD_NAK", N), UVM_NONE)
+      return;
+    end
 
     `uvm_info("RC_DL_MODEL",$sformatf("NEXT_TX_FLIT_SEQ_NUM=%d, N=%d", NEXT_TX_FLIT_SEQ_NUM,N),UVM_LOW);
     // Guard 1: Future Check
@@ -1305,7 +1717,7 @@ endfunction
       return;
     end
 
-    purge_tx_retry_buffer(N);
+    purge_tx_retry_buffer(N);   // flit N and all older flits were received by the EP
 
     if(mod1023_sub(N,ACKD_FLIT_SEQ_NUM) > 0) begin
       FLIT_REPLAY_NUM = '0;
@@ -1313,20 +1725,24 @@ endfunction
     end
 
     if(is_ack) begin
-      NAK_IGNORE_FLIT_SEQ_NUM = '0;
+      `uvm_info("RC_DL_MODEL",$sformatf("ACK(%0d) RECEIVED :: TX retry buffer size=%0d", N, tx_retry_buffer.size()),UVM_LOW);
+      NAK_IGNORE_FLIT_SEQ_NUM    = '0;
+      nak_ignore_window_start_ns = -1.0;
 
       if(mod1023_sub(N,TX_REPLAY_FLIT_SEQ_NUM) < MAX_UNACKNOWLEDGED_FLITS)
         TX_REPLAY_FLIT_SEQ_NUM = '0;
     end
     else if(is_nak) begin
-      `uvm_info("RC_DL_MODEL","Entered the nak logic",UVM_LOW);
+      `uvm_info("RC_DL_MODEL",$sformatf("%s(%0d) RECEIVED from EP :: flit %0d was lost",
+                (replay_cmd == 2'b11) ? "SELECTIVE_NAK" : "STANDARD_NAK", N, mod1023_add(N,10'h1)),UVM_NONE);
 
+      // NAK_IGNORE_FLIT_SEQ_NUM rules (spec 4.2.3.4.2.1.4), before the replay rules
       if(N == mod1023_sub(NEXT_TX_FLIT_SEQ_NUM,{{(`PCIe_SEQ_NUM_W-1){1'b0}},1'b1}))
         NAK_IGNORE_FLIT_SEQ_NUM = N;
       else if(N != NAK_IGNORE_FLIT_SEQ_NUM)
         NAK_IGNORE_FLIT_SEQ_NUM = '0;
 
-      schedule_replay(N+{{(`PCIe_SEQ_NUM_W-1){1'b0}},1'b1});
+      schedule_replay_on_nak(N, (replay_cmd == 2'b11));
     end
   endtask
 
@@ -1338,35 +1754,73 @@ endfunction
 
 
   task purge_tx_retry_buffer(bit [`PCIe_SEQ_NUM_W-1:0] N);
-    `uvm_info("RC_DL_MODEL",$sformatf("PURGING: Entry size of buffer :: %d",tx_retry_buffer.size()),UVM_LOW);
-
     while(tx_retry_buffer.size() > 0) begin
-      bit [`PCIe_SEQ_NUM_W-1:0] S = tx_retry_buffer[0].seq_num;
-
-      `uvm_info("RC_DL_MODEL",$sformatf("Sequence number flit deleted from the buffer is ::S=%d, tx_retry_buffer=%p",S,tx_retry_buffer),UVM_LOW);
-
-      if(is_older_than_or_including(S,N))
+      if(is_older_than_or_including(tx_retry_buffer[0].seq_num,N)) begin
+        `uvm_info("RC_DL_MODEL",$sformatf("TX_RETRY_BUFFER_PURGE :: SEQ_NUM=%0d acknowledged by EP, removed",tx_retry_buffer[0].seq_num),UVM_LOW);
         void'(tx_retry_buffer.pop_front());
+        REPLAY_TIMEOUT_FLIT_COUNT = 0;   // [REPLAY_TIMER] forward progress -> timer restarts
+      end
       else
         break;
     end
-
-    `uvm_info("RC_DL_MODEL",$sformatf("PURGING: Final buffer size is %d",tx_retry_buffer.size()),UVM_LOW);
   endtask
 
 
-  task schedule_replay(bit [`PCIe_SEQ_NUM_W-1:0] start_seq);
-    `uvm_info("RC_DL_MODEL","Entered the replay schedule task_",UVM_LOW);
+  // ---------------------------------------------------------------------------
+  // [REPLAY] Replay scheduling on a received NAK(N)  (spec 4.2.3.4.2.1.6)
+  //   Rule 1 : flit N+1 is in the TX retry buffer and no replay is running
+  //            -> schedule a Standard or Selective replay of flit N+1
+  //   Rule 2 : Standard NAK after a Selective NAK, replay not started yet
+  //            -> change the scheduled replay to a Standard replay
+  //   A repeated NAK(N) inside the Nak Ignore Window is ignored.
+  //   The RC driver then runs the replay (drive_replay).
+  // ---------------------------------------------------------------------------
+  function void schedule_replay_on_nak(bit [`PCIe_SEQ_NUM_W-1:0] N, bit is_selective_nak);
+    bit [`PCIe_SEQ_NUM_W-1:0] lost_seq;
+    bit lost_flit_in_buffer;
 
-    REPLAY_SCHEDULED = 1'b1;
-    RC_REPLAY_IN_PROGRESS = 1'b1;
-    TX_REPLAY_FLIT_SEQ_NUM = start_seq;
-  endtask
+    lost_seq            = mod1023_add(N, 10'h1);
+    lost_flit_in_buffer = 1'b0;
+    foreach (tx_retry_buffer[i])
+      if (tx_retry_buffer[i].seq_num == lost_seq) lost_flit_in_buffer = 1'b1;
 
+    // Rule 2
+    if (!is_selective_nak && REPLAY_SCHEDULED && !RC_REPLAY_IN_PROGRESS &&
+        (REPLAY_SCHEDULED_TYPE == SELECTIVE_REPLAY) && (TX_REPLAY_FLIT_SEQ_NUM == lost_seq)) begin
+      REPLAY_SCHEDULED_TYPE = STANDARD_REPLAY;
+      `uvm_info("RC_REPLAY", $sformatf("REPLAY_UPGRADED :: Standard NAK(%0d) after Selective NAK -> STANDARD_REPLAY from SEQ_NUM=%0d", N, lost_seq), UVM_NONE)
+      return;
+    end
+
+    // Rule 1
+    if (!lost_flit_in_buffer) begin
+      `uvm_info("RC_REPLAY", $sformatf("NAK(%0d) IGNORED :: flit SEQ_NUM=%0d is not in the TX retry buffer", N, lost_seq), UVM_LOW)
+      return;
+    end
+    if (REPLAY_SCHEDULED || RC_REPLAY_IN_PROGRESS) begin
+      `uvm_info("RC_REPLAY", $sformatf("NAK(%0d) IGNORED :: a replay is already scheduled / in progress", N), UVM_LOW)
+      return;
+    end
+    if ((NAK_IGNORE_FLIT_SEQ_NUM == N) && nak_ignore_window_open()) begin
+      `uvm_info("RC_REPLAY", $sformatf("NAK(%0d) IGNORED :: repeated NAK inside the Nak Ignore Window", N), UVM_LOW)
+      if (acknak_rx_is_new) n_nak_ignored++;   // [FLOW_SUM]
+      return;
+    end
+
+    REPLAY_SCHEDULED        = 1'b1;
+    TX_REPLAY_FLIT_SEQ_NUM  = lost_seq;
+    NAK_IGNORE_FLIT_SEQ_NUM = N;
+    REPLAY_SCHEDULED_TYPE   = is_selective_nak ? SELECTIVE_REPLAY : STANDARD_REPLAY;
+    if (is_selective_nak) n_sel_replay++;
+    else                  n_std_replay++;
+    `uvm_info("RC_REPLAY", $sformatf("REPLAY_SCHEDULED :: %s NAK(%0d) received -> %s starting at SEQ_NUM=%0d",
+              is_selective_nak ? "SELECTIVE" : "STANDARD", N, REPLAY_SCHEDULED_TYPE.name(), lost_seq), UVM_NONE)
+  endfunction
 
   // Storing the tx_retry_buffer
   function void store_tx_retry_buffer(input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,input bit [`PCIe_SEQ_NUM_W-1:0] seq_num);
     tx_retry_buffer.push_back('{tlp_data:tlp_data,seq_num:seq_num});
+    if (tx_retry_buffer.size() > max_tx_retry_used) max_tx_retry_used = tx_retry_buffer.size();   // [FLOW_SUM]
   //  `uvm_info("RC_DL_MODEL",$sformatf("The Retry Buffer Content is %p",tx_retry_buffer),UVM_LOW);
   endfunction
 
@@ -1618,6 +2072,11 @@ endfunction
     // the VC of a TLP; a TLP during FC init can only be VC0 traffic.
     if (dlp[0][7:6] == 2'b01) fi2[0] = 1'b1;
     v = {dlp[2], dlp[3], dlp[4], dlp[5]};
+    // [OPT_UPDATE_FC] DLP0[4] = 1 : Optimized_Update_FC (bit 31 = 0) or Flit_Marker (bit 31 = 1), not a DLLP
+    if (dlp[0][4]) begin
+      if (!v[31]) fc_rx_opt_update(v);
+      return;
+    end
     if (!PCIe_sequence_item::fc_is_dllp(v)) return;
     PCIe_sequence_item::fc_decode(v, typ, cls, shared, vc, hs, hfc, ds, dfc);
     `uvm_info("RC_DL_FC", $sformatf("[FC_DL_RX] %s", PCIe_sequence_item::fc_dllp_str(v)), UVM_LOW)
@@ -1651,6 +2110,13 @@ endfunction
         if (typ == `PCIe_FC_TYPE_INITFC2) fi2[vc] = 1'b1;
       end
       `PCIe_FC_TYPE_UPDATEFC: begin
+        // [LOST_UPDATEFC] test knob : this Posted UpdateFC is "lost on the link"
+        if (drop_p_updatefc && (c == 0)) begin
+          n_p_updatefc_dropped++;
+          `uvm_info("RC_DL_FC", $sformatf("[FC_DL_RX] TEST : UpdateFC%s VC%0d class P DROPPED (lost DLLP) :: %s",
+                    shared ? "-SHARED" : "", vc, PCIe_sequence_item::fc_dllp_str(v)), UVM_NONE)
+          return;
+        end
         if (shared) n_updfc_rx_shr++; else n_updfc_rx++;
         fi2[vc] = 1'b1;
         if (!shared) begin
@@ -1733,7 +2199,8 @@ endfunction
   // =========================================================================
   function void flit_cnt_count(bit is_tx,
                                bit [0:`PCIe_DLP_FLIT_BYTE_W-1][`PCIe_BYTE_W-1:0] f,
-                               bit is_good = 1'b1);
+                               bit is_good  = 1'b1,
+                               bit is_retx  = 1'b0);   // [FLOW_SUM] 1 : replayed / duplicate flit
     bit [7:0]  dlp0;
     bit [1:0]  rcmd;
     bit [31:0] v;
@@ -1749,23 +2216,11 @@ endfunction
       return;
     end
     if (dlp0[7:6] == 2'b01) begin                    // payload flit -> TLP
-      t = (f[0] == `PCIe_FLITTYPE_PREFIX) ? f[4] : f[0];
-      case (t)
-        8'h40, 8'h60                      : k = FLTC_MWR;
-        8'h00, 8'h01, 8'h03, 8'h20, 8'h21 : k = FLTC_MRD;
-        8'h04, 8'h05                      : k = FLTC_CFGRD;
-        8'h44, 8'h45                      : k = FLTC_CFGWR;
-        8'h0A, 8'h0B                      : k = FLTC_CPL;
-        8'h4A, 8'h4B                      : k = FLTC_CPLD;
-        default : begin
-          if      (t[7:3] == 5'b00110) k = FLTC_MSG;
-          else if (t[7:3] == 5'b01110) k = FLTC_MSGD;
-          else                         k = FLTC_OTHER_TLP;
-        end
-      endcase
+      k = tlp_kind(f[0], f[4]);                      // [FLOW_SUM] same decode as before, now a function
     end
     else if (v != 32'h0) begin                       // DLLP flit
-      if (PCIe_sequence_item::fc_is_dllp(v)) begin
+      if (dlp0[4]) k = FLTC_OPT_UPDATEFC;            // [OPT_UPDATE_FC] Optimized_Update_FC / Flit_Marker
+      else if (PCIe_sequence_item::fc_is_dllp(v)) begin
         case (v[31:30])
           `PCIe_FC_TYPE_INITFC1 : k = FLTC_INITFC1;
           `PCIe_FC_TYPE_INITFC2 : k = FLTC_INITFC2;
@@ -1773,12 +2228,15 @@ endfunction
         endcase
       end
       else if (v[31:24] == FEATURE_DLLP[31:24]) k = FLTC_FEATURE;
+      else if (v[31:24] == 8'h31)                k = FLTC_NOP_DLLP;         // [FLOW_SUM] NOP DLLP
+      else if (v[31:24] == 8'h28)                k = FLTC_LINK_MGMT_DLLP;   // [FLOW_SUM] Link Management DLLP
       else                                       k = FLTC_OTHER_DLLP;
     end
     else if (rcmd[1])          k = FLTC_NAK;         // 10 = standard NAK, 11 = selective NAK
     else if (rcmd == 2'b01)    k = FLTC_ACK;
     else                       k = FLTC_NOP;
     if (is_tx) flit_tx_cnt[k]++; else flit_rx_cnt[k]++;
+    if (is_tx && !is_retx) flit_tx_new_cnt[k]++;     // [FLOW_SUM]
     if (rcmd[1] && (k != FLTC_NAK)) begin
       if (is_tx) flit_tx_nak_piggy++; else flit_rx_nak_piggy++;
     end
@@ -1801,42 +2259,241 @@ endfunction
     endcase
   endfunction
 
-  // Prints the flit table in the log at the end of the test
-  function void flit_cnt_report();
+  // =========================================================================
+  // [FLOW_SUM] helpers + RC FLIT SUMMARY text
+  //   The summary is printed at the end of the test by flit_summary_report()
+  //   (called from report_phase of this DL model) :
+  //     1. FLIT COUNT   2. SEQUENCE NUMBERS   3. ACK / NAK   4. REPLAY
+  //     5. COMPLETIONS (from the RC TL model)  6. DL ERRORS LOGGED
+  // =========================================================================
+
+  // TLP type of a payload flit : byte 0 of the TLP
+  // (byte 4 when byte 0 is the Flit Mode prefix)
+  function flit_cnt_e tlp_kind(bit [7:0] b0, bit [7:0] b4);
+    bit [7:0] t;
+    t = (b0 == `PCIe_FLITTYPE_PREFIX) ? b4 : b0;
+    case (t)
+      8'h40, 8'h60                      : return FLTC_MWR;
+      8'h00, 8'h01, 8'h03, 8'h20, 8'h21 : return FLTC_MRD;
+      8'h04, 8'h05                      : return FLTC_CFGRD;
+      8'h44, 8'h45                      : return FLTC_CFGWR;
+      8'h0A, 8'h0B                      : return FLTC_CPL;
+      8'h4A, 8'h4B                      : return FLTC_CPLD;
+      default : begin
+        if      (t[7:3] == 5'b00110) return FLTC_MSG;
+        else if (t[7:3] == 5'b01110) return FLTC_MSGD;
+        else                         return FLTC_OTHER_TLP;
+      end
+    endcase
+  endfunction
+
+  // Credit value for the log : "INF" when the credit is infinite
+  function string fc_val_str(int unsigned v, bit inf);
+    if (inf) return "INF";
+    return $sformatf("%0d", v);
+  endfunction
+
+  // ACK / NAK received from the EP. A flit repeats the same ACK/NAK until a new
+  // one is scheduled, so only a NEW {command, seq num} is counted.
+  function void note_acknak_rcvd(bit [`PCIe_SEQ_NUM_W-1:0] N, bit [`PCIe_REPLAY_CMD_W-1:0] cmd);
+    int key;
+    key = int'({cmd, N});
+    acknak_rx_is_new = (key != last_rx_acknak_key);
+    if (!acknak_rx_is_new) return;
+    last_rx_acknak_key = key;
+    if (cmd == 2'b01) n_ack_rcvd++;
+    else if (cmd[1]) begin
+      if (cmd == 2'b11) n_sel_nak_rcvd++;
+      else              n_std_nak_rcvd++;
+      nak_rcvd_lost_seq_q.push_back(mod1023_add(N, 10'h1));
+      PCIe_flow_log::print("NAK", $sformatf("RC got %s NAK(%0d), lost seq %0d", (cmd == 2'b11) ? "SEL" : "STD", N, mod1023_add(N, 10'h1)));   // [FLOW]
+    end
+  endfunction
+
+  // ACK / NAK put in a flit sent to the EP (only a NEW {command, seq num} is counted)
+  function void note_acknak_sent(bit [`PCIe_SEQ_NUM_W-1:0] N, bit [`PCIe_REPLAY_CMD_W-1:0] cmd);
+    int key;
+    if (cmd == 2'b00) return;              // payload flit with its own sequence number
+    key = int'({cmd, N});
+    if (key == last_tx_acknak_key) return;
+    last_tx_acknak_key = key;
+    if (cmd == 2'b01) n_ack_sent++;
+    else begin
+      if (cmd == 2'b11) n_sel_nak_sent++;
+      else              n_std_nak_sent++;
+      nak_sent_lost_seq_q.push_back(mod1023_add(N, 10'h1));
+      PCIe_flow_log::print("NAK", $sformatf("RC sent %s NAK(%0d), lost seq %0d", (cmd == 2'b11) ? "SEL" : "STD", N, mod1023_add(N, 10'h1)));   // [FLOW]
+    end
+  endfunction
+
+  // "5, 11, 12" (at most 20 numbers) or "none"
+  function string seq_list_str(bit [`PCIe_SEQ_NUM_W-1:0] q[$]);
     string s;
-    string tlp_rows;
-    int unsigned dl_tx, dl_rx, tl_tx, tl_rx;
+    s = "";
+    if (q.size() == 0) return "none";
+    foreach (q[i]) begin
+      if (i == 20) begin
+        s = {s, $sformatf(" ... (+%0d more)", q.size() - 20)};
+        break;
+      end
+      if (i != 0) s = {s, ", "};
+      s = {s, $sformatf("%0d", q[i])};
+    end
+    return s;
+  endfunction
+
+  // one "name : value" line of the summary
+  function string sum_line(string name, string val);
+    return $sformatf("  %-33s : %s\n", name, val);
+  endfunction
+
+  // one row of the flit count table for flit type k
+  function string flit_cnt_row_k(string name, flit_cnt_e k);
+    return flit_cnt_row(name, $sformatf("%0d", flit_tx_cnt[k]), $sformatf("%0d", flit_rx_cnt[k]));
+  endfunction
+
+  // RX payload flits that were good (bad flits are counted in flit_rx_bad)
+  function int unsigned rx_good_payload_flits();
+    int unsigned n;
+    n = 0;
+    for (int i = FLTC_MWR; i < FLTC_NUM; i++) n += flit_rx_cnt[i];
+    return n;
+  endfunction
+
+  // Sections 1 .. 4 of the RC FLIT SUMMARY
+  function string flit_summary_part1();
+    string s, v;
+    int unsigned dl_tx, dl_rx, tl_tx, tl_rx, rx_good;
     dl_tx = 0; dl_rx = 0; tl_tx = 0; tl_rx = 0;
     for (int i = 0; i < FLTC_NUM; i++) begin
       if (i < FLTC_MWR) begin dl_tx += flit_tx_cnt[i]; dl_rx += flit_rx_cnt[i]; end
       else              begin tl_tx += flit_tx_cnt[i]; tl_rx += flit_rx_cnt[i]; end
     end
-    // TLP rows : one row for every TLP type seen in this test (TX or RX).
-    // Completion / CplD is always printed. Types not seen are not printed.
-    tlp_rows = "";
+
+    // ---------------- 1. FLIT COUNT ----------------
+    s = {" 1. FLIT COUNT  (TX also counts replayed flits)\n",
+         flit_cnt_row("Flit type", "Sent (TX)", "Received (RX)"),
+         "  -------------------------------------------------------------------\n",
+         flit_cnt_row_k("Feature (DL)",              FLTC_FEATURE),
+         flit_cnt_row_k("InitFC1 (DL)",              FLTC_INITFC1),
+         flit_cnt_row_k("InitFC2 (DL)",              FLTC_INITFC2),
+         flit_cnt_row_k("UpdateFC (DL)",             FLTC_UPDATEFC),
+         flit_cnt_row_k("Optimized_Update_FC (DL)",  FLTC_OPT_UPDATEFC),
+         flit_cnt_row_k("NOP DLLP (DL)",             FLTC_NOP_DLLP),
+         flit_cnt_row_k("Link Management DLLP (DL)", FLTC_LINK_MGMT_DLLP),
+         flit_cnt_row_k("Other / unsupported DLLP",  FLTC_OTHER_DLLP)};
+    if (flit_tx_cnt[FLTC_NOP] != 0 || flit_rx_cnt[FLTC_NOP] != 0)
+      s = {s, flit_cnt_row_k("Idle flit (no DLLP)",  FLTC_NOP)};
+    s = {s, flit_cnt_row_k("ACK (DL)", FLTC_ACK),
+            flit_cnt_row_k("NAK (DL)", FLTC_NAK)};
+    // one row for every TLP type seen (TX or RX); Completion / CplD always printed
     for (int i = FLTC_MWR; i < FLTC_NUM; i++) begin
       if (i == FLTC_CPL || i == FLTC_CPLD) continue;
       if (flit_tx_cnt[i] != 0 || flit_rx_cnt[i] != 0)
-        tlp_rows = {tlp_rows, flit_cnt_row(flit_tlp_name(flit_cnt_e'(i)),
-                                           $sformatf("%0d", flit_tx_cnt[i]), $sformatf("%0d", flit_rx_cnt[i]))};
+        s = {s, flit_cnt_row_k(flit_tlp_name(flit_cnt_e'(i)), flit_cnt_e'(i))};
     end
-    tlp_rows = {tlp_rows, flit_cnt_row("Completion / CplD (TL)",
-                                       $sformatf("%0d", flit_tx_cnt[FLTC_CPL] + flit_tx_cnt[FLTC_CPLD]),
-                                       $sformatf("%0d", flit_rx_cnt[FLTC_CPL] + flit_rx_cnt[FLTC_CPLD]))};
-    s = {"\n  RC side\n",
-         flit_cnt_row("Flit type",              "Sent (TX)", "Received (RX)"),
-         "  -------------------------------------------------------------------\n",
-         flit_cnt_row("Feature (DL)",           $sformatf("%0d", flit_tx_cnt[FLTC_FEATURE]),  $sformatf("%0d", flit_rx_cnt[FLTC_FEATURE])),
-         flit_cnt_row("InitFC1 (DL)",           $sformatf("%0d", flit_tx_cnt[FLTC_INITFC1]),  $sformatf("%0d", flit_rx_cnt[FLTC_INITFC1])),
-         flit_cnt_row("InitFC2 (DL)",           $sformatf("%0d", flit_tx_cnt[FLTC_INITFC2]),  $sformatf("%0d", flit_rx_cnt[FLTC_INITFC2])),
-         flit_cnt_row("UpdateFC (DL)",          $sformatf("%0d", flit_tx_cnt[FLTC_UPDATEFC]), $sformatf("%0d", flit_rx_cnt[FLTC_UPDATEFC])),
-         flit_cnt_row("ACK (DL)",               $sformatf("%0d", flit_tx_cnt[FLTC_ACK]),      $sformatf("%0d", flit_rx_cnt[FLTC_ACK])),
-         flit_cnt_row("NAK (DL)",               $sformatf("%0d", flit_tx_cnt[FLTC_NAK]),      $sformatf("%0d", flit_rx_cnt[FLTC_NAK])),
-         tlp_rows,
-         "  -------------------------------------------------------------------\n",
-         flit_cnt_row("Total",                  $sformatf("%0d (%0d DL + %0d TL)", flit_tx_total, dl_tx, tl_tx),
-                                                $sformatf("%0d", flit_rx_total))};
-    `uvm_info("RC_FLIT_SUMMARY", s, UVM_LOW)
+    s = {s, flit_cnt_row("Completion / CplD (TL)",
+                         $sformatf("%0d", flit_tx_cnt[FLTC_CPL] + flit_tx_cnt[FLTC_CPLD]),
+                         $sformatf("%0d", flit_rx_cnt[FLTC_CPL] + flit_rx_cnt[FLTC_CPLD])),
+            "  -------------------------------------------------------------------\n",
+            flit_cnt_row("Total", $sformatf("%0d (%0d DL + %0d TL)", flit_tx_total, dl_tx, tl_tx),
+                                  $sformatf("%0d", flit_rx_total)),
+            sum_line("Bad flits received (CRC/FEC fail)", $sformatf("%0d", flit_rx_bad)),
+            "\n"};
+
+    // ---------------- 2. SEQUENCE NUMBERS ----------------
+    rx_good = rx_good_payload_flits();
+    s = {s, " 2. SEQUENCE NUMBERS\n"};
+    if (n_tx_new_payload == 0) v = "0";
+    else v = $sformatf("%0d   (seq %0d -> %0d)", n_tx_new_payload, first_tx_seq, last_tx_seq);
+    s = {s, sum_line("TX payload flits sent (new)", v)};
+    if ((n_ack_rcvd + n_std_nak_rcvd + n_sel_nak_rcvd) == 0) v = "none yet";
+    else v = $sformatf("seq %0d", ACKD_FLIT_SEQ_NUM);
+    s = {s, sum_line("Last ACK received from EP", v),
+            sum_line("RX payload flits accepted", $sformatf("%0d   (given to the RC TL)", n_rx_tlp_to_tl)),
+            sum_line("RX payload flits dropped", $sformatf("%0d   (good flits not given to the TL)",
+                     (rx_good > n_rx_tlp_to_tl) ? (rx_good - n_rx_tlp_to_tl) : 0))};
+    if ((n_ack_sent + n_std_nak_sent + n_sel_nak_sent) == 0) v = "none yet";
+    else v = $sformatf("seq %0d", TX_ACKNAK_FLIT_SEQ_NUM);
+    s = {s, sum_line("Last ACK/NAK seq sent to EP", v), "\n"};
+
+    // ---------------- 3. ACK / NAK ----------------
+    s = {s, " 3. ACK / NAK  (a NEW ack/nak number is counted once)\n",
+            "   Received from EP :\n",
+            sum_line("ACK received", $sformatf("%0d", n_ack_rcvd)),
+            sum_line("Standard NAK received", $sformatf("%0d", n_std_nak_rcvd)),
+            sum_line("Selective NAK received", $sformatf("%0d", n_sel_nak_rcvd)),
+            sum_line("Lost flits reported by these NAKs", seq_list_str(nak_rcvd_lost_seq_q)),
+            sum_line("NAKs ignored (Nak Ignore Window)", $sformatf("%0d", n_nak_ignored)),
+            sum_line("NAKs dropped by test (lost NAK)", $sformatf("%0d", n_naks_dropped)),
+            "   Sent to EP :\n",
+            sum_line("ACK sent", $sformatf("%0d", n_ack_sent)),
+            sum_line("Standard NAK sent", $sformatf("%0d", n_std_nak_sent)),
+            sum_line("Selective NAK sent", $sformatf("%0d", n_sel_nak_sent)),
+            sum_line("Lost flits reported by these NAKs", seq_list_str(nak_sent_lost_seq_q)),
+            "\n"};
+
+    // ---------------- 4. REPLAY ----------------
+    s = {s, " 4. REPLAY (RC -> EP)\n",
+            sum_line("Standard replays (after NAK)", $sformatf("%0d", n_std_replay)),
+            sum_line("Selective replays (after NAK)", $sformatf("%0d", n_sel_replay)),
+            sum_line("Replay timer timeouts", $sformatf("%0d", n_replay_timeouts)),
+            sum_line("Replayed seq numbers", seq_list_str(replayed_seq_q)),
+            sum_line("Duplicate flits sent (test)", $sformatf("%0d", n_duplicate_flits_sent)),
+            sum_line("REPLAY_NUM now / rollovers", $sformatf("%0d / %0d", FLIT_REPLAY_NUM, err_replay_num_rollover)),
+            sum_line("Retry buffer : max used", $sformatf("%0d flits  (limit %0d)", max_tx_retry_used, TX_RETRY_BUFFER_MAX_FLITS)),
+            sum_line("Retry buffer : at end", $sformatf("%0d flits", tx_retry_buffer.size())),
+            sum_line("Retry buffer : full waits", $sformatf("%0d", n_tx_retry_buffer_full_waits)),
+            "\n"};
+    return s;
+  endfunction
+
+  // Section 6 of the RC FLIT SUMMARY
+  function string flit_summary_errors();
+    return {" 6. DL ERRORS LOGGED (Sec 6.2)\n",
+            sum_line("Invalid flit (bad CRC/FEC)", $sformatf("%0d", err_invalid_flit)),
+            sum_line("Replay timer timeout", $sformatf("%0d", err_replay_timer_timeout)),
+            sum_line("REPLAY_NUM rollover", $sformatf("%0d", err_replay_num_rollover)),
+            sum_line("DL protocol error", $sformatf("%0d", err_dl_protocol)),
+            sum_line("Total DL errors", $sformatf("%0d", dl_error_total()))};
+  endfunction
+
+  // Section 5 of the RC FLIT SUMMARY : completions (numbers from the RC TL model)
+  function string flit_summary_cpl(PCIe_RC_TL_model tl);
+    int unsigned n_mrd, n_cfgrd, n_cfgwr;
+    if (tl == null) return " 5. COMPLETIONS (RC side)\n  (RC TL model not found)\n\n";
+    n_mrd   = flit_tx_new_cnt[FLTC_MRD];
+    n_cfgrd = flit_tx_new_cnt[FLTC_CFGRD];
+    n_cfgwr = flit_tx_new_cnt[FLTC_CFGWR];
+    return {" 5. COMPLETIONS (RC side)\n",
+            sum_line("Non-posted requests sent", $sformatf("%0d   (MemRd %0d, CfgRd %0d, CfgWr %0d)",
+                     n_mrd + n_cfgrd + n_cfgwr, n_mrd, n_cfgrd, n_cfgwr)),
+            sum_line("Completions received", $sformatf("%0d   (CplD %0d, Cpl %0d)",
+                     tl.n_cpld_rcvd + tl.n_cpl_nodata_rcvd, tl.n_cpld_rcvd, tl.n_cpl_nodata_rcvd)),
+            sum_line("Status  SC / UR / CA / CRS", $sformatf("%0d / %0d / %0d / %0d",
+                     tl.n_cpl_status_rcvd[`PCIe_CPL_STATUS_SC], tl.n_cpl_status_rcvd[`PCIe_CPL_STATUS_UR],
+                     tl.n_cpl_status_rcvd[`PCIe_CPL_STATUS_CA], tl.n_cpl_status_rcvd[`PCIe_CPL_STATUS_CRS])),
+            sum_line("Read data DW match / mismatch", $sformatf("%0d / %0d",
+                     tl.n_rd_cpl_dw_match, tl.n_rd_cpl_dw_mismatch)),
+            sum_line("Still waiting (no completion)", $sformatf("%0d", tl.n_outstanding())),
+            sum_line("Completion timeouts", $sformatf("%0d", tl.n_cpl_timeouts)),
+            "\n"};
+  endfunction
+
+  // Prints the RC FLIT SUMMARY (called from report_phase).
+  // The RC TL model is the sibling "rc_tl_model" in the same agent.
+  function void flit_summary_report();
+    PCIe_RC_TL_model tl;
+    uvm_component    p;
+    p = get_parent();
+    if (p != null) void'($cast(tl, p.get_child("rc_tl_model")));
+    `uvm_info("RC_FLIT_SUMMARY", {"\n==========================================================================\n",
+                                  "                      RC FLIT SUMMARY  (end of test)\n",
+                                  "==========================================================================\n",
+                                  flit_summary_part1(),
+                                  flit_summary_cpl(tl),
+                                  flit_summary_errors(),
+                                  "=========================================================================="}, UVM_NONE)
   endfunction
 
   function void report_phase(uvm_phase phase);
@@ -1854,7 +2511,32 @@ endfunction
         n_initfc1_tx, n_initfc1_rx, n_initfc2_tx, n_initfc2_rx, n_updfc_tx, n_updfc_rx,
         n_updfc_tx_shr, n_updfc_rx_shr,
         fi1_done(), fi2_done(), fc_vc_report_str()), UVM_LOW)
-    flit_cnt_report();   // [FLIT_CNT]
+    flit_summary_report();   // [FLIT_CNT] [FLOW_SUM] RC FLIT SUMMARY (6 sections)
+
+    // [REPLAY] summary
+    `uvm_info("RC_DL_REPLAY", $sformatf({"\n",
+        "  ========== RC DL REPLAY SUMMARY ==========\n",
+        "    Standard replays            : %0d\n",
+        "    Selective replays           : %0d\n",
+        "    Replayed flits (total)      : %0d\n",
+        "    Replayed flit seq numbers   : %p\n",
+        "    TX retry buffer at end      : %0d (0 = every flit ACKed by EP)\n",
+        "    Replay timer timeouts       : %0d\n",
+        "    TLPs waited (buffer full)   : %0d\n",
+        "    Duplicate flits sent (test) : %0d\n",
+        "    Optimized_Update_FC rx      : %0d\n",
+        "    P UpdateFC dropped (test)   : %0d\n",
+        "    NAKs dropped (test)         : %0d\n",
+        "  ERRORS LOGGED (Sec 6.2)\n",
+        "    Invalid flit                : %0d\n",
+        "    Replay Timer Timeout        : %0d\n",
+        "    REPLAY_NUM Rollover         : %0d\n",
+        "    Data Link Protocol Error    : %0d\n",
+        "  =========================================="},
+        n_std_replay, n_sel_replay, flit_tx_replay, replayed_seq_q, tx_retry_buffer.size(),
+        n_replay_timeouts, n_tx_retry_buffer_full_waits, n_duplicate_flits_sent, n_opt_updfc_rx,
+        n_p_updatefc_dropped, n_naks_dropped,
+        err_invalid_flit, err_replay_timer_timeout, err_replay_num_rollover, err_dl_protocol), UVM_LOW)
   endfunction
 
    

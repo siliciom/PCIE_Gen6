@@ -179,12 +179,14 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
 
     `uvm_info("RC_ENUM", $sformatf("TARGET EP (from PCIe_defines.sv) : Bus=%0d Device=%0d Function=%0d",
               bus_num, dev_num, fn_num), UVM_LOW)
+    PCIe_flow_log::print("ENUM", $sformatf("start, EP %0d:%0d.%0d", bus_num, dev_num, fn_num));   // [FLOW]
 
     // ---- The EP function from the define file must exist ----
     cfg_read(dev_num, fn_num, CFG_ID, id_dw, st, ok);
     if (!ok || id_dw[15:0] == 16'hFFFF || id_dw[15:0] == 16'h0000) begin
       `uvm_error("RC_ENUM", $sformatf("NO_DEVICE_FOUND at %0d:%0d.%0d (VID/DID=%08h ok=%0b status=%s)",
                  bus_num, dev_num, fn_num, id_dw, ok, rc_tl.cpl_status_str(st)))
+      PCIe_flow_log::print("ENUM", $sformatf("FAILED, no device at %0d:%0d.%0d", bus_num, dev_num, fn_num));   // [FLOW]
       print_summary();
       return;
     end
@@ -209,6 +211,9 @@ class PCIe_RC_enumeration_sequence extends PCIe_RC_controller_base_sequence;
 
     print_summary();
     `uvm_info("RC_ENUM","==================== PCIe GEN6 ENUMERATION : DONE =====================",UVM_LOW)
+    PCIe_flow_log::print("ENUM", $sformatf("done, %0d completions (%0d not SC)",
+                         rc_tl.n_cpld_rcvd + rc_tl.n_cpl_nodata_rcvd,
+                         rc_tl.n_cpld_rcvd + rc_tl.n_cpl_nodata_rcvd - rc_tl.n_cpl_status_rcvd[`PCIe_CPL_STATUS_SC]));   // [FLOW]
   endtask
 
   //========================================================================

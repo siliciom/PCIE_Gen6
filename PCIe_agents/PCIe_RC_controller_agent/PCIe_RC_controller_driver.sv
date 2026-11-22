@@ -152,9 +152,18 @@ task run_phase(uvm_phase phase);
 end
      end
       else begin
-        // FLOW CONTROL : link is up. DLLP-only flits created by the DL model after
-        // DL_ACTIVE (UpdateFC) are put on the PIPE here and released afterwards.
-        if (rc_dl_model.dl_link_active && rc_dl_model.dllp_tx_pending && rc_pl_model.pl_sent) begin
+        // [REPLAY] Highest priority : the EP sent a NAK -> replay before any new TLP
+        if (rc_dl_model.dl_link_active && rc_dl_model.REPLAY_SCHEDULED && !rc_dl_model.RC_REPLAY_IN_PROGRESS) begin
+          drive_replay();
+        end
+        // [DUP_FLIT] test asked for a duplicate of the last payload flit
+        else if (rc_dl_model.dl_link_active && rc_dl_model.duplicate_flit_request) begin
+          drive_duplicate_flit();
+        end
+        // FLOW CONTROL : link is up. DLLP-only flits created by the DL model
+        // (UpdateFC, test DLLPs, and FEATURE / InitFC when the DL re-initialises
+        // after a link down [DL_RESET]) are put on the PIPE here.
+        else if (rc_dl_model.dllp_tx_pending && rc_pl_model.pl_sent) begin
           `uvm_info("RC_FC_DRV","DRIVING_DL_INITIATED_DLLP_FLIT (UpdateFC)",UVM_LOW)
           drive_flit(pcie_seq_item);
           rc_dl_model.dllp_tx_pending = 1'b0;
@@ -318,6 +327,7 @@ endtask
 
     if (!rc_tl_model.flit_needs_segmentation(req)) begin
       rc_tl_model.wait_for_fc_credits(req);
+      wait_for_tx_retry_buffer_space();   // [TX_BUF_LIMIT]
       tx_tl_ap.write(req);
       drive_flit(req);
       return;
@@ -331,6 +341,7 @@ endtask
     foreach (segs[i]) begin
       if (rc_dl_model.dllp_tx_pending) drain_dl_dllp_flits();
       rc_tl_model.wait_for_fc_credits(segs[i]);
+      wait_for_tx_retry_buffer_space();   // [TX_BUF_LIMIT]
       `uvm_info("RC_FLIT_SEG_DRV",
         $sformatf("SENDING_SEGMENT %0d/%0d : addr=0x%0h len=%0d DW tag=0x%0h -> own FLIT",
                   i + 1, segs.size(), segs[i].address, segs[i].data.size(), segs[i].tag), UVM_LOW)
@@ -467,24 +478,73 @@ endtask
      end
        endtask
  
-  // Handles the replay things
-  task handle_replay_request(bit[`PCIe_SEQ_NUM_W-1:0] N);
-    foreach(rc_dl_model.tx_retry_buffer[i]) begin
-      replayed_item.seq_num=rc_dl_model.tx_retry_buffer[i].seq_num;
-      replayed_item.tlp_data=rc_dl_model.tx_retry_buffer[i].tlp_data;
-      // Handle Replay Types
-      if(rc_dl_model.REPLAY_SCHEDULED_TYPE==STANDARD_REPLAY) begin
-        if(replayed_item.seq_num>=N) begin
-          tx_tl_ap.write(replayed_item);
-          `uvm_info("RC_CONTROLLER","writing on the port now....",UVM_LOW)
-        end
-      end
-      else if(rc_dl_model.REPLAY_SCHEDULED_TYPE==SELECTIVE_REPLAY) begin
-        tx_tl_ap.write(replayed_item);
-        break;
-      end
+  //--------------------------------------------------------------------------
+  // [REPLAY] drive_replay : replay flits from the RC DL TX retry buffer
+  //   The EP sent a NAK, so the RC DL model set REPLAY_SCHEDULED.
+  //   The RC PL model holds ONE flit, so the flits are sent one by one :
+  //     DL send_replay_flit()  -> flit (ORIGINAL sequence number) into the RC PL
+  //     drive_flit()           -> that flit on the PIPE
+  //   Replayed flits do NOT go through the TL : they already have their
+  //   sequence number, and the TL must not see them as new TLPs.
+  //--------------------------------------------------------------------------
+  task drive_replay();
+    tx_buffer_t replay_q[$];
+    bit         fc_allowed_saved;
+
+    // No new UpdateFC flit while replaying (they would overwrite the PL flit)
+    fc_allowed_saved          = rc_dl_model.fc_tx_allowed;
+    rc_dl_model.fc_tx_allowed = 1'b0;
+    if (rc_dl_model.dllp_tx_pending) drain_dl_dllp_flits();
+
+    rc_dl_model.start_replay(replay_q);
+
+    foreach (replay_q[i]) begin
+      rc_dl_model.send_replay_flit(replay_q[i], i + 1, replay_q.size());
+      drive_flit(null);
+      `uvm_info("RC_REPLAY_DRV", $sformatf("REPLAY_FLIT %0d/%0d :: SEQ_NUM=%0d driven on the PIPE",
+                i + 1, replay_q.size(), replay_q[i].seq_num), UVM_NONE)
     end
-    rc_dl_model.RC_REPLAY_IN_PROGRESS=1'b0;
+
+    rc_dl_model.finish_replay(replay_q.size());
+    rc_dl_model.fc_tx_allowed = fc_allowed_saved;
+  endtask
+
+  //--------------------------------------------------------------------------
+  // [TX_BUF_LIMIT] wait_for_tx_retry_buffer_space
+  //   A NEW TLP may only go out when the TX retry buffer has space
+  //   (max unACKed flits = rc_dl_model.TX_RETRY_BUFFER_MAX_FLITS, spec 511).
+  //   While waiting, a scheduled replay (NAK / replay timer) is still driven,
+  //   so the link cannot get stuck.
+  //--------------------------------------------------------------------------
+  task wait_for_tx_retry_buffer_space();
+    bit announced = 1'b0;
+    while (rc_dl_model.tx_retry_buffer_full()) begin
+      if (!announced) begin
+        announced = 1'b1;
+        rc_dl_model.n_tx_retry_buffer_full_waits++;
+        `uvm_info("RC_TX_BUF_LIMIT", $sformatf("TX_RETRY_BUFFER_FULL :: %0d unACKed flits (limit %0d) :: new TLP waits for an ACK",
+                  rc_dl_model.tx_retry_buffer.size(), rc_dl_model.TX_RETRY_BUFFER_MAX_FLITS), UVM_NONE)
+      end
+      if (rc_dl_model.REPLAY_SCHEDULED && !rc_dl_model.RC_REPLAY_IN_PROGRESS) drive_replay();
+      else #1ns;
+    end
+    if (announced)
+      `uvm_info("RC_TX_BUF_LIMIT", $sformatf("TX_RETRY_BUFFER_SPACE_FREE :: %0d unACKed flits :: new TLP can go",
+                rc_dl_model.tx_retry_buffer.size()), UVM_NONE)
+  endtask
+
+  //--------------------------------------------------------------------------
+  // [DUP_FLIT] drive_duplicate_flit : send the last payload flit again (test)
+  //--------------------------------------------------------------------------
+  task drive_duplicate_flit();
+    bit fc_allowed_saved;
+    fc_allowed_saved          = rc_dl_model.fc_tx_allowed;
+    rc_dl_model.fc_tx_allowed = 1'b0;          // RC PL holds ONE flit
+    if (rc_dl_model.dllp_tx_pending) drain_dl_dllp_flits();
+    rc_dl_model.send_duplicate_flit();
+    drive_flit(null);
+    rc_dl_model.duplicate_flit_request = 1'b0;
+    rc_dl_model.fc_tx_allowed = fc_allowed_saved;
   endtask
 
  

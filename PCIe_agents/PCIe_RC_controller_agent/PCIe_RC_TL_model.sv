@@ -47,6 +47,11 @@ class PCIe_RC_TL_model extends uvm_component;
   int unsigned n_tlp_rcvd;   // TLPs received from the DL model
   int unsigned n_cpl_rcvd;   // of which Cpl / CplD
   int unsigned n_cpl_ur_rcvd; // [TL_ERR_INJ] of which completion status = UR
+  // [FLOW_SUM] completion numbers for the end-of-test RC FLIT SUMMARY
+  int unsigned n_cpl_status_rcvd [8];   // per Completion Status (SC=0 UR=1 CRS=2 CA=4)
+  int unsigned n_cpld_rcvd;             // CplD (with data) received
+  int unsigned n_cpl_nodata_rcvd;       // Cpl (no data) received
+  int unsigned n_cpl_timeouts;          // wait_completion() timed out (no completion)
 
   // [ENUM] completions kept for a waiting sequence (e.g. enumeration)
   //   write_dl_rx() stores every decoded completion here (key = tag) and fires
@@ -880,7 +885,7 @@ class PCIe_RC_TL_model extends uvm_component;
 
   function void report_phase(uvm_phase phase);
     super.report_phase(phase);
-    fc_report();
+    // fc_report();   // RC_TL FLOW CONTROL SUMMARY + FC BUFFERS : print switched off (only a print, no check)
     `uvm_info("RC_TL_MODEL", $sformatf("RX_FROM_DL_SUMMARY : TLPs received from RC DL=%0d  completions=%0d  outstanding requests still open=%0d",
               n_tlp_rcvd, n_cpl_rcvd, outstanding.size()), UVM_LOW)
     // [FLIT_SEG] summary + every segmented Non-Posted request must be fully completed
@@ -1059,6 +1064,16 @@ class PCIe_RC_TL_model extends uvm_component;
     if (tl_aif != null)
       tl_aif.tl_cpl_sample(outstanding.exists(cpl_it.tag), cpl_it.cpl_status, has_data, tc,
                            outstanding.exists(cpl_it.tag) ? outstanding[cpl_it.tag].tc : tc);
+
+    // [FLOW_SUM] completion counters + [FLOW] line only when something is wrong
+    n_cpl_status_rcvd[cpl_it.cpl_status]++;
+    if (has_data) n_cpld_rcvd++;
+    else          n_cpl_nodata_rcvd++;
+    if (!(outstanding.exists(cpl_it.tag) || cpl_req_of.exists(cpl_it.tag)))
+      PCIe_flow_log::print("CPL", $sformatf("RC got Cpl tag=0x%0h status=%s, NO REQUEST with this tag",
+                           cpl_it.tag, cpl_status_str(cpl_it.cpl_status)));
+    else if (cpl_it.cpl_status != `PCIe_CPL_STATUS_SC)
+      PCIe_flow_log::print("CPL", $sformatf("RC got Cpl tag=0x%0h status=%s", cpl_it.tag, cpl_status_str(cpl_it.cpl_status)));   // [FLOW]
 
     if (outstanding.exists(cpl_it.tag) && !cpl_req_of.exists(cpl_it.tag))
       cpl_req_of[cpl_it.tag] = outstanding[cpl_it.tag];
@@ -1304,8 +1319,15 @@ class PCIe_RC_TL_model extends uvm_component;
     end
     else begin
       timed_out = 1'b1;
+      n_cpl_timeouts++;   // [FLOW_SUM]
+      PCIe_flow_log::print("CPL", $sformatf("RC TIMEOUT tag=0x%0h", tag));   // [FLOW]
     end
   endtask
+
+  // [FLOW_SUM] number of requests still waiting for their completion
+  function int unsigned n_outstanding();
+    return outstanding.size();
+  endfunction
 
   // [ENUM] completion status name for the log
   function string cpl_status_str(bit [2:0] st);

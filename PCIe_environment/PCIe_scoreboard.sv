@@ -697,5 +697,73 @@ class PCIe_scoreboard extends uvm_scoreboard;
                           rc_ep_256b_flits_compared, rc_ep_256b_flits_matched, rc_ep_256b_flits_mismatched), UVM_LOW)
   endfunction
 
+  // =========================================================================
+  // [FLOW_SUM] RC <-> EP FLIT MATCH + TEST FLOW  (end of test)
+  //   final_phase runs AFTER every report_phase, so this is printed after the
+  //   RC FLIT SUMMARY and EP FLIT SUMMARY (printed by the DL models).
+  //   RC numbers are compared with the EP numbers. This is only information
+  //   (uvm_info) : the test decides PASS / FAIL with its own checks.
+  //   A MISMATCH is normal in reset / link-down tests (flits are thrown away).
+  // =========================================================================
+  function string match_line(string name, string a_name, int unsigned a,
+                             string b_name, int unsigned b, ref int unsigned n_bad);
+    string res;
+    if (a == b) res = "OK";
+    else begin
+      res = "MISMATCH";
+      n_bad++;
+    end
+    return $sformatf("  %-24s : %s %0d, %s %0d  -> %s\n", name, a_name, a, b_name, b, res);
+  endfunction
+
+  function void final_phase(uvm_phase phase);
+    PCIe_RC_DL_model rc_dl;
+    PCIe_EP_DL_model ep_dl;
+    PCIe_RC_TL_model rc_tl;
+    PCIe_EP_TL_model ep_tl;
+    string           s, line;
+    int unsigned     n_bad;
+    super.final_phase(phase);
+
+    // the four models, found by their instance names
+    void'($cast(rc_dl, uvm_top.find("*.rc_dl_model")));
+    void'($cast(ep_dl, uvm_top.find("*.ep_dl_model")));
+    void'($cast(rc_tl, uvm_top.find("*.rc_tl_model")));
+    void'($cast(ep_tl, uvm_top.find("*.ep_tl_model")));
+
+    if (rc_dl != null && ep_dl != null && rc_tl != null && ep_tl != null) begin
+      n_bad = 0;
+      s = "\n  ==================== RC <-> EP MATCH ====================\n";
+      s = {s, match_line("TLP flits RC -> EP",   "RC sent", rc_dl.n_tx_new_payload,
+                                                 "EP accepted", ep_dl.n_rx_tlp_to_tl, n_bad)};
+      s = {s, match_line("TLP flits EP -> RC",   "EP sent", ep_dl.n_tx_new_payload,
+                                                 "RC accepted", rc_dl.n_rx_tlp_to_tl, n_bad)};
+      s = {s, match_line("Completions EP -> RC", "EP sent", ep_tl.n_cpld_sent + ep_tl.n_cpl_nodata_sent,
+                                                 "RC received", rc_tl.n_cpld_rcvd + rc_tl.n_cpl_nodata_rcvd, n_bad)};
+      s = {s, match_line("NAKs EP -> RC",        "EP sent", ep_dl.n_std_nak_scheduled + ep_dl.n_sel_nak_scheduled,
+                                                 "RC received", rc_dl.n_std_nak_rcvd + rc_dl.n_sel_nak_rcvd, n_bad)};
+      s = {s, match_line("NAKs RC -> EP",        "RC sent", rc_dl.n_std_nak_sent + rc_dl.n_sel_nak_sent,
+                                                 "EP received", ep_dl.n_std_nak_rcvd + ep_dl.n_sel_nak_rcvd, n_bad)};
+      s = {s, match_line("Retry buffers at end", "RC", rc_dl.tx_retry_buffer.size(),
+                                                 "EP", ep_dl.tx_retry_buffer.size(), n_bad)};
+      if (rc_dl.tx_retry_buffer.size() != 0 || ep_dl.tx_retry_buffer.size() != 0) begin
+        s = {s, "  (a retry buffer is NOT EMPTY : some flits were never ACKed)\n"};
+        n_bad++;
+      end
+      if (n_bad == 0) line = "ALL OK";
+      else            line = $sformatf("%0d MISMATCH(ES) - see the lines above (normal in reset / link-down / lost-flit tests)", n_bad);
+      s = {s, "  ----------------------------------------------------------\n",
+              "  RC_EP_FLIT_MATCH : ", line, "\n",
+              "  =========================================================="};
+      `uvm_info("RC_EP_FLIT_MATCH", s, UVM_NONE)
+    end
+    else
+      `uvm_warning("RC_EP_FLIT_MATCH", "RC / EP DL or TL model not found : RC <-> EP match not printed")
+
+    PCIe_flow_log::print_timeline();   // [FLOW] TEST FLOW : all [FLOW] lines in one block, at the very end
+
+  endfunction
+
+
 endclass
 

@@ -91,7 +91,23 @@
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
 #set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
 # [DLL] Data Link Layer tests
-set testname "PCIe_gen6_dll_ack_nak_test"
+#set testname "PCIe_gen6_dll_ack_nak_test"
+#set testname "PCIe_gen6_dll_crc_error_replay_test"
+#set testname "PCIe_gen6_dll_retry_request_test"
+#set testname "PCIe_gen6_dll_duplicate_flit_discard_test"
+#set testname "PCIe_gen6_dll_replay_timer_expiry_test"
+#set testname "PCIe_gen6_dll_replay_buffer_limit_test"
+#set testname "PCIe_gen6_dll_sequence_wraparound_test"
+#set testname "PCIe_gen6_dll_fec_error_correction_test"
+#set testname "PCIe_gen6_dll_invalid_dllp_test"
+#set testname "PCIe_gen6_dll_nop_dllp_test"
+#set testname "PCIe_gen6_dll_link_management_dllp_test"
+#set testname "PCIe_gen6_dll_flow_control_credit_exhaustion_test"
+#set testname "PCIe_gen6_dll_credit_recovery_test"
+#set testname "PCIe_gen6_dll_updatefc_optimized_test"
+set testname "PCIe_gen6_dll_link_recovery_reinitialization_test"
+#set testname "PCIe_gen6_dll_reset_replay_buffer_clear_test"
+#set testname "PCIe_gen6_dll_lost_nak_test"
  
 vlib work
 vmap work work

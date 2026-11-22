@@ -161,6 +161,10 @@ class PCIe_EP_TL_model extends uvm_component;
   //--------------------------------------------------------------------------
   int unsigned n_tlp_rcvd;
   int unsigned n_cpl_sent;
+  // [FLOW_SUM] completion numbers for the end-of-test EP FLIT SUMMARY
+  int unsigned n_cpl_status_sent [8];   // per Completion Status (SC=0 UR=1 CRS=2 CA=4)
+  int unsigned n_cpld_sent;             // CplD (with data) sent
+  int unsigned n_cpl_nodata_sent;       // Cpl (no data) sent
   int unsigned n_ecrc_pass;
   int unsigned n_ecrc_fail;
   int unsigned n_cfg_rd;
@@ -170,6 +174,20 @@ class PCIe_EP_TL_model extends uvm_component;
   int unsigned n_atomic_rcvd;      // [ATOMIC] AtomicOp requests executed
   int unsigned n_cpl_split_txn;    // [FLIT_SEG] completions that had to be split
   int unsigned n_cpl_split_parts;  // [FLIT_SEG] CplD parts sent for them
+
+  // [FC_TEST] test knobs for the receiver buffer (explained at fc_release_held_credits).
+  //   Declared here (before their first use) : Questa needs a class variable
+  //   to be declared before the first line that uses it.
+  int unsigned fc_test_p_hdr_credits;
+  bit          fc_hold_credit_release;
+  typedef struct {
+    int unsigned v;
+    int unsigned c;
+    int unsigned h;
+    int unsigned d;
+    string       desc;
+  } fc_held_release_t;
+  fc_held_release_t fc_held_q[$];
 
   //==========================================================================
 
@@ -366,6 +384,38 @@ class PCIe_EP_TL_model extends uvm_component;
                 "    Port-wide shared pool = %0d x %0d hdr / %0d x %0d data credits (sum over VCs, Eq 2-6)."},
                 fc_num_vc, sz_h[FC_DED], sz_d[FC_DED], sz_h[FC_SHR], sz_d[FC_SHR],
                 fc_num_vc, fc_wire_val(sz_h[FC_SHR], FC_FSH), fc_num_vc, fc_wire_val(sz_d[FC_SHR], FC_FSD)), UVM_LOW)
+
+    // [FC_TEST] small SHARED Posted header buffer for VC0 (credit exhaustion tests)
+    //   uvm_config_db#(int unsigned)::set(this, "*", "fc_test_p_hdr_credits", 4);
+    void'(uvm_config_db#(int unsigned)::get(this, "", "fc_test_p_hdr_credits", fc_test_p_hdr_credits));
+    if (fc_test_p_hdr_credits > 0) begin
+      fc_rx_max_h[0][FC_SHR][0]   = fc_test_p_hdr_credits;
+      fc_rx_alloc_h[0][FC_SHR][0] = fc_wire_val(fc_test_p_hdr_credits, FC_FSH);
+      fc_rx_adv_h[0][FC_SHR][0]   = fc_rx_alloc_h[0][FC_SHR][0];
+      fc_rx_shr_adv_u_h[0][0]     = fc_rx_adv_h[0][FC_SHR][0];
+      `uvm_info("EP_TL_FC", $sformatf("[FC_TEST] VC0 SHARED Posted header buffer = %0d credits (test setting)",
+                fc_test_p_hdr_credits), UVM_NONE)
+    end
+  endfunction
+
+  //==========================================================================
+  // [FC_TEST] Test knobs for the receiver buffer
+  //   fc_test_p_hdr_credits  : >0 -> size of the VC0 SHARED Posted header buffer
+  //   fc_hold_credit_release : 1  -> TLPs are serviced but their credits are
+  //                                  NOT freed (receiver buffer stays full,
+  //                                  no UpdateFC). The RC runs out of credits.
+  //   fc_release_held_credits() : frees every held credit now (UpdateFC follows)
+  //==========================================================================
+  // (declaration moved to the top of the class : Questa needs it before its first use)
+
+  function void fc_release_held_credits();
+    fc_held_release_t r;
+    fc_hold_credit_release = 1'b0;
+    `uvm_info("EP_TL_FC", $sformatf("[FC_TEST] CREDIT RELEASE ON :: freeing %0d held TLP(s) now", fc_held_q.size()), UVM_NONE)
+    while (fc_held_q.size() > 0) begin
+      r = fc_held_q.pop_front();
+      fc_rx_release(r.v, r.c, r.h, r.d, r.desc);
+    end
   endfunction
 
   function void fc_log(string msg);
@@ -771,6 +821,13 @@ class PCIe_EP_TL_model extends uvm_component;
   // that VC (Sec 2.6 : credits are returned on the VC of the TLP that freed them).
   function void fc_rx_release(int unsigned v, int unsigned c, int unsigned h, int unsigned d, string desc);
     bit p;
+    // [FC_TEST] credits held : keep the buffer space used, free it later
+    if (fc_hold_credit_release) begin
+      fc_held_q.push_back('{v:v, c:c, h:h, d:d, desc:desc});
+      fc_log($sformatf("[FC_TEST] CREDIT RELEASE HELD :: %s VC%0d class %s (%0d TLP(s) held)",
+                       desc, v, PCIe_sequence_item::fc_cls_name(c), fc_held_q.size()));
+      return;
+    end
     if (fc_rx_pool_q[v][c].size() == 0) begin
       `uvm_error("EP_TL_FC", $sformatf("FC_RX_RELEASE VC%0d class %s without a matching received TLP (%s)",
                  v, PCIe_sequence_item::fc_cls_name(c), desc))
@@ -1323,7 +1380,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
   virtual function void report_phase(uvm_phase phase);
     super.report_phase(phase);
-    fc_report();
+    // fc_report();   // EP_TL FLOW CONTROL SUMMARY + FC BUFFERS : print switched off (only a print, no check)
     `uvm_info("EP_TL_MODEL",
       $sformatf({"EP_TL_SUMMARY : tlp_received=%0d completions_sent=%0d ecrc_pass=%0d ecrc_fail=%0d ",
                   "cfg_rd=%0d cfg_wr=%0d cfg_unsupported=%0d"},
@@ -2929,6 +2986,13 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
         cpl.length,
         (cpl.pkt_mode == FLIT) ? (cpl.ohc[0] ? "YES" : "NO") : "N/A (Non-Flit)",
         cpl.tlp_header_dw_count, cpl.tlp_payload_dw_count, cpl.tlp_total_dw_count), UVM_LOW)
+
+    // [FLOW_SUM] completion counters + [FLOW] line
+    n_cpl_status_sent[cpl.cpl_status]++;
+    if (cpl.cpl_has_data) n_cpld_sent++;
+    else                  n_cpl_nodata_sent++;
+    if (cpl.cpl_status != `PCIe_CPL_STATUS_SC)
+      PCIe_flow_log::print("CPL", $sformatf("EP sent Cpl tag=0x%0h status=%s", d_tag, cpl_status_name(cpl.cpl_status)));   // [FLOW]
 
     foreach (cpl.serialized_tlp[i])
       `uvm_info("EP_TL_COMPLETION_DW",
