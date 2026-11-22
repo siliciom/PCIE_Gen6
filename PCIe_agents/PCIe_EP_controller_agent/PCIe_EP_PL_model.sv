@@ -216,8 +216,32 @@ class PCIe_EP_PL_model extends uvm_component;
    //   to the component's run time and is not stranded when the reset phase
    //   callback returns.
    //-------------------------------------------------------------------------
+   function void pl_aif_sample();
+      if (ep_pipe_intf_tx == null) return;
+      ep_pipe_intf_tx.pl_main_state = ep_main_state;
+      ep_pipe_intf_tx.pl_detect_state = ep_detect_state;
+      ep_pipe_intf_tx.pl_polling_state = ep_poll_state;
+      ep_pipe_intf_tx.pl_no_receiver_test = no_receiver_test;
+      ep_pipe_intf_tx.pl_timeout_test_active = (ep_ctrl_item != null) && ep_ctrl_item.ltssm_timeout_test;
+   endfunction
+
+   task run_pl_assert_mirror();
+      if (ep_pipe_intf_tx == null) return;
+      pl_aif_sample();
+      @(negedge ep_pipe_intf_tx.pclk);
+      pl_aif_sample();
+      ep_pipe_intf_tx.pl_sample_valid = 1'b1;
+      forever begin
+         @(negedge ep_pipe_intf_tx.pclk);
+         pl_aif_sample();
+      end
+   endtask
+
    task run_phase(uvm_phase phase);
-      ep_rx_os_decoder(phase);
+      fork
+         run_pl_assert_mirror();
+         ep_rx_os_decoder(phase);
+      join
    endtask
 
    virtual task ep_rx_os_decoder(uvm_phase phase);
@@ -606,11 +630,12 @@ class PCIe_EP_PL_model extends uvm_component;
            `uvm_info("EP_LTSSM","LTSSM_Transition_DETECT_Active_POLLING_Active",UVM_LOW)
          end
         //=================Receiver Not Found===============================
-        else
-         begin
-           `uvm_info("EP_LTSSM","Receiver_Detection_FAILED",UVM_HIGH)
-            ep_detect_state = DETECT_QUIET;
-            if (no_receiver_test) begin
+         else
+          begin
+            `uvm_info("EP_LTSSM","Receiver_Detection_FAILED",UVM_HIGH)
+             ep_pipe_intf_tx.tx_detect_rx <= 1'b0;
+             ep_detect_state = DETECT_QUIET;
+             if (no_receiver_test) begin
                detect_fail_count = detect_fail_count + 1;
                `uvm_info("EP_LTSSM",$sformatf("EP_No_Receiver_Test_detect_fail_count=%0d",detect_fail_count),UVM_HIGH)
             end
