@@ -5,24 +5,26 @@
 #
 #   Run from the PROJECT ROOT (the folder that has run.do, PCIe_top/, PCIe_tests/ ...):
 #
-#     vsim -c -do "do regression/regression.do; quit -f"                     (3DW + 4DW)
-#     vsim -c -do "set BUILD 3dw; do regression/regression.do; quit -f"      (3DW only)
-#     vsim -c -do "set BUILD 4dw; do regression/regression.do; quit -f"      (4DW only)
-#     vsim -c -do "set BUILD 3dw; set TESTS {PCIe_gen6_3DW_Flit_MemWr_Random_test}; set RUNS 5; do regression/regression.do; quit -f"
+#     vsim -c -do "do regression/regression.do"                              (3DW + 4DW)
+#     vsim -c -do "set BUILD 3dw; do regression/regression.do"               (3DW only)
+#     vsim -c -do "set BUILD 4dw; do regression/regression.do"               (4DW only)
+#     vsim -c -do "set BUILD 3dw; set TESTS {PCIe_gen6_3DW_Flit_MemWr_Random_test}; set RUNS 5; do regression/regression.do"
 #
 #   Optional knobs (set them before 'do regression/regression.do'):
 #     BUILD     3dw | 4dw | all             (default all)
 #     TESTS     {test1 test2 ...}           run only these (instead of the test list)
 #     RUNS      N                           seeds per test, overrides the list column
 #     SEED      random | <number>           seed when the list gives none (default random)
-#     RUN_TIME  -all | e.g. 20ms            sim time limit per test (default -all)
+#     RUN_TIME  -all | e.g. 20ms            sim time limit per test (default 200ms)
 #     VERB      UVM_LOW | UVM_MEDIUM ...    +UVM_VERBOSITY (default UVM_LOW)
 #     COV       1 | 0                       save functional coverage (covergroups) per test,
 #                                           merge + report at the end (default 1)
 #     CODECOV   0 | 1                       also collect code coverage (+cover=bcesf / -coverage)
-#     KEEP_PASS_LOGS 1 | 0                  0 = delete the (very large) log of every PASS run
+#     KEEP_PASS_LOGS 1 | 0                  1 = keep all logs (default); 0 = delete PASS logs after reports
 #     REPORT_ONLY    0 | 1                  regenerate reports from an existing run; set regdir too
 #     regdir         <results directory>    used with REPORT_ONLY 1
+#
+#   Exit : batch mode exits with 0 only when every run passed; 1 for FAIL, 2 for setup error.
 #
 #   Output : regression/results/<date_time>/
 #              compile_<lib>.log , logs/<test>__s<seed>.log , summary.txt , summary.csv
@@ -36,23 +38,48 @@
 #            NO_SUCH_TEST  +UVM_TESTNAME is not a registered test (check the spelling / test list)
 #==========================================================================================
 
-onbreak {resume}
-onerror {resume}
+set REG_SETUP_ERROR 0
+set COV_ERROR 0
+
+if {[batch_mode]} {
+  onerror {}
+  onbreak {}
+} else {
+  onbreak {resume}
+  onerror {resume}
+}
 
 if {![info exists BUILD]}    {set BUILD all}
 if {![info exists SEED]}     {set SEED random}
-if {![info exists RUN_TIME]} {set RUN_TIME -all}
+if {![info exists RUN_TIME]} {set RUN_TIME 200ms}
 if {![info exists VERB]}     {set VERB UVM_LOW}
 if {![info exists COV]}      {set COV 1}
 if {![info exists CODECOV]}  {set CODECOV 0}
 if {![info exists KEEP_PASS_LOGS]} {set KEEP_PASS_LOGS 1}
 
-if {![info exists regdir]} {
-  set stamp  [clock format [clock seconds] -format %Y%m%d_%H%M%S]
+set stamp [clock format [clock seconds] -format %Y%m%d_%H%M%S]
+
+if {![file isdirectory "PCIe_top"] || ![file exists "run.do"]} {
+  echo "REGRESSION : run this script from the project root (the folder with run.do and PCIe_top/)"
+  set REG_SETUP_ERROR 1
+  if {[batch_mode]} { quit -f -code 2 }
+  return -code error "wrong working directory"
+}
+
+if {![info exists regdir] || $regdir eq ""} {
   set regdir "regression/results/$stamp"
 }
-file mkdir "$regdir/logs"
-if {$COV} { file mkdir "$regdir/ucdb" }
+set regdir [file normalize $regdir]
+
+if {[catch {
+  file mkdir "$regdir/logs"
+  if {$COV} { file mkdir "$regdir/ucdb" }
+} err]} {
+  echo "REGRESSION : SETUP ERROR creating $regdir : $err"
+  set REG_SETUP_ERROR 1
+  if {[batch_mode]} { quit -f -code 2 }
+  return -code error $err
+}
 
 set SRC [list PCIe_top/PCIe_PHY_interface.sv PCIe_config/enum_defs.sv \
               PCIe_top/PCIe_PIPE_interface.sv PCIe_top/PCIe_pkg.sv PCIe_top/PCIe_top.sv]
@@ -67,7 +94,10 @@ set RESULTS {}
 proc compile_build {lib defs} {
   global SRC regdir CODECOV
   if {[file exists $lib]} { catch {vdel -lib $lib -all} }
-  vlib $lib
+  if {[catch {vlib $lib} err]} {
+    echo "REGRESSION : COMPILE FAILED creating $lib ($err)"
+    return 0
+  }
   set covopt [expr {$CODECOV ? "+cover=bcesf" : ""}]
   if {[catch {vlog -work $lib -sv {*}$covopt +define+$defs -l $regdir/compile_$lib.log {*}$SRC} err]} {
     echo "REGRESSION : COMPILE FAILED for $lib ($err) - see $regdir/compile_$lib.log"
@@ -79,8 +109,13 @@ proc compile_build {lib defs} {
 #------------------------------------------------------------------------------
 # test list line : <test> [num_seeds] [seed]
 proc read_list {fname} {
+  global REG_SETUP_ERROR
   set out {}
-  if {![file exists $fname]} { echo "REGRESSION : test list $fname not found"; return $out }
+  if {![file exists $fname]} {
+    echo "REGRESSION : test list $fname not found"
+    set REG_SETUP_ERROR 1
+    return $out
+  }
   set fh [open $fname r]
   while {[gets $fh line] >= 0} {
     set line [string trim $line]
@@ -128,7 +163,7 @@ proc parse_log {log seed_in} {
 
 #------------------------------------------------------------------------------
 proc run_one {lib test seed} {
-  global regdir RUN_TIME VERB RESULTS COV CODECOV KEEP_PASS_LOGS
+  global regdir RUN_TIME VERB RESULTS COV CODECOV KEEP_PASS_LOGS COV_ERROR
   set tag  [expr {$seed eq "random" ? "r[clock clicks]" : $seed}]
   set log  "$regdir/logs/${test}__s${tag}.log"
   set ucdb "$regdir/ucdb/${test}__s${tag}.ucdb"
@@ -143,9 +178,20 @@ proc run_one {lib test seed} {
     echo "REGRESSION : LOAD_ERR $test : $err"
     return
   }
-  if {$RUN_TIME eq "-all"} { run -all } else { run $RUN_TIME }
+  if {[catch {
+    if {$RUN_TIME eq "-all"} { run -all } else { run $RUN_TIME }
+  } rerr]} {
+    catch {quit -sim}
+    set dt [expr {[clock seconds] - $t0}]
+    lappend RESULTS [list $test $lib INCOMPLETE - - $seed $dt $log]
+    echo "REGRESSION : INCOMPLETE $test (run error: $rerr)"
+    return
+  }
   if {$COV} {
-    if {[catch {coverage save $ucdb} cerr]} { echo "REGRESSION : coverage save failed for $test : $cerr" }
+    if {[catch {coverage save $ucdb} cerr]} {
+      echo "REGRESSION : coverage save failed for $test : $cerr"
+      set COV_ERROR 1
+    }
   }
   catch {quit -sim}
 
@@ -231,16 +277,27 @@ proc write_assertion_report {regdir} {
 }
 
 if {[info exists REPORT_ONLY] && $REPORT_ONLY} {
+  if {![file isdirectory "$regdir/logs"]} {
+    echo "REGRESSION : REPORT_ONLY cannot find $regdir/logs"
+    if {[batch_mode]} { quit -f -code 2 }
+    return -code error "missing $regdir/logs"
+  }
   write_testcase_report $regdir
   write_assertion_report $regdir
-  return
+  echo "REGRESSION : reports regenerated in $regdir"
+  if {[batch_mode]} { quit -f -code 0 }
+  return 0
 }
 
 #------------------------------------------------------------------------------
 if {$BUILD eq "all"} { set blist {3dw 4dw} } else { set blist [list $BUILD] }
 
 foreach b $blist {
-  if {![info exists BUILDS($b)]} { echo "REGRESSION : unknown BUILD '$b' (use 3dw / 4dw / all)"; continue }
+  if {![info exists BUILDS($b)]} {
+    echo "REGRESSION : unknown BUILD '$b' (use 3dw / 4dw / all)"
+    set REG_SETUP_ERROR 1
+    continue
+  }
   foreach {lib defs listfile} $BUILDS($b) break
 
   echo "REGRESSION : ===== COMPILING $b ($lib) ====="
@@ -269,7 +326,7 @@ set csv [open "$regdir/summary.csv" w]
 puts $csv "test,lib,status,uvm_error,uvm_fatal,seed,time_s,log"
 
 set hdr [format "%-62s %-9s %-11s %-6s %-6s %-12s %s" TEST LIB STATUS ERR FATAL SEED TIME(s)]
-puts $fh "PCIe Gen6 regression : $stamp   BUILD=$BUILD"
+puts $fh "PCIe Gen6 regression : $regdir   BUILD=$BUILD"
 puts $fh $hdr
 puts $fh [string repeat - [string length $hdr]]
 foreach r $RESULTS {
@@ -295,7 +352,7 @@ foreach r $RESULTS {
 set tp 0 ; set tf 0
 set ts [open "$regdir/test_summary.txt" w]
 set th [format "%-62s %-9s %-5s %-5s %-5s %s" TEST LIB RUNS PASS FAIL RESULT]
-puts $ts "PCIe Gen6 regression : $stamp   BUILD=$BUILD   (TEST-LEVEL SUMMARY)"
+puts $ts "PCIe Gen6 regression : $regdir   BUILD=$BUILD   (TEST-LEVEL SUMMARY)"
 puts $ts $th
 puts $ts [string repeat - [string length $th]]
 foreach k $order {
@@ -324,9 +381,10 @@ if {$COV} {
       vcover merge $merged {*}$ucdbs
       vcover report -file $regdir/coverage_summary.txt $merged
       vcover report -details -file $regdir/coverage_details.txt $merged
-      catch {vcover report -html -htmldir $regdir/coverage_html -details $merged}
+      vcover report -html -htmldir $regdir/coverage_html -details $merged
     } cerr]} {
     puts $fh "COVERAGE : merge/report failed : $cerr"
+    set COV_ERROR 1
   } else {
     puts $fh "COVERAGE : merged [llength $ucdbs] UCDBs -> $merged"
     set cf [open $regdir/coverage_summary.txt r]
@@ -343,6 +401,25 @@ write_assertion_report $regdir
 
 echo ""
 set fh [open "$regdir/summary.txt" r] ; echo [read $fh] ; close $fh
+
+set exit_code 0
+if {$nfail > 0}       { set exit_code 1 }
+if {$COV_ERROR}       { set exit_code 1 }
+if {$REG_SETUP_ERROR} { set exit_code 2 }
+set final_status [expr {$exit_code == 0 ? "PASS" : "FAIL"}]
+
+set sfh [open "$regdir/final_status.txt" w]
+puts $sfh "STATUS=$final_status"
+puts $sfh "EXIT_CODE=$exit_code"
+puts $sfh "RUNS_TOTAL=[expr {$npass+$nfail}]"
+puts $sfh "RUNS_PASS=$npass"
+puts $sfh "RUNS_NOT_PASS=$nfail"
+puts $sfh "TESTS_TOTAL=[expr {$tp+$tf}]"
+puts $sfh "TESTS_PASS=$tp"
+puts $sfh "TESTS_FAIL=$tf"
+close $sfh
+
+echo "REGRESSION : FINAL_STATUS=$final_status exit_code=$exit_code"
 echo "REGRESSION : results in $regdir"
 
 if {!$KEEP_PASS_LOGS} {
@@ -355,4 +432,7 @@ if {!$KEEP_PASS_LOGS} {
   catch {transcript off}
   catch {file delete $tr}
 }
+
+if {[batch_mode]} { quit -f -code $exit_code }
+return $exit_code
 

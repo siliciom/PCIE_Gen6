@@ -2300,64 +2300,77 @@ task ep_state_config_complete();
     //-------------------------------------------------------------------------
     // ep_state_recovery_rcvrlock - Section 4.2.7.4.1
     //-------------------------------------------------------------------------
-    task ep_state_recovery_rcvrlock(PCIe_sequence_item item);
-       bit tx_ts1_done;
-       bit rx_ts1_done;
-       bit is_timeout_target;
-       int  base_ts1;
-       tx_ts1_done = 1'b0;
-       rx_ts1_done = 1'b0;
-       is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_RCVRLOCK);
-       base_ts1    = ep_rx_ts1_count;
-       `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
-       `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_RcvrLock",UVM_LOW)
-       `uvm_info("EP_RECOVERY","==========================================",UVM_HIGH)
-       ep_build_recovery_ts1();
-       fork : EP_RECOVERY_RCVR_LOCK_THREADS
-          begin
-             if (!is_timeout_target) begin
-                `uvm_info("EP_RECOVERY","STARTING_EP_8_TS1_TRANSMISSION",UVM_HIGH)
-                send_ordered_set(ep_ts1_os,`PCIe_RECOVERY_TS1_TX_COUNT,"RECOVERY_TS1");
-                tx_ts1_done = 1'b1;
-             end
-             else wait(1'b0);
-          end
-          begin
-             if (!is_timeout_target) begin
-                `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS1_FROM_RC",UVM_HIGH)
-                ep_wait_rc_ts1_os(`PCIe_RECOVERY_TS1_RX_COUNT, base_ts1, rx_ts1_done);
-             end
-             else wait(1'b0);
-          end
-          begin
-             ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_RCVRLOCK);
-          end
-       join_any
-       disable fork;
-       if (is_timeout_target) begin
-          ep_timeout_test_finish("RECOVERY_RCVRLOCK");
-          return;
-       end
-       if (tx_ts1_done && rx_ts1_done) begin
-          `uvm_info("EP_RECOVERY","8_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_HIGH)
-          // Equalization applies to the rate being moved to (8 GT/s and above)
-          if (ep_rate_gen_num(ep_adv_rate) >= `PCIe_EQ_MIN_GEN) begin
-             ep_recovery_state = RECOVERY_EQUALIZATION;
-             ep_eq_phase       = EQ_PHASE_1;
-             ep_eq_phase_count = 0;
-             `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_REQUIRED_AT_RATE=%s LTSSM_TRANSITION_RECOVERY_RcvrLock_Recovery_Equalization",
-                       ep_adv_rate.name()),UVM_LOW)
-          end
-          else begin
-             ep_recovery_state = RECOVERY_RCVR_CFG;
-             `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_NOT_REQUIRED_AT_RATE=%s LTSSM_TRANSITION_RECOVERY_RcvrLock_Recovery_RcvrCfg",
-                       ep_adv_rate.name()),UVM_LOW)
-          end
-       end
-       else begin
-          `uvm_error("EP_RECOVERY","RECOVERY_RcvrLock_TX_RX_CONDITIONS_NOT_MET")
-       end
-    endtask
+     task ep_state_recovery_rcvrlock(PCIe_sequence_item item);
+        bit tx_ts1_done;
+        bit rx_ts1_done;
+        bit timeout_occured;
+        bit is_timeout_target;
+        int  base_ts1;
+        tx_ts1_done = 1'b0;
+        rx_ts1_done = 1'b0;
+        timeout_occured = 1'b0;
+        is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_RCVRLOCK);
+        base_ts1    = ep_rx_ts1_count;
+        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
+        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_RcvrLock",UVM_LOW)
+        `uvm_info("EP_RECOVERY","==========================================",UVM_HIGH)
+        ep_build_recovery_ts1();
+        fork : EP_RECOVERY_RCVRLOCK_WATCHDOG
+           begin : EP_RECOVERY_RCVRLOCK_XCHANGE
+              fork : EP_RECOVERY_RCVRLOCK_THREADS
+                 begin
+                    if (!is_timeout_target) begin
+                       `uvm_info("EP_RECOVERY","STARTING_EP_8_TS1_TRANSMISSION",UVM_HIGH)
+                       send_ordered_set(ep_ts1_os,`PCIe_RECOVERY_TS1_TX_COUNT,"RECOVERY_TS1");
+                       tx_ts1_done = 1'b1;
+                    end
+                    else wait(1'b0);
+                 end
+                 begin
+                    if (!is_timeout_target) begin
+                       `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS1_FROM_RC",UVM_HIGH)
+                       ep_wait_rc_ts1_os(`PCIe_RECOVERY_TS1_RX_COUNT, base_ts1, rx_ts1_done);
+                    end
+                    else wait(1'b0);
+                 end
+              join
+           end
+           begin : EP_RECOVERY_RCVRLOCK_TIMER
+              ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_RCVRLOCK);
+              timeout_occured = 1'b1;
+           end
+        join_any
+        disable fork;
+        if (is_timeout_target) begin
+           ep_timeout_test_finish("RECOVERY_RCVRLOCK");
+           return;
+        end
+        if (timeout_occured) begin
+           `uvm_error("EP_RECOVERY","RECOVERY_RcvrLock_TIMEOUT")
+           timeout_test_done = 1'b1;
+           return;
+        end
+        if (tx_ts1_done && rx_ts1_done) begin
+           `uvm_info("EP_RECOVERY","8_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_HIGH)
+           // Equalization applies to the rate being moved to (8 GT/s and above)
+           if (ep_rate_gen_num(ep_adv_rate) >= `PCIe_EQ_MIN_GEN) begin
+              ep_recovery_state = RECOVERY_EQUALIZATION;
+              ep_eq_phase       = EQ_PHASE_1;
+              ep_eq_phase_count = 0;
+              `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_REQUIRED_AT_RATE=%s LTSSM_TRANSITION_RECOVERY_RcvrLock_Recovery_Equalization",
+                        ep_adv_rate.name()),UVM_LOW)
+           end
+           else begin
+              ep_recovery_state = RECOVERY_RCVR_CFG;
+              `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_NOT_REQUIRED_AT_RATE=%s LTSSM_TRANSITION_RECOVERY_RcvrLock_Recovery_RcvrCfg",
+                        ep_adv_rate.name()),UVM_LOW)
+           end
+        end
+        else begin
+           `uvm_error("EP_RECOVERY","RECOVERY_RcvrLock_TX_RX_CONDITIONS_NOT_MET")
+           timeout_test_done = 1'b1;
+        end
+     endtask
 
     //-------------------------------------------------------------------------
     // ep_state_recovery_equalization - Section 4.2.7.4.2
@@ -2397,32 +2410,38 @@ task ep_state_config_complete();
           endcase
           ep_eq_phase = equalization_phase_e'(phase);
           ep_build_recovery_ts1();
-          fork : EP_RECOVERY_EQ_THREADS
-             begin
-                send_ordered_set(ep_ts1_os,`PCIe_RECOVERY_TS1_TX_COUNT,"RECOVERY_EQ_TS1");
-                tx_eq_done = 1'b1;
-             end
-             begin
-                ep_wait_rc_ts1_os(`PCIe_RECOVERY_TS1_RX_COUNT, base_ts1, rx_eq_done);
-             end
-             begin
-                ep_ltssm_timer(eq_timeout);
-                timeout_occured = 1'b1;
-             end
-          join_any
-          disable fork;
-          if (timeout_occured) begin
-             `uvm_error("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_TIMEOUT",phase))
-             break;
-          end
-          if (tx_eq_done && rx_eq_done) begin
-             ep_eq_phase_count++;
-             `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_COMPLETED",phase),UVM_HIGH)
-          end
-          else begin
-             `uvm_error("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_TX_RX_CONDITIONS_NOT_MET",phase))
-             break;
-          end
+           fork : EP_RECOVERY_EQ_WATCHDOG
+              begin : EP_RECOVERY_EQ_XCHANGE
+                 fork : EP_RECOVERY_EQ_THREADS
+                    begin
+                       send_ordered_set(ep_ts1_os,`PCIe_RECOVERY_TS1_TX_COUNT,"RECOVERY_EQ_TS1");
+                       tx_eq_done = 1'b1;
+                    end
+                    begin
+                       ep_wait_rc_ts1_os(`PCIe_RECOVERY_TS1_RX_COUNT, base_ts1, rx_eq_done);
+                    end
+                 join
+              end
+              begin : EP_RECOVERY_EQ_TIMER
+                 ep_ltssm_timer(eq_timeout);
+                 timeout_occured = 1'b1;
+              end
+           join_any
+           disable fork;
+           if (timeout_occured) begin
+              `uvm_error("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_TIMEOUT",phase))
+              timeout_test_done = 1'b1;
+              break;
+           end
+           if (tx_eq_done && rx_eq_done) begin
+              ep_eq_phase_count++;
+              `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_COMPLETED",phase),UVM_HIGH)
+           end
+           else begin
+              `uvm_error("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_TX_RX_CONDITIONS_NOT_MET",phase))
+              timeout_test_done = 1'b1;
+              break;
+           end
        end
        if (ep_eq_phase_count >= `PCIe_RECOVERY_EQ_PHASE_COUNT) begin
           ep_eq_phase       = EQ_PHASE_0;
@@ -2451,44 +2470,56 @@ task ep_state_config_complete();
     //-------------------------------------------------------------------------
     // ep_state_recovery_rcvrcfg - Section 4.2.7.4.4
     //-------------------------------------------------------------------------
-    task ep_state_recovery_rcvrcfg(PCIe_sequence_item item);
-       bit tx_ts2_done;
-       bit rx_ts2_done;
-       bit is_timeout_target;
-       int  base_ts2;
-       tx_ts2_done = 1'b0;
-       rx_ts2_done = 1'b0;
-       is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_RCVRCFG);
+     task ep_state_recovery_rcvrcfg(PCIe_sequence_item item);
+        bit tx_ts2_done;
+        bit rx_ts2_done;
+        bit timeout_occured;
+        bit is_timeout_target;
+        int  base_ts2;
+        tx_ts2_done = 1'b0;
+        rx_ts2_done = 1'b0;
+        timeout_occured = 1'b0;
+        is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_RCVRCFG);
        base_ts2    = ep_rx_ts2_count;
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_RcvrCfg",UVM_LOW)
        ep_build_recovery_ts2();
-       fork : EP_RECOVERY_RCVR_CFG_THREADS
-          begin
-             if (!is_timeout_target) begin
-                `uvm_info("EP_RECOVERY","STARTING_EP_16_TS2_TRANSMISSION",UVM_HIGH)
-                send_ordered_set(ep_ts2_os,`PCIe_RECOVERY_TS2_TX_COUNT,"RECOVERY_TS2");
-                tx_ts2_done = 1'b1;
-             end
-             else wait(1'b0);
-          end
-          begin
-             if (!is_timeout_target) begin
-                `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS2_FROM_RC",UVM_HIGH)
-                ep_wait_rc_ts2_os_rate(`PCIe_RECOVERY_TS2_RX_COUNT, base_ts2, rx_ts2_done);
-             end
-             else wait(1'b0);
-          end
-          begin
-             ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_RCVRCFG);
-          end
-       join_any
-       disable fork;
-       if (is_timeout_target) begin
-          ep_timeout_test_finish("RECOVERY_RCVRCFG");
-          return;
-       end
-       if (tx_ts2_done && rx_ts2_done) begin
+        fork : EP_RECOVERY_RCVRCFG_WATCHDOG
+           begin : EP_RECOVERY_RCVRCFG_XCHANGE
+              fork : EP_RECOVERY_RCVRCFG_THREADS
+                 begin
+                    if (!is_timeout_target) begin
+                       `uvm_info("EP_RECOVERY","STARTING_EP_16_TS2_TRANSMISSION",UVM_HIGH)
+                       send_ordered_set(ep_ts2_os,`PCIe_RECOVERY_TS2_TX_COUNT,"RECOVERY_TS2");
+                       tx_ts2_done = 1'b1;
+                    end
+                    else wait(1'b0);
+                 end
+                 begin
+                    if (!is_timeout_target) begin
+                       `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS2_FROM_RC",UVM_HIGH)
+                       ep_wait_rc_ts2_os_rate(`PCIe_RECOVERY_TS2_RX_COUNT, base_ts2, rx_ts2_done);
+                    end
+                    else wait(1'b0);
+                 end
+              join
+           end
+           begin : EP_RECOVERY_RCVRCFG_TIMER
+              ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_RCVRCFG);
+              timeout_occured = 1'b1;
+           end
+        join_any
+        disable fork;
+        if (is_timeout_target) begin
+           ep_timeout_test_finish("RECOVERY_RCVRCFG");
+           return;
+        end
+        if (timeout_occured) begin
+           `uvm_error("EP_RECOVERY","RECOVERY_RcvrCfg_TIMEOUT")
+           timeout_test_done = 1'b1;
+           return;
+        end
+        if (tx_ts2_done && rx_ts2_done) begin
           ep_rx_adv_rate = ep_dri_to_rate(ep_rx_dri_rate);
           if (ep_rate_gen_num(ep_rx_adv_rate) < ep_rate_gen_num(ep_adv_rate))
              ep_agreed_rate = ep_rx_adv_rate;
@@ -2511,25 +2542,31 @@ task ep_state_config_complete();
              `uvm_info("EP_RECOVERY",$sformatf("SPEED_CHANGE_ACCEPTED_NOW_AT=%s LTSSM_TRANSITION_RECOVERY_RcvrCfg_Recovery_RcvrLock",
                        ep_cur_rate.name()),UVM_LOW)
           end
-          else begin
-             ep_recovery_state = RECOVERY_IDLE;
-             `uvm_info("EP_RECOVERY",$sformatf("RATE_CONFIRMED=%s LTSSM_TRANSITION_RECOVERY_RcvrCfg_Recovery_Idle",
-                       ep_cur_rate.name()),UVM_LOW)
-          end
-       end
-    endtask
+           else begin
+              ep_recovery_state = RECOVERY_IDLE;
+              `uvm_info("EP_RECOVERY",$sformatf("RATE_CONFIRMED=%s LTSSM_TRANSITION_RECOVERY_RcvrCfg_Recovery_Idle",
+                        ep_cur_rate.name()),UVM_LOW)
+           end
+        end
+        else begin
+           `uvm_error("EP_RECOVERY","RECOVERY_RcvrCfg_TX_RX_CONDITIONS_NOT_MET")
+           timeout_test_done = 1'b1;
+        end
+     endtask
 
     //-------------------------------------------------------------------------
     // ep_state_recovery_idle - Section 4.2.7.4.5
     //-------------------------------------------------------------------------
-    task ep_state_recovery_idle(PCIe_sequence_item item);
-       bit tx_idle_done;
-       bit rx_idle_done;
-       bit is_timeout_target;
-       int  base_idle;
-       tx_idle_done = 1'b0;
-       rx_idle_done = 1'b0;
-       is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_IDLE);
+     task ep_state_recovery_idle(PCIe_sequence_item item);
+        bit tx_idle_done;
+        bit rx_idle_done;
+        bit timeout_occured;
+        bit is_timeout_target;
+        int  base_idle;
+        tx_idle_done = 1'b0;
+        rx_idle_done = 1'b0;
+        timeout_occured = 1'b0;
+        is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_IDLE);
        base_idle    = ep_rx_idle_count;
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_Idle",UVM_LOW)
@@ -2548,30 +2585,41 @@ task ep_state_config_complete();
        end
        previous_symbol = `PCIe_INIT_PREVIOUS_SYMBOL;
        ep_build_recovery_idle();
-       fork : EP_RECOVERY_IDLE_THREADS
-          begin
-             `uvm_info("EP_RECOVERY","STARTING_EP_2_IDLE_TRANSMISSION",UVM_HIGH)
-             send_ordered_set(ep_idle_os,`PCIe_RECOVERY_IDLE_COUNT,"RECOVERY_IDLE");
-             tx_idle_done = 1'b1;
-          end
-           begin
-              `uvm_info("EP_RECOVERY","WAITING_FOR_2_IDLE_FROM_RC",UVM_HIGH)
-              ep_wait_rc_idle_os(`PCIe_RECOVERY_IDLE_COUNT, base_idle, rx_idle_done);
+        fork : EP_RECOVERY_IDLE_WATCHDOG
+           begin : EP_RECOVERY_IDLE_XCHANGE
+              fork : EP_RECOVERY_IDLE_THREADS
+                 begin
+                    `uvm_info("EP_RECOVERY","STARTING_EP_2_IDLE_TRANSMISSION",UVM_HIGH)
+                    send_ordered_set(ep_idle_os,`PCIe_RECOVERY_IDLE_COUNT,"RECOVERY_IDLE");
+                    tx_idle_done = 1'b1;
+                 end
+                 begin
+                    `uvm_info("EP_RECOVERY","WAITING_FOR_2_IDLE_FROM_RC",UVM_HIGH)
+                    ep_wait_rc_idle_os(`PCIe_RECOVERY_IDLE_COUNT, base_idle, rx_idle_done);
+                 end
+              join
            end
-           begin
+           begin : EP_RECOVERY_IDLE_TIMER
               ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_IDLE);
+              timeout_occured = 1'b1;
            end
         join_any
         disable fork;
+        if (timeout_occured) begin
+           `uvm_error("EP_RECOVERY","RECOVERY_Idle_TIMEOUT")
+           timeout_test_done = 1'b1;
+           return;
+        end
         if (tx_idle_done && rx_idle_done) begin
            ep_main_state = L0;
            `uvm_info("EP_RECOVERY",$sformatf("2_IDLE_TX_AND_2_IDLE_RX_CONDITIONS_SATISFIED LTSSM_TRANSITION_RECOVERY_Idle_L0_AT=%s",
                      ep_cur_rate.name()),UVM_LOW)
         end
-        else begin
-           `uvm_error("EP_RECOVERY","RECOVERY_Idle_TX_RX_CONDITIONS_NOT_MET")
-        end
-    endtask
+         else begin
+            `uvm_error("EP_RECOVERY","RECOVERY_Idle_TX_RX_CONDITIONS_NOT_MET")
+            timeout_test_done = 1'b1;
+         end
+     endtask
 
     task reset_scrambler();
        lfsr = `PCIe_PL_SCRAMBLER_SEED;

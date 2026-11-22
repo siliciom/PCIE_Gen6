@@ -45,6 +45,8 @@ class PCIe_gen6_ltssm_recovery_test extends PCIe_base_test;
   // walk, so it is fixed at Gen6 (64.0 GT/s).
   int unsigned target_gen = 6;
 
+  localparam time RECOVERY_TEST_TIMEOUT = 100ms;
+
   PCIe_RC_ltssm_recovery_sequence rc_seq;
   PCIe_EP_ltssm_recovery_sequence ep_seq;
 
@@ -60,78 +62,92 @@ class PCIe_gen6_ltssm_recovery_test extends PCIe_base_test;
     `uvm_info("RECOVERY_TEST","PCIe_gen6_ltssm_recovery_test_built target_gen=6",UVM_LOW)
   endfunction
 
-  task run_phase(uvm_phase phase);
-    PCIe_RC_PL_model rc_pl;
-    PCIe_EP_PL_model ep_pl;
-    int               expected_l0;
-    bit               link_up_rc;
-    bit               link_up_ep;
-    int               gen_rc;
-    int               gen_ep;
+   task run_phase(uvm_phase phase);
+     PCIe_RC_PL_model rc_pl;
+     PCIe_EP_PL_model ep_pl;
+     int               expected_l0;
+     bit               link_up_rc;
+     bit               link_up_ep;
+     int               gen_rc;
+     int               gen_ep;
+     bit               timed_out;
 
-    phase.raise_objection(this);
-    `uvm_info("RECOVERY_TEST",$sformatf("Starting_directed_recovery_target_gen=%0d",target_gen),UVM_LOW)
+     phase.raise_objection(this);
+     `uvm_info("RECOVERY_TEST",$sformatf("Starting_directed_recovery_target_gen=%0d",target_gen),UVM_LOW)
 
-    rc_seq = PCIe_RC_ltssm_recovery_sequence::type_id::create("rc_seq");
-    ep_seq = PCIe_EP_ltssm_recovery_sequence::type_id::create("ep_seq");
-    rc_seq.set_target_gen(target_gen);
-    ep_seq.set_target_gen(target_gen);
+     rc_seq = PCIe_RC_ltssm_recovery_sequence::type_id::create("rc_seq");
+     ep_seq = PCIe_EP_ltssm_recovery_sequence::type_id::create("ep_seq");
+     rc_seq.set_target_gen(target_gen);
+     ep_seq.set_target_gen(target_gen);
 
-    // RC and EP negotiate in parallel.
-    fork
-      rc_seq.start(pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_sequencer);
-      ep_seq.start(pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_sequencer);
-    join
+     timed_out = 1'b0;
+     // RC and EP negotiate in parallel, bounded by a test-level watchdog.
+     fork : RECOVERY_TEST_WATCHDOG
+       begin : RECOVERY_TEST_SEQUENCES
+         fork
+           rc_seq.start(pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_sequencer);
+           ep_seq.start(pcie_environment.ep_top_agent.ep_controller_agent.ep_controller_sequencer);
+         join
+       end
+       begin : RECOVERY_TEST_TIMEOUT_THREAD
+         #RECOVERY_TEST_TIMEOUT;
+         timed_out = 1'b1;
+         `uvm_error("RECOVERY_TEST","RECOVERY_TEST_DID_NOT_COMPLETE_BEFORE_TIMEOUT")
+       end
+     join_any
+     disable fork;
 
-    //-----------------------------------------------------------------------
-    // The LTSSM runs to completion before the item is handed back, so the
-    // PL state is final once both sequences have returned.
-    //-----------------------------------------------------------------------
-    rc_pl     = pcie_environment.rc_top_agent.rc_controller_agent.rc_pl_model;
-    ep_pl     = pcie_environment.ep_top_agent.ep_controller_agent.ep_pl_model;
-    link_up_rc = rc_pl.link_up;
-    link_up_ep = ep_pl.link_up;
-    gen_rc     = rc_pl.rc_rate_gen_num(rc_pl.rc_cur_rate);
-    gen_ep     = ep_pl.ep_rate_gen_num(ep_pl.ep_cur_rate);
-    expected_l0 = PCIe_gen6_ltssm_recovery_expected_l0_visits(target_gen);
+     if (!timed_out) begin
+       //-----------------------------------------------------------------------
+       // The LTSSM runs to completion before the item is handed back, so the
+       // PL state is final once both sequences have returned.
+       //-----------------------------------------------------------------------
+       rc_pl     = pcie_environment.rc_top_agent.rc_controller_agent.rc_pl_model;
+       ep_pl     = pcie_environment.ep_top_agent.ep_controller_agent.ep_pl_model;
+       link_up_rc = rc_pl.link_up;
+       link_up_ep = ep_pl.link_up;
+       gen_rc     = rc_pl.rc_rate_gen_num(rc_pl.rc_cur_rate);
+       gen_ep     = ep_pl.ep_rate_gen_num(ep_pl.ep_cur_rate);
+       expected_l0 = PCIe_gen6_ltssm_recovery_expected_l0_visits(target_gen);
 
-    `uvm_info("RECOVERY_TEST",$sformatf("RESULT target_gen=%0d RC: link_up=%0b rate=Gen%0d L0_visits=%0d | EP: link_up=%0b rate=Gen%0d L0_visits=%0d",
-              target_gen, link_up_rc, gen_rc, rc_pl.rc_l0_visit_count,
-                             link_up_ep, gen_ep, ep_pl.ep_l0_visit_count),UVM_LOW)
+       `uvm_info("RECOVERY_TEST",$sformatf("RESULT target_gen=%0d RC: link_up=%0b rate=Gen%0d L0_visits=%0d | EP: link_up=%0b rate=Gen%0d L0_visits=%0d",
+                 target_gen, link_up_rc, gen_rc, rc_pl.rc_l0_visit_count,
+                                link_up_ep, gen_ep, ep_pl.ep_l0_visit_count),UVM_LOW)
 
-    if (link_up_rc !== 1'b1)
-      `uvm_error("RECOVERY_TEST",$sformatf("RC link_up is %0b after directed recovery to Gen%0d",link_up_rc,target_gen))
-    if (link_up_ep !== 1'b1)
-      `uvm_error("RECOVERY_TEST",$sformatf("EP link_up is %0b after directed recovery to Gen%0d",link_up_ep,target_gen))
+       if (link_up_rc !== 1'b1)
+         `uvm_error("RECOVERY_TEST",$sformatf("RC link_up is %0b after directed recovery to Gen%0d",link_up_rc,target_gen))
+       if (link_up_ep !== 1'b1)
+         `uvm_error("RECOVERY_TEST",$sformatf("EP link_up is %0b after directed recovery to Gen%0d",link_up_ep,target_gen))
 
-    if (gen_rc != target_gen)
-      `uvm_error("RECOVERY_TEST",$sformatf("RC settled on Gen%0d but the test requires Gen%0d",gen_rc,target_gen))
-    if (gen_ep != target_gen)
-      `uvm_error("RECOVERY_TEST",$sformatf("EP settled on Gen%0d but the test requires Gen%0d",gen_ep,target_gen))
+       if (gen_rc != target_gen)
+         `uvm_error("RECOVERY_TEST",$sformatf("RC settled on Gen%0d but the test requires Gen%0d",gen_rc,target_gen))
+       if (gen_ep != target_gen)
+         `uvm_error("RECOVERY_TEST",$sformatf("EP settled on Gen%0d but the test requires Gen%0d",gen_ep,target_gen))
 
-    if (gen_rc != gen_ep)
-      `uvm_error("RECOVERY_TEST",$sformatf("RC and EP did not agree on the negotiated rate: RC=Gen%0d EP=Gen%0d",gen_rc,gen_ep))
+       if (gen_rc != gen_ep)
+         `uvm_error("RECOVERY_TEST",$sformatf("RC and EP did not agree on the negotiated rate: RC=Gen%0d EP=Gen%0d",gen_rc,gen_ep))
 
-    // Gen1 L0 is reached through Polling/Configuration, so only the directed
-    // speed changes (Gen2 .. Gen<target>) go through Recovery.
-    if (rc_pl.rc_l0_visit_count != expected_l0)
-      `uvm_error("RECOVERY_TEST",$sformatf("RC visited L0 %0d time(s), expected %0d for Gen%0d",
-                rc_pl.rc_l0_visit_count, expected_l0, target_gen))
-    if (ep_pl.ep_l0_visit_count != expected_l0)
-      `uvm_error("RECOVERY_TEST",$sformatf("EP visited L0 %0d time(s), expected %0d for Gen%0d",
-                ep_pl.ep_l0_visit_count, expected_l0, target_gen))
+       // Gen1 L0 is reached through Polling/Configuration, so only the directed
+       // speed changes (Gen2 .. Gen<target>) go through Recovery.
+       if (rc_pl.rc_l0_visit_count != expected_l0)
+         `uvm_error("RECOVERY_TEST",$sformatf("RC visited L0 %0d time(s), expected %0d for Gen%0d",
+                   rc_pl.rc_l0_visit_count, expected_l0, target_gen))
+       if (ep_pl.ep_l0_visit_count != expected_l0)
+         `uvm_error("RECOVERY_TEST",$sformatf("EP visited L0 %0d time(s), expected %0d for Gen%0d",
+                   ep_pl.ep_l0_visit_count, expected_l0, target_gen))
 
-    //-----------------------------------------------------------------------
-    // Traffic must only have been released at the final Gen6 L0. If the link
-    // had come up early the DL/TL models would already be active, so assert
-    // the negotiated rate is Gen6 AND that both ports walked every generation.
-    //-----------------------------------------------------------------------
-    if ((rc_pl.rc_l0_visit_count < 6) || (ep_pl.ep_l0_visit_count < 6))
-      `uvm_error("RECOVERY_TEST","The link did not visit every generation Gen1..Gen6 before coming up")
+       //-----------------------------------------------------------------------
+       // Traffic must only have been released at the final Gen6 L0. If the link
+       // had come up early the DL/TL models would already be active, so assert
+       // the negotiated rate is Gen6 AND that both ports walked every generation.
+       //-----------------------------------------------------------------------
+       if ((rc_pl.rc_l0_visit_count < 6) || (ep_pl.ep_l0_visit_count < 6))
+         `uvm_error("RECOVERY_TEST","The link did not visit every generation Gen1..Gen6 before coming up")
 
-    `uvm_info("RECOVERY_TEST",$sformatf("Directed_recovery_to_Gen%0d_completed",target_gen),UVM_LOW)
-    phase.drop_objection(this);
-  endtask
+       `uvm_info("RECOVERY_TEST",$sformatf("Directed_recovery_to_Gen%0d_completed",target_gen),UVM_LOW)
+     end
+     phase.drop_objection(this);
+   endtask
 
   function void report_phase(uvm_phase phase);
     super.report_phase(phase);

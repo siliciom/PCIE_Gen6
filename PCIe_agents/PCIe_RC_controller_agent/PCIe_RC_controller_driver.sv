@@ -216,13 +216,15 @@ end
     // STEP 1 : link-training item (not from the sequence)
     ltssm_item = PCIe_sequence_item::type_id::create("rc_ltssm_item");
     if (!ltssm_item.randomize() with {
-          pkt_mode             == FLIT;
-          electrical_idle_test == 1'b0;
-          no_receiver_test     == 1'b0;
-          tx_elec_idle         == 1'b1;
-          txn_type             == PCIe_TL_CFG;
-          dir                  == PCIe_TL_READ;
-          cfg_type1            == 1'b0;
+           pkt_mode             == FLIT;
+           electrical_idle_test == 1'b0;
+           no_receiver_test     == 1'b0;
+           tx_elec_idle         == 1'b1;
+           tx_valid             == 1'b0;
+           rate                 == `PCIe_RATE_NOT_NEGOTIATED;
+           txn_type             == PCIe_TL_CFG;
+           dir                  == PCIe_TL_READ;
+           cfg_type1            == 1'b0;
         })
       `uvm_fatal("RC_LINK_FIRST","randomize failed for the driver LTSSM item")
 

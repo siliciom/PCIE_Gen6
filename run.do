@@ -115,7 +115,10 @@
 #set testname "PCIe_gen6_dll_lost_nak_test"
 #set testname "PCIe_gen6_dll_multi_flit_replay_test"
 #set testname "PCIe_gen6_dll_sequence_gap_detection_test"
-set testname "PCIe_gen6_dll_out_of_order_flit_test"
+set RUN_DO_TESTNAME_FROM_CLI [info exists testname]
+if {!$RUN_DO_TESTNAME_FROM_CLI} {
+  set testname "PCIe_gen6_dll_out_of_order_flit_test"
+}
 #set testname "PCIe_gen6_dll_maximum_replay_buffer_test"
 #set testname "PCIe_gen6_dll_retry_buffer_overflow_test"
 #set testname "PCIe_gen6_dll_flit_crc_generation_test"
@@ -139,14 +142,30 @@ vlog -work work -sv +define+PCIE_GEN6_FEC_CRC PCIe_top/PCIe_top.sv
 #vlog -work work -sv +define+PCIE_GEN6_FEC_CRC+FORCE_4DW+CONFIG_4DW PCIe_top/PCIe_pkg.sv
 #vlog -work work -sv +define+PCIE_GEN6_FEC_CRC+FORCE_4DW+CONFIG_4DW PCIe_top/PCIe_top.sv
  
-#set infile [open "logs/${testname}_log.log" w+]
-set infile [open "sim/${testname}_log.log" w+]
- 
-vsim PCIe_top +UVM_TESTNAME=${testname} -l $infile
-#vsim work.PCIe_top +UVM_TESTNAME=${testname} -l ${testname}.log
- 
-view wave
-add wave -r /PCIe_top/*
- 
-add log -r /*
-run -all
+if {![info exists testname] || $testname eq ""} {
+  set testname "PCIe_gen6_ltssm_basic_linkup_L0_test"
+}
+
+file mkdir sim
+set logfile "sim/${testname}_log.log"
+
+if {[catch {vsim work.PCIe_top +UVM_TESTNAME=${testname} -l $logfile} err]} {
+  echo "SINGLE RUN : vsim failed : $err"
+  if {[batch_mode]} { quit -f -code 1 }
+  return -code error $err
+}
+
+if {![batch_mode]} {
+  view wave
+  add wave -r /PCIe_top/*
+  add log -r /*
+}
+
+if {[catch {run 200ms} rerr]} {
+  echo "SINGLE RUN : run failed : $rerr"
+  catch {quit -sim}
+  if {[batch_mode]} { quit -f -code 1 }
+  return -code error $rerr
+}
+
+if {[batch_mode]} { quit -f -code 0 }
