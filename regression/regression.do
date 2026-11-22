@@ -21,9 +21,12 @@
 #                                           merge + report at the end (default 1)
 #     CODECOV   0 | 1                       also collect code coverage (+cover=bcesf / -coverage)
 #     KEEP_PASS_LOGS 1 | 0                  0 = delete the (very large) log of every PASS run
+#     REPORT_ONLY    0 | 1                  regenerate reports from an existing run; set regdir too
+#     regdir         <results directory>    used with REPORT_ONLY 1
 #
 #   Output : regression/results/<date_time>/
 #              compile_<lib>.log , logs/<test>__s<seed>.log , summary.txt , summary.csv
+#              testcase_report.txt/.csv , assertion_summary.txt/.csv
 #              ucdb/<test>__s<seed>.ucdb , merged.ucdb , coverage_summary.txt ,
 #              coverage_details.txt , coverage_html/index.html
 #   Status : PASS        UVM_ERROR==0 and UVM_FATAL==0 and no simulator ** Error/Fatal
@@ -44,13 +47,15 @@ if {![info exists COV]}      {set COV 1}
 if {![info exists CODECOV]}  {set CODECOV 0}
 if {![info exists KEEP_PASS_LOGS]} {set KEEP_PASS_LOGS 1}
 
-set stamp  [clock format [clock seconds] -format %Y%m%d_%H%M%S]
-set regdir "regression/results/$stamp"
+if {![info exists regdir]} {
+  set stamp  [clock format [clock seconds] -format %Y%m%d_%H%M%S]
+  set regdir "regression/results/$stamp"
+}
 file mkdir "$regdir/logs"
 if {$COV} { file mkdir "$regdir/ucdb" }
 
-set SRC [list PCIe_top/PCIe_PHY_interface.sv PCIe_top/PCIe_PIPE_interface.sv \
-              PCIe_config/enum_defs.sv PCIe_top/PCIe_pkg.sv PCIe_top/PCIe_top.sv]
+set SRC [list PCIe_top/PCIe_PHY_interface.sv PCIe_config/enum_defs.sv \
+              PCIe_top/PCIe_PIPE_interface.sv PCIe_top/PCIe_pkg.sv PCIe_top/PCIe_top.sv]
 
 # build name -> {library  defines  test-list}
 set BUILDS(3dw) {work_3dw PCIE_GEN6_FEC_CRC                       regression/testlist_3dw.txt}
@@ -148,7 +153,87 @@ proc run_one {lib test seed} {
   foreach {st e f s} [parse_log $log $seed] break
   lappend RESULTS [list $test $lib $st $e $f $s $dt $log]
   echo [format "REGRESSION : %-10s %s  (UVM_ERROR=%s UVM_FATAL=%s seed=%s %ss)" $st $test $e $f $s $dt]
-  if {$st eq "PASS" && !$KEEP_PASS_LOGS} { catch {file delete $log} }
+}
+
+#------------------------------------------------------------------------------
+# Log-based reports (also usable on an interrupted run: REPORT_ONLY 1)
+#------------------------------------------------------------------------------
+proc write_testcase_report {regdir} {
+  set out [open "$regdir/testcase_report.txt" w]
+  set csv [open "$regdir/testcase_report.csv" w]
+  puts $csv "test,seed,status,uvm_error,uvm_fatal,assertion_failures"
+  set hdr [format "%-62s %-14s %-11s %-6s %-6s %s" TEST SEED STATUS ERR FATAL ASSERT_FAIL]
+  puts $out "PCIe Gen6 testcase report : $regdir"
+  puts $out $hdr
+  puts $out [string repeat - [string length $hdr]]
+  set np 0 ; set nn 0
+  foreach f [lsort [glob -nocomplain "$regdir/logs/*.log"]] {
+    set base [file rootname [file tail $f]]
+    set test $base ; set seed -
+    if {[regexp {^(.+)__s(.+)$} $base -> t s]} { set test $t ; set seed $s }
+    set fh [open $f r] ; set data [read $fh] ; close $fh
+    set status INCOMPLETE
+    foreach {m st} [regexp -all -inline {(?m)^# REGRESSION : (PASS|FAIL|INCOMPLETE|NO_SUCH_TEST|LOAD_ERR|COMPILE_ERR) } $data] { set status $st }
+    set err [llength [regexp -all -inline {(?m)^# UVM_ERROR\s+\S+\([0-9]+\)} $data]]
+    set fat [llength [regexp -all -inline {(?m)^# UVM_FATAL\s+\S+\([0-9]+\)} $data]]
+    set af  0
+    foreach {m n} [regexp -all -inline {(?m)^#\s+[A-Z]+ assertion failures\s*:\s*(\d+)} $data] { incr af $n }
+    puts $out [format "%-62s %-14s %-11s %-6d %-6d %d" $test $seed $status $err $fat $af]
+    puts $csv "$test,$seed,$status,$err,$fat,$af"
+    if {$status eq "PASS"} {incr np} else {incr nn}
+  }
+  puts $out [string repeat - [string length $hdr]]
+  puts $out "TESTCASES : TOTAL=[expr {$np+$nn}]  PASS=$np  NOT_PASS=$nn"
+  close $out ; close $csv
+}
+
+proc write_assertion_report {regdir} {
+  set out [open "$regdir/assertion_summary.txt" w]
+  set csv [open "$regdir/assertion_summary.csv" w]
+  puts $csv "test,seed,side,check,failures"
+  set sides {RC_DL RC_TL RC_PL EP_DL EP_TL EP_PL}
+  set hdr [format "%-62s %-14s %-15s %-15s %-15s %-15s %-15s %-15s %s" \
+                TEST SEED RC_DL RC_TL RC_PL EP_DL EP_TL EP_PL TOTAL]
+  puts $out "PCIe Gen6 assertion report : $regdir"
+  puts $out $hdr
+  puts $out [string repeat - [string length $hdr]]
+  set detail {}
+  foreach f [lsort [glob -nocomplain "$regdir/logs/*.log"]] {
+    set base [file rootname [file tail $f]]
+    set test $base ; set seed -
+    if {[regexp {^(.+)__s(.+)$} $base -> t s]} { set test $t ; set seed $s }
+    set fh [open $f r] ; set data [read $fh] ; close $fh
+    foreach s $sides { set st($s) "N/A" }
+    foreach {m s n state} [regexp -all -inline \
+        {(?m)^#.*\[((?:RC|EP)_(?:DL|TL|PL))_STATUS\][^\n]*\n#\s+[A-Z]+ assertion failures\s*:\s*(\d+)\n#\s+[A-Z]+ assertions\s*:\s*(\S+(?:[ \t]+\S+)?)} $data] {
+      set st($s) [format "%s(%d)" [string trim $state] $n]
+    }
+    set total 0
+    foreach s $sides { if {[regexp {\((\d+)\)} $st($s) -> k]} { incr total $k } }
+    set cells {}
+    foreach s $sides { lappend cells [format %-15s $st($s)] }
+    puts $out [format "%-62s %-14s %s %d" $test $seed [join $cells {}] $total]
+    set fails [dict create]
+    foreach {m side check} [regexp -all -inline \
+        {(?m)^# UVM_ERROR .*\[((?:RC|EP)_(?:DL|TL|PL)_ASSERT)\]\s+\[([^\]]+)\]\s+FAILED} $data] {
+      dict incr fails "$side|$check"
+    }
+    dict for {k n} $fails {
+      foreach {side check} [split $k |] break
+      puts $csv "$test,$seed,$side,$check,$n"
+      lappend detail [format "%-50s %-20s %-18s %s" $test $side $check $n]
+    }
+  }
+  puts $out [string repeat - [string length $hdr]]
+  puts $out "FAILED ASSERTION CHECKS"
+  foreach ln $detail { puts $out $ln }
+  close $out ; close $csv
+}
+
+if {[info exists REPORT_ONLY] && $REPORT_ONLY} {
+  write_testcase_report $regdir
+  write_assertion_report $regdir
+  return
 }
 
 #------------------------------------------------------------------------------
@@ -253,7 +338,21 @@ if {$COV} {
 }
 close $fh ; close $csv
 
+write_testcase_report $regdir
+write_assertion_report $regdir
+
 echo ""
 set fh [open "$regdir/summary.txt" r] ; echo [read $fh] ; close $fh
 echo "REGRESSION : results in $regdir"
+
+if {!$KEEP_PASS_LOGS} {
+  set tr "$regdir/.transcript.tmp"
+  catch {transcript file $tr}
+  foreach r $RESULTS {
+    foreach {t l st e f s dt log} $r break
+    if {$st eq "PASS"} { catch {file delete $log} }
+  }
+  catch {transcript off}
+  catch {file delete $tr}
+}
 
