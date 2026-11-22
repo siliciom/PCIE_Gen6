@@ -136,13 +136,44 @@ PCIe_gen6_3DW_Flit_MemWr_Malformed_TLP_test
 PCIe_gen6_3DW_Flit_DefMemWr_Poisoned_TLP_test
 PCIe_gen6_3DW_Flit_IOWr_ECRC_Error_test
 
-# DLL : replay / sequence number / retry buffer / CRC / FEC
+#------------------------------------------------------------------------------
+# [DLL] Data Link Layer tests (3DW build) - all DLL tests in one place
+#------------------------------------------------------------------------------
+# DL state machine (DLCMSM) / flow control init
+PCIe_gen6_dll_inactive_state_test
+PCIe_gen6_dll_initfc1_test
+PCIe_gen6_dll_initfc2_test
+PCIe_gen6_dll_feature_negotiation_test
+PCIe_gen6_dll_active_state_test
+# ACK / NAK / replay / replay timer
+PCIe_gen6_dll_ack_nak_test
+PCIe_gen6_dll_crc_error_replay_test
+PCIe_gen6_dll_retry_request_test
+PCIe_gen6_dll_lost_nak_test
+PCIe_gen6_dll_duplicate_flit_discard_test
+PCIe_gen6_dll_replay_timer_expiry_test
 PCIe_gen6_dll_multi_flit_replay_test
+# sequence numbers / retry buffer
+PCIe_gen6_dll_sequence_wraparound_test
 PCIe_gen6_dll_sequence_gap_detection_test
 PCIe_gen6_dll_out_of_order_flit_test
+PCIe_gen6_dll_replay_buffer_limit_test
 PCIe_gen6_dll_maximum_replay_buffer_test
 PCIe_gen6_dll_retry_buffer_overflow_test
+# CRC / FEC
 PCIe_gen6_dll_flit_crc_generation_test
 PCIe_gen6_dll_flit_crc_error__test
+PCIe_gen6_dll_fec_error_correction_test
 PCIe_gen6_dll_uncorrectable_fec_error_test
 PCIe_gen6_dll_crc_and_fec_combined_test
+# DLLP receive
+PCIe_gen6_dll_invalid_dllp_test
+PCIe_gen6_dll_nop_dllp_test
+PCIe_gen6_dll_link_management_dllp_test
+# flow control credits
+PCIe_gen6_dll_flow_control_credit_exhaustion_test
+PCIe_gen6_dll_credit_recovery_test
+PCIe_gen6_dll_updatefc_optimized_test
+# link down / reset
+PCIe_gen6_dll_link_recovery_reinitialization_test
+PCIe_gen6_dll_reset_replay_buffer_clear_test
