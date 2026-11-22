@@ -68,7 +68,7 @@ class PCIe_RC_3DW_NonFlit_DefMemWr_Random_sequence extends PCIe_RC_controller_ba
       `uvm_error("3DW_NONFLIT_DEFMEMWR_RANDOM","randomize failed for defmwr")
 
     `uvm_info("TL_DEFMWR",$sformatf("Sending 3DW NonFlit Deferrable MemWr (Random)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

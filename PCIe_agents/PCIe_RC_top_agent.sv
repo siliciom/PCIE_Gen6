@@ -26,11 +26,11 @@ class PCIe_RC_top_agent extends uvm_component;
    endfunction
   
    function void build_phase(uvm_phase phase);
-    `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_TOP_AGENT_BUILD_PHASE",UVM_LOW)
+    `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_TOP_AGENT_BUILD_PHASE",UVM_HIGH)
      super.build_phase(phase);   
         rc_controller_agent    = PCIe_RC_controller_agent::type_id::create("rc_controller_agent",this);
         rc_phy_agent    = PCIe_RC_phy_agent::type_id::create("rc_phy_agent",this);
-    `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_TOP_AGENT_BUILD_PHASE",UVM_LOW)
+    `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_TOP_AGENT_BUILD_PHASE",UVM_HIGH)
    endfunction
   
 endclass

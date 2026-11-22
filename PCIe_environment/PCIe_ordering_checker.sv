@@ -209,13 +209,13 @@ class PCIe_ordering_checker extends uvm_component;
     verdict = (r == ORD_NO && t2_went_first) ? "FAIL" : "PASS";
 
     `uvm_info("ORD_CHK", $sformatf("ENTERED_ORDERING_TABLE_CHECK : T1(older)=%s  T2(newer)=%s",
-              tlp_desc(t1, n1), tlp_desc(t2, n2)), UVM_LOW)
+              tlp_desc(t1, n1), tlp_desc(t2, n2)), UVM_HIGH)
     `uvm_info("ORD_CHK", $sformatf("ORDERING_RULE_CHECKED : Table 2-42 row=%s col=%s -> rule %s = %s : %s",
               PCIe_ordering_rules::class_name(PCIe_ordering_rules::get_ord_class(t2)),
               PCIe_ordering_rules::class_name(PCIe_ordering_rules::get_ord_class(t1)),
-              rid, PCIe_ordering_rules::result_name(r), why), UVM_LOW)
+              rid, PCIe_ordering_rules::result_name(r), why), UVM_HIGH)
     `uvm_info("ORD_CHK", $sformatf("ORDERING_DECISION : rule %s says %s | actual : %s -> %s",
-              rid, rule_says, actual, verdict), UVM_LOW)
+              rid, rule_says, actual, verdict), UVM_HIGH)
   endfunction
 
   //=======================================================================================
@@ -224,19 +224,19 @@ class PCIe_ordering_checker extends uvm_component;
   //=======================================================================================
   protected function void check_sent(int pos);
 
-    `uvm_info("ORD_CHK", $sformatf("TLP_LEFT_TL : %s", tlp_desc(waiting[pos], waiting_no[pos])), UVM_LOW)
+    `uvm_info("ORD_CHK", $sformatf("TLP_LEFT_TL : %s", tlp_desc(waiting[pos], waiting_no[pos])), UVM_HIGH)
 
     //-------------------------------------------------------------------------------------
     // compare with the TLP that left just before this one, and print the table decision
     //-------------------------------------------------------------------------------------
     if (last_sent == null) begin
       `uvm_info("ORD_CHK", $sformatf("ENTERED_ORDERING_TABLE_CHECK : %s is the FIRST TLP, nothing older to compare",
-                tlp_desc(waiting[pos], waiting_no[pos])), UVM_LOW)
+                tlp_desc(waiting[pos], waiting_no[pos])), UVM_HIGH)
     end
     else if (same_request(waiting[pos], last_sent)) begin
       // [FIX] next piece of the same split request -> not a new transaction, no table check
       `uvm_info("ORD_CHK", $sformatf("SAME_REQUEST_PIECE : %s is the next piece of %s, no ordering check",
-                tlp_desc(waiting[pos], waiting_no[pos]), tlp_desc(last_sent, last_sent_no)), UVM_LOW)
+                tlp_desc(waiting[pos], waiting_no[pos]), tlp_desc(last_sent, last_sent_no)), UVM_HIGH)
     end
     else if (last_sent_no < waiting_no[pos]) begin
       // normal case : the older TLP (T1 = last_sent) went first, now the newer one (T2)
@@ -277,7 +277,7 @@ class PCIe_ordering_checker extends uvm_component;
       end
       else begin
         `uvm_info("ORD_CHK", $sformatf("LEGAL_PASS rule %s %s : #%0d before #%0d : %s",
-                  rid, PCIe_ordering_rules::result_name(r), waiting_no[pos], waiting_no[j], why), UVM_LOW)
+                  rid, PCIe_ordering_rules::result_name(r), waiting_no[pos], waiting_no[j], why), UVM_HIGH)
       end
     end
 
@@ -338,7 +338,7 @@ class PCIe_ordering_checker extends uvm_component;
       s = {s, "\n  every TLP left the TL in issue order (no TLP passed an older TLP)"};
     foreach (n_rule_hit[rid])
       s = {s, $sformatf("\n    rule %-4s checked %0d time(s)", rid, n_rule_hit[rid])};
-    `uvm_info("ORD_CHK", s, UVM_LOW)
+    `uvm_info("ORD_CHK", s, UVM_HIGH)
     if (sent_early.size() != 0)
       `uvm_warning("ORD_CHK", $sformatf("%0d TLP(s) were seen leaving the TL but never seen issued by the driver", sent_early.size()))
   endfunction

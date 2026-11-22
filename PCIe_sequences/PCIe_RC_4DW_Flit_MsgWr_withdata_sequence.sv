@@ -69,7 +69,7 @@ class PCIe_RC_4DW_Flit_MsgWr_withdata_sequence extends PCIe_RC_controller_base_s
       `uvm_error("4DW_FLIT_MSGWR_WITHDATA","randomize failed for msgwr")
 
     `uvm_info("TL_MSG",$sformatf("Sending 4DW Flit MsgWr (with data)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

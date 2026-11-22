@@ -66,7 +66,7 @@ class PCIe_RC_3DW_Flit_CFGWr0_followed_CFGRd0_Random_sequence extends PCIe_RC_co
       `uvm_error("3DW_FLIT_CFGRD0_FOLLOWED_CFGRD0_RANDOM","randomize failed for cfgwr")
 
     `uvm_info("TL_CFG",$sformatf("Sending 3DW Flit CFGWr (Type0)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 
@@ -105,7 +105,7 @@ class PCIe_RC_3DW_Flit_CFGWr0_followed_CFGRd0_Random_sequence extends PCIe_RC_co
       `uvm_error("3DW_FLIT_CFGRD0_FOLLOWED_CFGRD0_RANDOM","randomize failed for cfgrd")
 
     `uvm_info("TL_CFG",$sformatf("Sending 3DW Flit CFGRd (Type0) readback"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

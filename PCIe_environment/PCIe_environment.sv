@@ -44,7 +44,7 @@ class PCIe_environment extends uvm_env;
 
    function void build_phase(uvm_phase phase);
       super.build_phase(phase);
-      `uvm_info(get_type_name(),"ENTER_BUILD_PHASE", UVM_LOW)
+      `uvm_info(get_type_name(),"ENTER_BUILD_PHASE", UVM_HIGH)
        rc_to_ep_bit_event = uvm_event_pool::get_global("rc_to_ep_bit_event");
        ep_to_rc_bit_event = uvm_event_pool::get_global("ep_to_rc_bit_event");
        rc_l0_to_dl_event = uvm_event_pool::get_global("rc_l0_to_dl_event");
@@ -85,12 +85,12 @@ class PCIe_environment extends uvm_env;
          vc_arb = PCIe_VC_Arbiter::type_id::create("vc_arb", this);
          uvm_config_db#(PCIe_VC_Arbiter)::set(this, "*", "vc_arb", vc_arb);
       end
-      `uvm_info(get_type_name(),"EXIT_BUILD_PHASE",  UVM_LOW)
+      `uvm_info(get_type_name(),"EXIT_BUILD_PHASE",  UVM_HIGH)
    endfunction
 
    function void connect_phase(uvm_phase phase);
      super.connect_phase(phase);
-     `uvm_info(get_type_name(),"ENTER_CONNECT_PHASE", UVM_LOW)
+     `uvm_info(get_type_name(),"ENTER_CONNECT_PHASE", UVM_HIGH)
       
     if(pcie_ecfg.has_rc_top_agent)
         begin
@@ -198,7 +198,7 @@ ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_dl_model = ep_top_agen
          if(pcie_ecfg.has_ep_top_agent)
             ep_top_agent.ep_controller_agent.ep_controller_monitor.ep_cov_ap.connect(pcie_subscriber.ep_export);
       end
-      `uvm_info(get_type_name(),"EXIT_CONNECT_PHASE", UVM_LOW)
+      `uvm_info(get_type_name(),"EXIT_CONNECT_PHASE", UVM_HIGH)
 
    endfunction
 

@@ -68,14 +68,14 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
  
    function void build_phase(uvm_phase phase);
     int unsigned arb;
-    `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_BUILD_PHASE",UVM_LOW)
+    `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_BUILD_PHASE",UVM_HIGH)
      super.build_phase(phase);
       // [TC_VC] VC arbitration on when the Link has more than one VC
       vc_arb_en = (PCIe_sequence_item::num_vc > 1);
       if ($value$plusargs("VC_ARB_EN=%d", arb)) vc_arb_en = (arb != 0);
       `uvm_info("RC_VC_ARB", $sformatf("VC_ARBITRATION %s : %s",
                 vc_arb_en ? "ENABLED (Strict Priority, VC7 highest / VC0 lowest)" : "DISABLED (one request at a time, as before)",
-                PCIe_sequence_item::tc_vc_map_str()), UVM_LOW)
+                PCIe_sequence_item::tc_vc_map_str()), UVM_HIGH)
       pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
       replayed_item = PCIe_sequence_item::type_id::create("replayed_item");
       nak_item = PCIe_sequence_item::type_id::create("nak_item");
@@ -92,12 +92,12 @@ class PCIe_RC_controller_driver extends uvm_driver #(PCIe_sequence_item);
  
       if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf_rx))
        `uvm_fatal("NO_VIF", "RC_PIPE_INTERFACE_not_found")
-       `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_DRIVER_BUILD_PHASE",UVM_LOW)
+       `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_DRIVER_BUILD_PHASE",UVM_HIGH)
   	endfunction
  
 task run_phase(uvm_phase phase);
       vc_arb_phase = phase;   // [TC_VC] objection while TLPs wait in the VC queues
-      `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
+      `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_DRIVER_RUN_PHASE",UVM_HIGH)
       `uvm_info("RC_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",rc_dl_model.DL_STATE.name()),UVM_LOW)
 
       // [LINK_FIRST] LTSSM (L0) + DLCMSM (DL_ACTIVE) first, no sequence item used.
@@ -300,7 +300,7 @@ endtask
     // ones, then send the TLP (same handshake as the one-at-a-time path).
     rc_dl_model.fc_tx_allowed = 1'b0;
     drain_dl_dllp_flits();
-    `uvm_info("RC_VC_ARB", $sformatf("SENDING %s (TC%0d) : %s", won_vc.name(), req.tc, req.convert2string()), UVM_LOW)
+    `uvm_info("RC_VC_ARB", $sformatf("SENDING %s (TC%0d) : %s", won_vc.name(), req.tc, req.convert2string()), UVM_HIGH)
     send_request(req);                     // FC gate of won_vc + [FLIT_SEG]
     rc_dl_model.fc_tx_allowed = 1'b1;
     if (!vc_arb.any_pending() && vc_arb_obj_raised) begin
@@ -324,6 +324,8 @@ endtask
   task send_request(PCIe_sequence_item req);
     PCIe_sequence_item segs[$];
     bit                fc_allowed_saved;
+
+    wait_dl_tx_ready();   // [DLL_TEST] replay running or Tx retry buffer full -> wait
 
     if (!rc_tl_model.flit_needs_segmentation(req)) begin
       rc_tl_model.wait_for_fc_credits(req);
@@ -354,6 +356,23 @@ endtask
                 segs.size(), segs.size(), req.data.size()), UVM_LOW)
 
     rc_dl_model.fc_tx_allowed = fc_allowed_saved;
+  endtask
+
+  // [DLL_TEST] A new TLP waits while the Tx retry buffer is full (no Ack yet :
+  // TX_RETRY_BUFFER_MAX_FLITS or the test setting tx_retry_depth).
+  // The replay is driven by drive_replay() (also while waiting), so there is
+  // no replay running here when a TLP is sent.
+  function bit dl_tx_blocked();
+    return rc_dl_model.tx_retry_buffer_full();
+  endfunction
+
+  task wait_dl_tx_ready();
+    if (!dl_tx_blocked()) return;
+    rc_dl_model.n_tx_stall++;
+    `uvm_info("RC_DLL_DRV", $sformatf("TLP_STALLED : tx_retry_buffer=%0d/%0d",
+              rc_dl_model.tx_retry_buffer.size(), rc_dl_model.tx_retry_depth), UVM_NONE)
+    wait_for_tx_retry_buffer_space();   // waits for an ACK, drives a scheduled replay meanwhile
+    `uvm_info("RC_DLL_DRV", "TLP_RELEASED", UVM_NONE)
   endtask
 
   // [ENUM] Drive every DLLP flit (UpdateFC) the DL model has already queued,
@@ -452,11 +471,11 @@ endtask
        for (int unsigned i = 0; i < `PCIe_FLIT_TOTAL_DW; i++) begin
           bit [`PCIe_MON_DATA_W-1:0] flit_dword;
           flit_dword = {flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+3], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+2], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+1], flit_full_q[i*`PCIe_PL_BYTES_PER_WORD+0]};
-          `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_LOW)
+          `uvm_info("DRIVE_FLIT",$sformatf("flit_dword is %h :: %d",flit_dword,flit_dword),UVM_HIGH)
           rc_pl_model.tx_process_executed = 1'b0;
-          if (pcie_seq_item != null) pcie_seq_item.print();
+          if (pcie_seq_item != null) if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
           rc_pl_model.tx_process(flit_dword, scr_data, pcie_seq_item);
-          `uvm_info("SCR_DATA",$sformatf("scr_data is %h :: %d",scr_data,scr_data),UVM_LOW)
+          `uvm_info("SCR_DATA",$sformatf("scr_data is %h :: %d",scr_data,scr_data),UVM_HIGH)
           enc_flit.push_back(scr_data);
        end
 

@@ -79,7 +79,7 @@ class PCIe_RC_4DW_NonFlit_MemRdlock_MinPayload_sequence extends PCIe_RC_controll
       `uvm_error("4DW_NONFLIT_MEMRDLOCK_MINPAYLOAD","randomize failed for mrdlk")
 
     `uvm_info("TL_MRDLK",$sformatf("Sending 4DW NonFlit MemRdlock (MinPayload)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

@@ -682,15 +682,209 @@ interface PCIe_RC_interface(input logic pclk);
       if      (tl_checks_started == 1'b0) result = "NOT CHECKED";
       else if (fail_cnt == 0)             result = "PASSED";
       else                                result = "FAILED";
-      `uvm_info({SIDE,"_TL_STATUS"}, $sformatf({"\n",
-                "  TLPs sent / received     : %0d / %0d\n",
-                "  Completions received     : %0d\n",
-                "  TL assertion failures    : %0d\n",
-                "  TL assertions            : %s\n"},
-                tl_tx_cnt, tl_rx_cnt, tl_cpl_cnt, fail_cnt, result), UVM_LOW)
+       `uvm_info({SIDE,"_TL_STATUS"}, $sformatf("\n  TL assertion failures    : %0d\n  TL assertions            : %s\n",
+                 fail_cnt, result), UVM_LOW)
    end
 
    // [TL_ASSERT] end of TL assertions
+
+   logic pl_assert_en = 1'b1;
+   logic pl_sample_valid = 1'b0;
+   logic pl_reserved_rate_test = 1'b0;
+   main_state_e pl_main_state = DETECT;
+   detect_state_e pl_detect_state = DETECT_QUIET;
+   polling_state_e pl_polling_state = POLLING_ACTIVE;
+   logic pl_no_receiver_test = 1'b0;
+   logic pl_timeout_test_active = 1'b0;
+   logic pl_det_quiet;
+   logic pl_det_active;
+   logic pl_poll_active;
+   int unsigned pl_assert_pass_count = 0;
+   int unsigned pl_assert_fail_count = 0;
+
+
+   always_comb begin
+      pl_det_quiet   = (pl_main_state == DETECT) && (pl_detect_state == DETECT_QUIET);
+      pl_det_active  = (pl_main_state == DETECT) && (pl_detect_state == DETECT_ACTIVE);
+      pl_poll_active = (pl_main_state == POLLING) && (pl_polling_state == POLLING_ACTIVE);
+   end
+
+   PL_RESET_DEFAULTS_CHECK : assert property (disable iff (!pl_assert_en || pl_timeout_test_active)
+      $rose(pl_sample_valid) && !pl_timeout_test_active |->
+          (!tx_valid && (tx_elec_idle || pl_det_active) && (!tx_detect_rx || pl_det_active || ($past(tx_detect_rx) === 1'b1)) &&
+           (rate inside {RATE_NOT_NEGOTIATED, RATE_GEN1, RATE_GEN2, RATE_GEN3, RATE_GEN4, RATE_GEN5, RATE_GEN6})))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RESET_DEFAULTS_CHECK] FAILED : tx_valid=%0b tx_elec_idle=%0b tx_detect_rx=%0b rate=%0b", tx_valid, tx_elec_idle, tx_detect_rx, rate))
+   end
+
+   PL_DETECT_QUIET_TX_VALID_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_quiet |-> !tx_valid)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_TX_VALID_LOW_CHECK] FAILED : DETECT_QUIET tx_valid=%0b", tx_valid))
+   end
+
+   PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_quiet && ($past(tx_detect_rx) !== 1'b1) |-> !tx_detect_rx)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK] FAILED : DETECT_QUIET tx_detect_rx=%0b", tx_detect_rx))
+   end
+
+   PL_DETECT_QUIET_RATE_ZERO_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_quiet |-> (rate inside {RATE_NOT_NEGOTIATED, RATE_GEN1, RATE_GEN2, RATE_GEN3, RATE_GEN4, RATE_GEN5, RATE_GEN6}))
+      begin pl_assert_pass_count++; end
+    else begin
+       pl_assert_fail_count++;
+       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_RATE_ZERO_CHECK] FAILED : DETECT_QUIET rate=%0b expected a valid encoded rate", rate))
+   end
+
+   PL_DETECT_QUIET_TX_ELEC_IDLE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_quiet |-> tx_elec_idle)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_QUIET_TX_ELEC_IDLE_CHECK] FAILED : DETECT_QUIET tx_elec_idle is not 1")
+   end
+
+   PL_DETECT_ACTIVE_TX_DETECT_RX_HIGH_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_active |-> tx_detect_rx)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_ACTIVE_TX_DETECT_RX_HIGH_CHECK] FAILED : DETECT_ACTIVE tx_detect_rx is not 1")
+   end
+
+   PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $rose(pl_det_active) && !pl_timeout_test_active |-> ##[1:8] $rose(phy_status))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK] FAILED : phy_status did not rise after DETECT_ACTIVE")
+   end
+
+   PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      phy_status |-> (tx_detect_rx || $past(tx_detect_rx)))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK] FAILED : phy_status asserted before tx_detect_rx")
+   end
+
+   PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $rose(phy_status) |=> !phy_status)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK] FAILED : phy_status stayed high for more than one clock")
+   end
+
+   PL_RX_STATUS_VALID_DURING_DETECTION_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      phy_status |-> (rx_status inside {3'b000, 3'b011}))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_STATUS_VALID_DURING_DETECTION_CHECK] FAILED : rx_status=%03b", rx_status))
+   end
+
+   PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $fell(phy_status) |-> (rx_status == 3'b000))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK] FAILED : rx_status=%03b after phy_status fell", rx_status))
+   end
+
+   PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $fell(phy_status) |-> !tx_detect_rx)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK] FAILED : tx_detect_rx not cleared after phy_status fell")
+   end
+
+   PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $rose(phy_status) && !pl_no_receiver_test |-> (rx_status == 3'b011))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK] FAILED : rx_status=%03b expected 011", rx_status))
+   end
+
+   PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_poll_active |-> !tx_elec_idle)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK] FAILED : POLLING_ACTIVE tx_elec_idle is not 0")
+   end
+
+   PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_poll_active |-> (rate != RATE_NOT_NEGOTIATED))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK] FAILED : POLLING_ACTIVE rate=%0b", rate))
+   end
+
+   PL_RATE_NOT_RESERVED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      !pl_reserved_rate_test |-> (rate != 3'b111))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RATE_NOT_RESERVED_CHECK] FAILED : rate=%03b is reserved", rate))
+   end
+
+   PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $changed(rx_data) |-> rx_valid)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK] FAILED : rx_data changed to %08h while rx_valid=%0b", rx_data, rx_valid))
+   end
+
+   PL_SCALAR_TX_BURST_END_CLEAR_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $fell(tx_valid) && ($past(tx_striped) == 1'b0) |-> (tx_data == 32'h00000000))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_SCALAR_TX_BURST_END_CLEAR_CHECK] FAILED : tx_valid fell with tx_data=%08h", tx_data))
+   end
+
+   PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      !(tx_valid && tx_elec_idle))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK] FAILED : tx_valid and tx_elec_idle are both 1")
+   end
+
+   PL_RX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      !(rx_valid && rx_elec_idle))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_RX_VALID_ELEC_IDLE_MUTEX_CHECK] FAILED : rx_valid and rx_elec_idle are both 1")
+   end
+
+    final begin
+       uvm_report_server svr;
+       int unsigned total_cnt;
+       int unsigned fail_cnt;
+       string            result;
+       svr       = uvm_report_server::get_server();
+       total_cnt = pl_assert_pass_count + pl_assert_fail_count;
+       fail_cnt  = svr.get_id_count({SIDE,"_PL_ASSERT"});
+       if      (total_cnt == 0) result = "NOT CHECKED";
+       else if (fail_cnt == 0)  result = "PASSED";
+       else                     result = "FAILED";
+       `uvm_info({SIDE,"_PL_STATUS"}, $sformatf("\n  PL assertion failures    : %0d\n  PL assertions            : %s\n",
+                 fail_cnt, result), UVM_LOW)
+    end
 
 endinterface
 
@@ -1323,15 +1517,209 @@ interface PCIe_EP_interface(input logic pclk);
       if      (tl_checks_started == 1'b0) result = "NOT CHECKED";
       else if (fail_cnt == 0)             result = "PASSED";
       else                                result = "FAILED";
-      `uvm_info({SIDE,"_TL_STATUS"}, $sformatf({"\n",
-                "  Requests received        : %0d\n",
-                "  Completions sent         : %0d\n",
-                "  TL assertion failures    : %0d\n",
-                "  TL assertions            : %s\n"},
-                tl_req_cnt, tl_cpl_cnt, fail_cnt, result), UVM_LOW)
+       `uvm_info({SIDE,"_TL_STATUS"}, $sformatf("\n  TL assertion failures    : %0d\n  TL assertions            : %s\n",
+                 fail_cnt, result), UVM_LOW)
    end
 
    // [TL_ASSERT] end of TL assertions
+
+   logic pl_assert_en = 1'b1;
+   logic pl_sample_valid = 1'b0;
+   logic pl_reserved_rate_test = 1'b0;
+   main_state_e pl_main_state = DETECT;
+   detect_state_e pl_detect_state = DETECT_QUIET;
+   polling_state_e pl_polling_state = POLLING_ACTIVE;
+   logic pl_no_receiver_test = 1'b0;
+   logic pl_timeout_test_active = 1'b0;
+   logic pl_det_quiet;
+   logic pl_det_active;
+   logic pl_poll_active;
+   int unsigned pl_assert_pass_count = 0;
+   int unsigned pl_assert_fail_count = 0;
+
+
+   always_comb begin
+      pl_det_quiet   = (pl_main_state == DETECT) && (pl_detect_state == DETECT_QUIET);
+      pl_det_active  = (pl_main_state == DETECT) && (pl_detect_state == DETECT_ACTIVE);
+      pl_poll_active = (pl_main_state == POLLING) && (pl_polling_state == POLLING_ACTIVE);
+   end
+
+   PL_RESET_DEFAULTS_CHECK : assert property (disable iff (!pl_assert_en || pl_timeout_test_active)
+      $rose(pl_sample_valid) && !pl_timeout_test_active |->
+          (!tx_valid && (tx_elec_idle || pl_det_active) && (!tx_detect_rx || pl_det_active || ($past(tx_detect_rx) === 1'b1)) &&
+           (rate inside {RATE_NOT_NEGOTIATED, RATE_GEN1, RATE_GEN2, RATE_GEN3, RATE_GEN4, RATE_GEN5, RATE_GEN6})))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RESET_DEFAULTS_CHECK] FAILED : tx_valid=%0b tx_elec_idle=%0b tx_detect_rx=%0b rate=%0b", tx_valid, tx_elec_idle, tx_detect_rx, rate))
+   end
+
+   PL_DETECT_QUIET_TX_VALID_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_quiet |-> !tx_valid)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_TX_VALID_LOW_CHECK] FAILED : DETECT_QUIET tx_valid=%0b", tx_valid))
+   end
+
+   PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_quiet && ($past(tx_detect_rx) !== 1'b1) |-> !tx_detect_rx)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK] FAILED : DETECT_QUIET tx_detect_rx=%0b", tx_detect_rx))
+   end
+
+   PL_DETECT_QUIET_RATE_ZERO_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_quiet |-> (rate inside {RATE_NOT_NEGOTIATED, RATE_GEN1, RATE_GEN2, RATE_GEN3, RATE_GEN4, RATE_GEN5, RATE_GEN6}))
+      begin pl_assert_pass_count++; end
+    else begin
+       pl_assert_fail_count++;
+       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_RATE_ZERO_CHECK] FAILED : DETECT_QUIET rate=%0b expected a valid encoded rate", rate))
+   end
+
+   PL_DETECT_QUIET_TX_ELEC_IDLE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_quiet |-> tx_elec_idle)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_QUIET_TX_ELEC_IDLE_CHECK] FAILED : DETECT_QUIET tx_elec_idle is not 1")
+   end
+
+   PL_DETECT_ACTIVE_TX_DETECT_RX_HIGH_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_det_active |-> tx_detect_rx)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_ACTIVE_TX_DETECT_RX_HIGH_CHECK] FAILED : DETECT_ACTIVE tx_detect_rx is not 1")
+   end
+
+   PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $rose(pl_det_active) && !pl_timeout_test_active |-> ##[1:8] $rose(phy_status))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK] FAILED : phy_status did not rise after DETECT_ACTIVE")
+   end
+
+   PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      phy_status |-> (tx_detect_rx || $past(tx_detect_rx)))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK] FAILED : phy_status asserted before tx_detect_rx")
+   end
+
+   PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $rose(phy_status) |=> !phy_status)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK] FAILED : phy_status stayed high for more than one clock")
+   end
+
+   PL_RX_STATUS_VALID_DURING_DETECTION_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      phy_status |-> (rx_status inside {3'b000, 3'b011}))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_STATUS_VALID_DURING_DETECTION_CHECK] FAILED : rx_status=%03b", rx_status))
+   end
+
+   PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $fell(phy_status) |-> (rx_status == 3'b000))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK] FAILED : rx_status=%03b after phy_status fell", rx_status))
+   end
+
+   PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $fell(phy_status) |-> !tx_detect_rx)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK] FAILED : tx_detect_rx not cleared after phy_status fell")
+   end
+
+   PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $rose(phy_status) && !pl_no_receiver_test |-> (rx_status == 3'b011))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK] FAILED : rx_status=%03b expected 011", rx_status))
+   end
+
+   PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_poll_active |-> !tx_elec_idle)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK] FAILED : POLLING_ACTIVE tx_elec_idle is not 0")
+   end
+
+   PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      pl_poll_active |-> (rate != RATE_NOT_NEGOTIATED))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK] FAILED : POLLING_ACTIVE rate=%0b", rate))
+   end
+
+   PL_RATE_NOT_RESERVED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      !pl_reserved_rate_test |-> (rate != 3'b111))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RATE_NOT_RESERVED_CHECK] FAILED : rate=%03b is reserved", rate))
+   end
+
+   PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $changed(rx_data) |-> rx_valid)
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK] FAILED : rx_data changed to %08h while rx_valid=%0b", rx_data, rx_valid))
+   end
+
+   PL_SCALAR_TX_BURST_END_CLEAR_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      $fell(tx_valid) && ($past(tx_striped) == 1'b0) |-> (tx_data == 32'h00000000))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_SCALAR_TX_BURST_END_CLEAR_CHECK] FAILED : tx_valid fell with tx_data=%08h", tx_data))
+   end
+
+   PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      !(tx_valid && tx_elec_idle))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK] FAILED : tx_valid and tx_elec_idle are both 1")
+   end
+
+   PL_RX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+      !(rx_valid && rx_elec_idle))
+      begin pl_assert_pass_count++; end
+   else begin
+      pl_assert_fail_count++;
+      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_RX_VALID_ELEC_IDLE_MUTEX_CHECK] FAILED : rx_valid and rx_elec_idle are both 1")
+   end
+
+    final begin
+       uvm_report_server svr;
+       int unsigned total_cnt;
+       int unsigned fail_cnt;
+       string            result;
+       svr       = uvm_report_server::get_server();
+       total_cnt = pl_assert_pass_count + pl_assert_fail_count;
+       fail_cnt  = svr.get_id_count({SIDE,"_PL_ASSERT"});
+       if      (total_cnt == 0) result = "NOT CHECKED";
+       else if (fail_cnt == 0)  result = "PASSED";
+       else                     result = "FAILED";
+       `uvm_info({SIDE,"_PL_STATUS"}, $sformatf("\n  PL assertion failures    : %0d\n  PL assertions            : %s\n",
+                 fail_cnt, result), UVM_LOW)
+    end
 
 endinterface
 

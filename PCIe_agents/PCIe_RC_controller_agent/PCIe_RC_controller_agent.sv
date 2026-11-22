@@ -31,7 +31,7 @@ class PCIe_RC_controller_agent extends uvm_agent;
        endfunction
 
        function void build_phase(uvm_phase phase);
-          `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_AGENT_BUILD_PHASE",UVM_LOW)
+          `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_AGENT_BUILD_PHASE",UVM_HIGH)
     	  super.build_phase(phase);   
      	    rc_controller_driver    = PCIe_RC_controller_driver::type_id::create("rc_controller_driver",this);
      	    rc_controller_monitor   = PCIe_RC_controller_monitor::type_id::create("rc_controller_monitor",this);
@@ -39,11 +39,11 @@ class PCIe_RC_controller_agent extends uvm_agent;
             rc_tl_model = PCIe_RC_TL_model::type_id::create("rc_tl_model", this);
             rc_dl_model = PCIe_RC_DL_model::type_id::create("rc_dl_model", this);
             rc_pl_model = PCIe_RC_PL_model::type_id::create("rc_pl_model", this);
-           `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_AGENT_BUILD_PHASE",UVM_LOW)
+           `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_AGENT_BUILD_PHASE",UVM_HIGH)
        endfunction
   
       function void connect_phase(uvm_phase phase);
-        `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
+        `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_AGENT_CONNECT_PHASE",UVM_HIGH)
           super.connect_phase(phase);
           rc_controller_driver.seq_item_port.connect(rc_controller_sequencer.seq_item_export);
 	  // RC_DRIVER -> TL -> DL -> PL Connection
@@ -59,7 +59,7 @@ class PCIe_RC_controller_agent extends uvm_agent;
          rc_dl_model.rc_dl_tl_ap.connect(rc_tl_model.dl_tl_imp);
          // [ENUM] share the RC TL handle so a sequence can wait for completions
          uvm_config_db#(PCIe_RC_TL_model)::set(null, "*", "rc_tl_model", rc_tl_model);
-        `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
+        `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_AGENT_CONNECT_PHASE",UVM_HIGH)
       endfunction
   
 endclass

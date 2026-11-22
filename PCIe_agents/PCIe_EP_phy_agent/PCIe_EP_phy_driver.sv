@@ -35,7 +35,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
     endfunction
 
     function void build_phase(uvm_phase phase);
-      `uvm_info("EP_PHY","ENTERED_INTO_EP_PHY_DRIVER_BUILD_PHASE",UVM_LOW)
+      `uvm_info("EP_PHY","ENTERED_INTO_EP_PHY_DRIVER_BUILD_PHASE",UVM_HIGH)
 	   super.build_phase(phase);
        pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
      if (!uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf_tx))
@@ -50,11 +50,11 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
     uvm_rc_to_ep_ev = uvm_event_pool::get_global("rc_to_ep_bit_event");
      uvm_ep_to_rc_ev = uvm_event_pool::get_global("ep_to_rc_bit_event");
 
-        `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_DRIVER_BUILD_PHASE",UVM_LOW)
+        `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_DRIVER_BUILD_PHASE",UVM_HIGH)
    endfunction
 
    task run_phase(uvm_phase phase);
-      `uvm_info("EP_PHY","ENTERED_INTO_EP_PHY_DRIVER_RUN_PHASE",UVM_LOW)
+      `uvm_info("EP_PHY","ENTERED_INTO_EP_PHY_DRIVER_RUN_PHASE",UVM_HIGH)
 	   fork
 	    process_sequence_items();
 	    receiving_data_ep(ep_pipe_intf_tx);
@@ -67,47 +67,47 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
       //        //receiving_data_ep(ep_pipe_intf_tx);
       // seq_item_port.item_done(pcie_seq_item);
       // end
-       `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_DRIVER_RUN_PHASE",UVM_LOW)
+       `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_DRIVER_RUN_PHASE",UVM_HIGH)
     endtask
 
    
     task process_sequence_items();
       forever begin
         // Wait for LTSSM/PL model to request receiver detection
-        `uvm_info("EP_PHY","Waiting for TxDetectRx...",UVM_LOW)
+        `uvm_info("EP_PHY","Waiting for TxDetectRx...",UVM_HIGH)
         wait(ep_pipe_intf_tx.tx_detect_rx == 1'b1);
-        `uvm_info("EP_PHY","TxDetectRx detected - Receiver Detection Started",UVM_LOW)
+        `uvm_info("EP_PHY","TxDetectRx detected - Receiver Detection Started",UVM_HIGH)
         repeat(5)
            @(posedge ep_pipe_intf_tx.pclk);
 	   rc_present = rc_pl_model.rc_present;
-           `uvm_info("EP_PHY_DRIVER",$sformatf("EP_PHY_reads_RC_PRESENT = %0d", rc_present),UVM_LOW)
+           `uvm_info("EP_PHY_DRIVER",$sformatf("EP_PHY_reads_RC_PRESENT = %0d", rc_present),UVM_HIGH)
 
         // Receiver detection result
         ep_pipe_intf_tx.phy_status <= 1'b1;
         if (rc_pl_model.no_receiver_test) begin
             ep_pipe_intf_tx.rx_status <= 3'b000;
-          `uvm_info("EP_PHY","EP_No_Receiver_Test: forcing receiver-detection FAIL (rx_status=000)",UVM_LOW)
+          `uvm_info("EP_PHY","EP_No_Receiver_Test: forcing receiver-detection FAIL (rx_status=000)",UVM_HIGH)
         end
         else if (rc_present)
            ep_pipe_intf_tx.rx_status <= 3'b011;
         else
            ep_pipe_intf_tx.rx_status <= 3'b000;
-        `uvm_info("EP_PHY","PHY receiver detection completed",UVM_LOW)
+        `uvm_info("EP_PHY","PHY receiver detection completed",UVM_HIGH)
         @(posedge ep_pipe_intf_tx.pclk);
          ep_pipe_intf_tx.phy_status   <= 1'b0;
          ep_pipe_intf_tx.rx_status    <= 3'b000;
          ep_pipe_intf_tx.tx_detect_rx <= 1'b0;
         seq_item_port.get_next_item(pcie_seq_item);
-        `uvm_info("EP_PHY","EP PHY SEQUENCE ITEM RECEIVED",UVM_LOW)
+        `uvm_info("EP_PHY","EP PHY SEQUENCE ITEM RECEIVED",UVM_HIGH)
          seq_item_port.item_done();
-        `uvm_info("EP_PHY","EP PHY SEQUENCE ITEM COMPLETED",UVM_LOW)
+        `uvm_info("EP_PHY","EP PHY SEQUENCE ITEM COMPLETED",UVM_HIGH)
       end
     endtask
 
     task rx_sipo(virtual PCIe_EP_PHY_interface ep_phy_intf_rx);
       bit [`PCIE_LANE_BUS_W-1:0] rx_bus;
       bit        rx_bit;
-      `uvm_info("EP_PHY_DRIVER","ENTERED_INTO_RX_SIPO", UVM_LOW)
+      `uvm_info("EP_PHY_DRIVER","ENTERED_INTO_RX_SIPO", UVM_HIGH)
        forever
        begin
           for(int i = 0; i < `PCIe_MON_DATA_W; i++)
@@ -118,18 +118,18 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
                  rx_bit = ep_phy_intf_rx.rx_plus[l];
                  rx_bus[l*`PCIe_LANE_W + i] = rx_bit;
               end
-              `uvm_info("EP_PHY_DRIVER",$sformatf("RX_BIT[%0d] LANE0=%0b TIME=%0.5f",i, rx_bus[i],$realtime), UVM_LOW);
+              `uvm_info("EP_PHY_DRIVER",$sformatf("RX_BIT[%0d] LANE0=%0b TIME=%0.5f",i, rx_bus[i],$realtime), UVM_HIGH);
           end
            rc_data_q.push_back(rx_bus);
-          `uvm_info("EP_PHY_DRIVER",$sformatf("RX_BUS_LANE0 = %08h QUEUE_SIZE=%d", rx_bus[31:0],rc_data_q.size()),UVM_LOW);
+          `uvm_info("EP_PHY_DRIVER",$sformatf("RX_BUS_LANE0 = %08h QUEUE_SIZE=%d", rx_bus[31:0],rc_data_q.size()),UVM_HIGH);
       end
-      `uvm_info("EP_PHY_DRIVER","EXIT_FROM_RX_SIPO", UVM_LOW)
+      `uvm_info("EP_PHY_DRIVER","EXIT_FROM_RX_SIPO", UVM_HIGH)
    endtask
 
    task sending_pipe_rx(virtual PCIe_EP_interface ep_pipe_intf_rx);
       bit [`PCIE_LANE_BUS_W-1:0] rx_parallel_bus;
 
-      `uvm_info("EP_PHY_DRIVER","ENTERED_INTO_SENDING_PARALLEL_DATA_TO_PIPE_RX", UVM_LOW)
+      `uvm_info("EP_PHY_DRIVER","ENTERED_INTO_SENDING_PARALLEL_DATA_TO_PIPE_RX", UVM_HIGH)
        ep_pipe_intf_rx.phy_status   <= 1'b0;
        ep_pipe_intf_rx.rx_elec_idle <= 1'b0;
        ep_pipe_intf_rx.rx_status    <= 3'b000;
@@ -144,7 +144,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
             for (int l = 0; l < `PCIE_NUM_LANES; l++)
                ep_pipe_intf_rx.rx_data_lane[l] <= rx_parallel_bus[l*`PCIe_LANE_W +: `PCIe_LANE_W];
             ep_pipe_intf_rx.rx_valid <= 1'b1;
-           `uvm_info("EP_PHY_DRIVER",$sformatf("DRIVING_EP_PIPE_RX_LANE0 = %08h", rx_parallel_bus[31:0]),UVM_LOW);
+           `uvm_info("EP_PHY_DRIVER",$sformatf("DRIVING_EP_PIPE_RX_LANE0 = %08h", rx_parallel_bus[31:0]),UVM_HIGH);
 	    end
 	    else begin
             ep_pipe_intf_rx.rx_valid <= 1'b0;
@@ -161,7 +161,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
        bit [1:0]  powerdown;
        bit [2:0]  rate;
 
-       `uvm_info("EP_PHY_DRIVER","ENtered_into_Receiving_PIPE_Data_EP_Task",  UVM_LOW)
+       `uvm_info("EP_PHY_DRIVER","ENtered_into_Receiving_PIPE_Data_EP_Task",  UVM_HIGH)
        // Free running sampler: look at EVERY negedge and queue whatever
        // tx_valid presents. The previous shape of this loop was
        //   wait(tx_valid); while (tx_valid) @(negedge pclk) ...
@@ -185,7 +185,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
            for (int l = 0; l < `PCIE_NUM_LANES; l++)
               tx_bus[l*`PCIe_LANE_W +: `PCIe_LANE_W] = ep_pipe_intf_tx.tx_data_lane[l];
            ep_data_q.push_back(tx_bus);
-           `uvm_info("EP_PHY_DRIVER",$sformatf("Received_Lane0 = %08h Queue_Size = %0d",tx_bus[31:0],ep_data_q.size()),UVM_LOW)
+           `uvm_info("EP_PHY_DRIVER",$sformatf("Received_Lane0 = %08h Queue_Size = %0d",tx_bus[31:0],ep_data_q.size()),UVM_HIGH)
           end
        end
    endtask
@@ -206,7 +206,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
 
  task tx_piso(input bit [`PCIE_LANE_BUS_W-1:0] data_in);
        bit piso_data_out;
-       `uvm_info("EP_PHY_DRIVER","ENTERED_INTO_PISO_TASK_EP",  UVM_LOW)
+       `uvm_info("EP_PHY_DRIVER","ENTERED_INTO_PISO_TASK_EP",  UVM_HIGH)
           // Serialize all lanes in lockstep, one bit per lane per event.
            for (int i = 0; i < `PCIe_MON_DATA_W; i++) begin
               for (int l = 0; l < `PCIE_NUM_LANES; l++) begin
@@ -214,7 +214,7 @@ class PCIe_EP_phy_driver extends uvm_driver #(PCIe_sequence_item);
                  ep_phy_intf_tx.tx_plus[l]  <= piso_data_out;
                  ep_phy_intf_tx.tx_minus[l] <= ~piso_data_out;
               end
-             `uvm_info("EP_PHY_DRIVER", $sformatf("EP_PHY_DRIVER_PISO_BIT[%0d] LANE0=%0b TIME=%0t ",i, data_in[i], $time), UVM_LOW)
+             `uvm_info("EP_PHY_DRIVER", $sformatf("EP_PHY_DRIVER_PISO_BIT[%0d] LANE0=%0b TIME=%0t ",i, data_in[i], $time), UVM_HIGH)
               uvm_ep_to_rc_ev.trigger();
               #`PCIe_PHY_TX_BIT_DELAY;
            end

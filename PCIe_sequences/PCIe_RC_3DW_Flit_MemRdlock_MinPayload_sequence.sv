@@ -79,7 +79,7 @@ class PCIe_RC_3DW_Flit_MemRdlock_MinPayload_sequence extends PCIe_RC_controller_
       `uvm_error("3DW_FLIT_MEMRDLOCK_MINPAYLOAD","randomize failed for mrdlk")
 
     `uvm_info("TL_MRDLK",$sformatf("Sending 3DW Flit MemRdlock (MinPayload)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

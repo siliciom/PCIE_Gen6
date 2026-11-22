@@ -90,6 +90,14 @@ class PCIe_RC_DL_model extends uvm_component;
   bit NAK_WITHDRAWAL_ALLOWED;
   bit RC_REPLAY_IN_PROGRESS;
 
+  // [DLL_TEST] Flit replay / Tx retry buffer controls (default = old behaviour)
+  bit          replay_on_wire_en = 1'b0;                  // kept for older tests : the replay is ALWAYS driven on the link now
+  int unsigned tx_retry_depth    = `PCIe_MAX_UNACK_FLITS; // Tx retry buffer size in flits : the driver stalls when full
+  int unsigned n_replay_events;                           // replays started (REPLAY_NUM style counter)
+  int unsigned n_tx_stall;                                // TLPs that had to wait (replay running / retry buffer full)
+  int unsigned tx_retry_peak;                             // highest Tx retry buffer occupancy seen
+  bit          fc_batch_busy;                             // an UpdateFC batch is on its way to the PL model
+
   // Payload related information
   bit last_flit_was_payload;
 
@@ -234,7 +242,7 @@ function void build_phase(uvm_phase phase);
 
 // DL model consumes TL output, creates the DLP, then publishes to PL.
 function void write(PCIe_sequence_item item);
-  `uvm_info("RC_DL_MODEL","TL -> DL",UVM_LOW);
+  `uvm_info("RC_DL_MODEL","TL -> DL",UVM_HIGH);
   // item.print();
   form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
 
@@ -447,6 +455,7 @@ endfunction
      replay_q.delete();
      REPLAY_SCHEDULED      = 1'b0;
      RC_REPLAY_IN_PROGRESS = 1'b1;
+     n_replay_events++;   // [DLL_TEST] replays started
 
      foreach (tx_retry_buffer[i]) begin
         if (tx_retry_buffer[i].seq_num == TX_REPLAY_FLIT_SEQ_NUM) begin
@@ -677,7 +686,8 @@ endfunction
   int unsigned n_tx_retry_buffer_full_waits;           // TLPs that had to wait for space
 
   function bit tx_retry_buffer_full();
-    return (tx_retry_buffer.size() >= TX_RETRY_BUFFER_MAX_FLITS);
+    return (tx_retry_buffer.size() >= TX_RETRY_BUFFER_MAX_FLITS) ||
+           (tx_retry_buffer.size() >= tx_retry_depth);          // [DLL_TEST] tx_retry_depth (test setting)
   endfunction
 
   // ===========================================================================
@@ -1153,7 +1163,7 @@ endfunction
       {dlp[0][1:0],dlp[1]}
       );
 
-    `uvm_info("RC_DL_TLP_SEQ_ECRC_DUMP", dump, UVM_LOW)
+    `uvm_info("RC_DL_TLP_SEQ_ECRC_DUMP", dump, UVM_HIGH)
 
   endfunction
 
@@ -1214,7 +1224,7 @@ endfunction
       dlp[2], dlp[3], dlp[4], dlp[5],
       {dlp[2], dlp[3], dlp[4], dlp[5]});
 
-    `uvm_info("RC_DL_DLP_DUMP", dump, UVM_LOW)
+    `uvm_info("RC_DL_DLP_DUMP", dump, UVM_HIGH)
 
   endfunction
 
@@ -1256,7 +1266,7 @@ endfunction
 
   // NAK Schedule Implementation
   task execute_nak_schedule(int id);
-    `uvm_info("RC_DL_MODEL",$sformatf("Entered nak schedule task with id=%d",id),UVM_LOW);
+    `uvm_info("RC_DL_MODEL",$sformatf("Entered nak schedule task with id=%d",id),UVM_HIGH);
 
     case(id)
       0: begin
@@ -1328,7 +1338,7 @@ endfunction
 
   // ACK Schedule Implementation
   task execute_ack_schedule(int id);
-    `uvm_info("RC_DL_MODEL","Entered execute ack schedule",UVM_LOW);
+    `uvm_info("RC_DL_MODEL","Entered execute ack schedule",UVM_HIGH);
 
     case(id)
       0: begin
@@ -1821,6 +1831,7 @@ endfunction
   function void store_tx_retry_buffer(input bit [0:`PCIe_TLP_DATA_BYTE_W-1][`PCIe_BYTE_W-1:0] tlp_data,input bit [`PCIe_SEQ_NUM_W-1:0] seq_num);
     tx_retry_buffer.push_back('{tlp_data:tlp_data,seq_num:seq_num});
     if (tx_retry_buffer.size() > max_tx_retry_used) max_tx_retry_used = tx_retry_buffer.size();   // [FLOW_SUM]
+    if (tx_retry_buffer.size() > tx_retry_peak)     tx_retry_peak     = tx_retry_buffer.size();   // [DLL_TEST]
   //  `uvm_info("RC_DL_MODEL",$sformatf("The Retry Buffer Content is %p",tx_retry_buffer),UVM_LOW);
   endfunction
 
@@ -1831,7 +1842,7 @@ endfunction
     if(is_valid && !is_idle && is_explicit && (N != '0)) begin
       IMPLICIT_RX_FLIT_SEQ_NUM = N;
       NON_IDLE_EXPLICIT_SEQ_NUM_FLIT_RCVD = 1'b1;
-      `uvm_info("RC_DL_MODEL","IMPLICIT_NUMBER_ASSIGNED_TO_N",UVM_LOW);
+      `uvm_info("RC_DL_MODEL","IMPLICIT_NUMBER_ASSIGNED_TO_N",UVM_HIGH);
     end
 
     // No Change Rules
@@ -1842,7 +1853,7 @@ endfunction
             (is_valid && is_payload && !is_explicit && (NAK_WITHDRAWAL_ALLOWED && !prior_was_payload))) begin
 
       IMPLICIT_RX_FLIT_SEQ_NUM = IMPLICIT_RX_FLIT_SEQ_NUM;
-      `uvm_info("RC_DL_MODEL","IMPLICIT_NUMBER_NO_CHANGE",UVM_LOW);
+      `uvm_info("RC_DL_MODEL","IMPLICIT_NUMBER_NO_CHANGE",UVM_HIGH);
     end
 
     // Increment Rules
@@ -1850,13 +1861,13 @@ endfunction
             (is_valid && is_payload && !is_explicit && (!NAK_WITHDRAWAL_ALLOWED || prior_was_payload))) begin
 
       IMPLICIT_RX_FLIT_SEQ_NUM = mod1023_add(IMPLICIT_RX_FLIT_SEQ_NUM,{{(`PCIe_SEQ_NUM_W-1){1'b0}},1'b1});
-      `uvm_info("RC_DL_MODEL","IMPLICIT_NUMBER_INCREMENTED",UVM_LOW);
+      `uvm_info("RC_DL_MODEL","IMPLICIT_NUMBER_INCREMENTED",UVM_HIGH);
     end
 
     // Decrement Rules
     else if(is_valid && is_nop && !is_explicit && NAK_WITHDRAWAL_ALLOWED && !prior_was_payload) begin
       IMPLICIT_RX_FLIT_SEQ_NUM = mod1023_sub(IMPLICIT_RX_FLIT_SEQ_NUM,{{(`PCIe_SEQ_NUM_W-1){1'b0}},1'b1});
-      `uvm_info("RC_DL_MODEL","IMPLICIT_NUMBER_DECREMENTED",UVM_LOW);
+      `uvm_info("RC_DL_MODEL","IMPLICIT_NUMBER_DECREMENTED",UVM_HIGH);
     end
 
   endtask
@@ -1933,7 +1944,7 @@ endfunction
   int unsigned v;
     v = it.fc_vc;
     `uvm_info("RC_DL_FC", $sformatf("[FC_TL->DL] %s VC%0d :: DL_EXTRACTED %s  (from %s, reason=%s)",
-              it.fc_kind.name(), v, it.fc_values_str(), it.fc_origin, it.fc_reason), UVM_LOW)
+              it.fc_kind.name(), v, it.fc_values_str(), it.fc_origin, it.fc_reason), UVM_HIGH)
     if (it.fc_kind == FC_ADV_INIT || it.fc_kind == FC_ADV_UPDATE) begin
       for (int c = 0; c < 3; c++)
         begin
@@ -1994,9 +2005,9 @@ endfunction
       for (int c = 0; c < 3; c++) q.push_back(fc_build_shared(typ, c, v));     // [FC SHARED]
       `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] %s ROUND VC%0d :: advertising  DED: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d  SHR: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d",
                 nm, v, adv_h[v][0], adv_d[v][0], adv_h[v][1], adv_d[v][1], adv_h[v][2], adv_d[v][2],
-                adv_h_shr[v][0], adv_d_shr[v][0], adv_h_shr[v][1], adv_d_shr[v][1], adv_h_shr[v][2], adv_d_shr[v][2]), UVM_LOW)
+                adv_h_shr[v][0], adv_d_shr[v][0], adv_h_shr[v][1], adv_d_shr[v][1], adv_h_shr[v][2], adv_d_shr[v][2]), UVM_HIGH)
       foreach (q[i]) begin
-        `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] %s VC%0d %0d/6 : %s", nm, v, i+1, PCIe_sequence_item::fc_dllp_str(q[i])), UVM_LOW)
+        `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] %s VC%0d %0d/6 : %s", nm, v, i+1, PCIe_sequence_item::fc_dllp_str(q[i])), UVM_HIGH)
         send_dllp_flit(q[i]);
         if (typ == `PCIe_FC_TYPE_INITFC1) n_initfc1_tx++; else n_initfc2_tx++;
       end
@@ -2015,7 +2026,7 @@ endfunction
           v = fc_build_dedicated(`PCIe_FC_TYPE_UPDATEFC, c, vc);
           `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] UpdateFC VC%0d class %s : CREDITS_ALLOCATED %s=%0d %s=%0d :: %s",
                     vc, PCIe_sequence_item::fc_cls_name(c), PCIe_sequence_item::fc_hdr_name(c), adv_h[vc][c],
-                    PCIe_sequence_item::fc_dat_name(c), adv_d[vc][c], PCIe_sequence_item::fc_dllp_str(v)), UVM_LOW)
+                    PCIe_sequence_item::fc_dat_name(c), adv_d[vc][c], PCIe_sequence_item::fc_dllp_str(v)), UVM_HIGH)
           if (fc_multi_vc()) wait (fc_tx_allowed);
           fc_send_active(v);
           n_updfc_tx++;
@@ -2025,7 +2036,7 @@ endfunction
           v = fc_build_shared(`PCIe_FC_TYPE_UPDATEFC, c, vc);
           `uvm_info("RC_DL_FC", $sformatf("[FC_DL_TX] UpdateFC-SHARED VC%0d class %s : SHARED CREDITS_ALLOCATED %s=%0d %s=%0d :: %s",
                     vc, PCIe_sequence_item::fc_cls_name(c), PCIe_sequence_item::fc_hdr_name(c), adv_h_shr[vc][c],
-                    PCIe_sequence_item::fc_dat_name(c), adv_d_shr[vc][c], PCIe_sequence_item::fc_dllp_str(v)), UVM_LOW)
+                    PCIe_sequence_item::fc_dat_name(c), adv_d_shr[vc][c], PCIe_sequence_item::fc_dllp_str(v)), UVM_HIGH)
           if (fc_multi_vc()) wait (fc_tx_allowed);
           fc_send_active(v);
           n_updfc_tx_shr++;
@@ -2052,7 +2063,12 @@ endfunction
     end
     `uvm_info("RC_DL_FC", "[FC_DL] DL_ACTIVE :: INITIAL UpdateFC (dedicated + shared) FOR P/NP/CPL (completes FC_INIT2 at the peer)", UVM_LOW)
     forever begin
-      if (fc_any_pending() && fc_tx_allowed) fc_send_pending_updates();
+      // [DLL_TEST] no UpdateFC batch while a replay is running
+      if (fc_any_pending() && fc_tx_allowed && !RC_REPLAY_IN_PROGRESS) begin
+        fc_batch_busy = 1'b1;
+        fc_send_pending_updates();
+        fc_batch_busy = 1'b0;
+      end
       else #1ns;
     end
   endtask
@@ -2079,11 +2095,11 @@ endfunction
     end
     if (!PCIe_sequence_item::fc_is_dllp(v)) return;
     PCIe_sequence_item::fc_decode(v, typ, cls, shared, vc, hs, hfc, ds, dfc);
-    `uvm_info("RC_DL_FC", $sformatf("[FC_DL_RX] %s", PCIe_sequence_item::fc_dllp_str(v)), UVM_LOW)
+    `uvm_info("RC_DL_FC", $sformatf("[FC_DL_RX] %s", PCIe_sequence_item::fc_dllp_str(v)), UVM_HIGH)
     // [TC_VC] OLD : if (vc != `PCIe_FC_VC0) return;   // only VC0 exists
     if (!fc_vc_on(vc)) begin
       n_fc_dllp_dis_vc++;
-      `uvm_info("RC_DL_FC", $sformatf("[FC_DL_RX] VC%0d is not enabled on this Port -> FC DLLP ignored", vc), UVM_LOW)
+      `uvm_info("RC_DL_FC", $sformatf("[FC_DL_RX] VC%0d is not enabled on this Port -> FC DLLP ignored", vc), UVM_HIGH)
       return;
     end
     c    = cls;
@@ -2161,7 +2177,7 @@ endfunction
     `uvm_info("RC_DL_FC", $sformatf("[FC_DL->TL] %s VC%0d class %s : %s=%0d %s=%0d  (%s %s)",
               it.fc_kind.name(), vc, PCIe_sequence_item::fc_cls_name(c),
               PCIe_sequence_item::fc_hdr_name(c), hfc, PCIe_sequence_item::fc_dat_name(c), dfc,
-              PCIe_sequence_item::fc_type_name(typ), shared ? "SHARED" : "DEDICATED"), UVM_LOW)
+              PCIe_sequence_item::fc_type_name(typ), shared ? "SHARED" : "DEDICATED"), UVM_HIGH)
     fc_tl_ap.write(it);
   endfunction
 
@@ -2510,7 +2526,7 @@ endfunction
         peer_h_shr[0][0], peer_d_shr[0][0], peer_h_shr[0][1], peer_d_shr[0][1], peer_h_shr[0][2], peer_d_shr[0][2],
         n_initfc1_tx, n_initfc1_rx, n_initfc2_tx, n_initfc2_rx, n_updfc_tx, n_updfc_rx,
         n_updfc_tx_shr, n_updfc_rx_shr,
-        fi1_done(), fi2_done(), fc_vc_report_str()), UVM_LOW)
+        fi1_done(), fi2_done(), fc_vc_report_str()), UVM_HIGH)
     flit_summary_report();   // [FLIT_CNT] [FLOW_SUM] RC FLIT SUMMARY (6 sections)
 
     // [REPLAY] summary

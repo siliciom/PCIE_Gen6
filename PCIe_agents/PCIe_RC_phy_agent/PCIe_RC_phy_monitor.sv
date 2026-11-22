@@ -32,7 +32,7 @@ class PCIe_RC_phy_monitor extends uvm_monitor;
     endfunction
 
     function void build_phase(uvm_phase phase);
-      `uvm_info("RC_PHY","ENTERED_INTO_RC_PHY_MONITOR_BUILD_PHASE",UVM_LOW)
+      `uvm_info("RC_PHY","ENTERED_INTO_RC_PHY_MONITOR_BUILD_PHASE",UVM_HIGH)
        super.build_phase(phase);
          rc_phy_tx_mon_ap =new("rc_phy_tx_mon_ap",this);
          rc_phy_rx_mon_ap =new("rc_phy_rx_mon_ap",this);
@@ -45,11 +45,11 @@ class PCIe_RC_phy_monitor extends uvm_monitor;
         `uvm_fatal("NO_VIF", "RC_PHY_INTERFACE_not_found")
        uvm_rc_to_ep_ev = uvm_event_pool::get_global("rc_to_ep_bit_event");
        uvm_ep_to_rc_ev = uvm_event_pool::get_global("ep_to_rc_bit_event");
-      `uvm_info("RC_PHY","EXIT_FROM_RC_PHY_MONITOR_BUILD_PHASE",UVM_LOW)
+      `uvm_info("RC_PHY","EXIT_FROM_RC_PHY_MONITOR_BUILD_PHASE",UVM_HIGH)
     endfunction
 
     task run_phase(uvm_phase phase);
-       `uvm_info("RC_PHY","ENTERED_INTO_RC_PHY_MONITOR_RUN_PHASE",UVM_LOW)
+       `uvm_info("RC_PHY","ENTERED_INTO_RC_PHY_MONITOR_RUN_PHASE",UVM_HIGH)
        fork
         forever begin
          tx_sipo(rc_phy_intf_tx);
@@ -58,43 +58,43 @@ class PCIe_RC_phy_monitor extends uvm_monitor;
          rx_sipo(rc_phy_intf_rx);
         end
        join
-       `uvm_info("RC_PHY","EXIT_FROM_RC_PHY_MONITOR_RUN_PHASE",UVM_LOW)
+       `uvm_info("RC_PHY","EXIT_FROM_RC_PHY_MONITOR_RUN_PHASE",UVM_HIGH)
     endtask
 
 task tx_sipo(virtual PCIe_RC_PHY_interface rc_phy_intf_tx);
       bit [`PCIe_MON_DATA_W-1:0] tx_data;
       bit        tx_bit;
       
-      `uvm_info("RC_PHY_MONITOR","ENTERED_INTO_TX_SIPO_RC_MONITOR", UVM_LOW)
+      `uvm_info("RC_PHY_MONITOR","ENTERED_INTO_TX_SIPO_RC_MONITOR", UVM_HIGH)
           for(int i = 0; i < `PCIe_MON_DATA_W; i++)
           begin
               uvm_rc_to_ep_ev.wait_trigger();		  
               #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
               tx_bit = rc_phy_intf_tx.tx_plus[0];
               tx_data[i] = tx_bit;
-              `uvm_info("RC_PHY_MONITOR",$sformatf("TX_BIT_IN_RC_MONITOR[%0d] = %0b TIME=%0.5f",i, tx_bit,$realtime), UVM_LOW);
+              `uvm_info("RC_PHY_MONITOR",$sformatf("TX_BIT_IN_RC_MONITOR[%0d] = %0b TIME=%0.5f",i, tx_bit,$realtime), UVM_HIGH);
           end
            pcie_seq_item.data_q_rc_mon_tx.push_back(tx_data);
-          `uvm_info("RC_PHY_MONITOR",$sformatf("RC_TX_32_BIT_PARALLEL_MONITOR_DATA = %08h RC_MONITOR_QUEUE_SIZE=%d", tx_data,pcie_seq_item.data_q_rc_mon_tx.size()),UVM_LOW);
-          `uvm_info("RC_PHY_MONITOR","EXIT_FROM_TX_SIPO_RC_MONITOR", UVM_LOW)
+          `uvm_info("RC_PHY_MONITOR",$sformatf("RC_TX_32_BIT_PARALLEL_MONITOR_DATA = %08h RC_MONITOR_QUEUE_SIZE=%d", tx_data,pcie_seq_item.data_q_rc_mon_tx.size()),UVM_HIGH);
+          `uvm_info("RC_PHY_MONITOR","EXIT_FROM_TX_SIPO_RC_MONITOR", UVM_HIGH)
            rc_phy_tx_mon_ap.write(pcie_seq_item);
     endtask
  
     task rx_sipo(virtual PCIe_RC_PHY_interface rc_phy_intf_rx);
        bit [`PCIe_MON_DATA_W-1:0] rx_data;
        bit        rx_bit;
-      `uvm_info("RC_PHY_MONITOR","ENTERED_INTO_RX_SIPO_RC_MONITOR", UVM_LOW)
+      `uvm_info("RC_PHY_MONITOR","ENTERED_INTO_RX_SIPO_RC_MONITOR", UVM_HIGH)
          for(int i = 0; i < `PCIe_MON_DATA_W; i++)
          begin
              uvm_ep_to_rc_ev.wait_trigger();		  
              #`PCIe_PHY_MON_RX_SAMPLE_DELAY;
              rx_bit = rc_phy_intf_rx.rx_plus[0];
              rx_data[i] = rx_bit;
-             `uvm_info("EP_PHY_MONITOR",$sformatf("RX_BIT_IN_RC_MONITOR[%0d] = %0b TIME=%0.5f",i, rx_bit,$realtime), UVM_LOW);
+             `uvm_info("EP_PHY_MONITOR",$sformatf("RX_BIT_IN_RC_MONITOR[%0d] = %0b TIME=%0.5f",i, rx_bit,$realtime), UVM_HIGH);
          end
           pcie_seq_item.data_q_rc_mon_rx.push_back(rx_data);
-         `uvm_info("RC_PHY_MONITOR",$sformatf("RX_32_BIT_PARALLEL_RC_MONITOR_DATA = %08h RC_MONITOR_QUEUE_SIZE=%d", rx_data,pcie_seq_item.data_q_rc_mon_rx.size()),UVM_LOW);
-         `uvm_info("RC_PHY_MONITOR","EXIT_FROM_RX_SIPO_RC_MONITOR", UVM_LOW)
+         `uvm_info("RC_PHY_MONITOR",$sformatf("RX_32_BIT_PARALLEL_RC_MONITOR_DATA = %08h RC_MONITOR_QUEUE_SIZE=%d", rx_data,pcie_seq_item.data_q_rc_mon_rx.size()),UVM_HIGH);
+         `uvm_info("RC_PHY_MONITOR","EXIT_FROM_RX_SIPO_RC_MONITOR", UVM_HIGH)
  	      rc_phy_rx_mon_ap.write(pcie_seq_item);
     endtask
 

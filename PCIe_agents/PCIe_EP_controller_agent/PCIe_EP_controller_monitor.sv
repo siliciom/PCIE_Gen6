@@ -28,6 +28,18 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
    // and 6B FEC) in dlp_flit_out + is_valid (0 = FEC&CRC match, 1 = no match)
    uvm_analysis_port #(PCIe_sequence_item) ep_mon_dl_242b_ap;
    int rc_to_ep_flit_cnt = 0;   // [ADDED] RC->EP flit number for the DL write print
+
+   // [DLL_TEST] error injection on received RC->EP payload flits (before FEC decode)
+   //   inj_type 1 : 1 byte error                       -> FEC corrects it, CRC passes
+   //   inj_type 2 : 2 bytes, same ECC group, same value -> FEC cannot fix it -> CRC error
+   //   inj_type 3 : Check + Parity byte of ECC group 0  -> FEC reports UNCORRECTABLE
+   int unsigned inj_type  = 0;
+   int unsigned inj_skip  = 0;          // payload flits to let through first
+   int unsigned inj_count = 0;          // payload flits to corrupt (0 = off)
+   int unsigned inj_done  = 0;          // payload flits corrupted so far
+   int unsigned n_crc_ok, n_crc_bad;    // CRC check result of every RC->EP flit
+   bit          fec_unc_is_invalid = 1'b1;   // Sec 4.2.3.4.2 : ECC uncorrectable -> flit is not valid
+   bit          last_fec_unc;
    PCIe_sequence_item            pcie_seq_item;
    PCIe_RC_PL_model              rc_pl_model;
    PCIe_EP_TL_model              ep_tl_model;
@@ -101,7 +113,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
    endfunction
 
    function void build_phase(uvm_phase phase);
-     `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_BUILD_PHASE",UVM_LOW)
+     `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_BUILD_PHASE",UVM_HIGH)
       super.build_phase(phase);
  	  ep_con_rx_mon_ap =new("ep_con_rx_mon_ap",this);
  	  ep_con_tx_mon_ap =new("ep_con_tx_mon_ap",this);
@@ -132,7 +144,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
           rx_os_dword_count = 0;
           tx_total_rcvd_dwords = 0;
           rx_total_rcvd_dwords = 0;
-       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_BUILD_PHASE",UVM_LOW)
+       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_BUILD_PHASE",UVM_HIGH)
     endfunction
 
     //-------------------------------------------------------------------------
@@ -156,7 +168,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
     endfunction
 
     task run_phase(uvm_phase phase);
-       `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
+       `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_HIGH)
        fork
          forever begin
             receiving_pipe_rx(ep_pipe_intf_rx);
@@ -165,7 +177,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
             receiving_pipe_tx(ep_pipe_intf_tx);
          end
        join
-       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
+       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_RUN_PHASE",UVM_HIGH)
     endtask
   
 
@@ -186,7 +198,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
        bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus_q[$];
        bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
-       `uvm_info("EP_CONTROLLER", "ENTERED_INTO_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
+       `uvm_info("EP_CONTROLLER", "ENTERED_INTO_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_HIGH)
 
        dword_in_os = 0;
 
@@ -242,23 +254,23 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                rx_in_os = 1'b0;
                `uvm_info("EP_CONTROLLER", $sformatf(
                   "[RX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h (training stream length)",
-                  rx_os_dword_count, rx_lfsr), UVM_LOW)
+                  rx_os_dword_count, rx_lfsr), UVM_HIGH)
             end
 
             `uvm_info("EP_CONTROLLER", $sformatf(
                "[RX_DBG] LTSSM=%s IN_OS=%0b DWORD_CNT=%0d DWORD_IN_OS=%0d LFSR=%06h PIPE=%08h",
                ep_pl_model.ep_main_state.name(), rx_in_os,
-               rx_os_dword_count, dword_in_os, rx_lfsr, rx_data), UVM_LOW)
+               rx_os_dword_count, dword_in_os, rx_lfsr, rx_data), UVM_HIGH)
 
             // 1. Reverse PRECODING
             de_precoder_rx(rx_data, deprecoded_data);
             `uvm_info("EP_CONTROLLER", $sformatf("RX DWORD=%0d PIPE=%08h DEPRECODED=%08h",
-                       rx_os_dword_count, rx_data, deprecoded_data), UVM_LOW)
+                       rx_os_dword_count, rx_data, deprecoded_data), UVM_HIGH)
 
             // 2. Reverse GRAY CODING
             gray_decode_rx(deprecoded_data, gray_decoded_data);
             `uvm_info("EP_CONTROLLER", $sformatf("RX DWORD=%0d GRAY_DECODED=%08h",
-                       rx_os_dword_count, gray_decoded_data), UVM_LOW)
+                       rx_os_dword_count, gray_decoded_data), UVM_HIGH)
 
             descrambled_data = gray_decoded_data;
 
@@ -273,7 +285,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                   original_symbol = decoded_symbol;
                   `uvm_info("EP_CONTROLLER", $sformatf(
                      "[RX_DBG] BYPASS DWORD=%0d SYM=%0d LFSR_NA=%06h DATA=%02h",
-                     rx_os_dword_count, symbol_idx, rx_lfsr, original_symbol), UVM_LOW)
+                     rx_os_dword_count, symbol_idx, rx_lfsr, original_symbol), UVM_HIGH)
                end
                else begin
                   // NORMAL DESCRAMBLING
@@ -281,20 +293,20 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                   `uvm_info("EP_CONTROLLER", $sformatf(
                      "[RX_DBG] DESCR DWORD=%0d SYM=%0d LFSR_B=%06h LFSR_A=%06h IN=%02h OUT=%02h",
                      rx_os_dword_count, symbol_idx, lfsr_before, rx_lfsr,
-                     decoded_symbol, original_symbol), UVM_LOW)
+                     decoded_symbol, original_symbol), UVM_HIGH)
                end
                descrambled_data[(byte_idx * 8) +: 8] = original_symbol;
             end
 
             `uvm_info("EP_CONTROLLER", $sformatf(
                "[RX_DBG] FINAL DWORD=%0d DATA=%08h LFSR=%06h IN_OS=%0b",
-               rx_os_dword_count, descrambled_data, rx_lfsr, rx_in_os), UVM_LOW)
+               rx_os_dword_count, descrambled_data, rx_lfsr, rx_in_os), UVM_HIGH)
 
              pcie_seq_item.data_q_ep_mon_con_rx.push_back(descrambled_data);
              rx_total_rcvd_dwords++;
              `uvm_info("EP_CON_MONITOR", $sformatf(
                 "RECEIVED_RX_DATA_IN_EP_CONTROLLER_MONITOR=%08h EP_CONTROLLER_MON_Queue_Size=%0d",
-                descrambled_data, rx_total_rcvd_dwords), UVM_LOW)
+                descrambled_data, rx_total_rcvd_dwords), UVM_HIGH)
             `ifdef PCIE_GEN6_FEC_CRC
             // ===== SINGLE FEC/CRC CHECK (RC->EP flit only) =====
             // FEC/CRC addition : 256B flit received from RC PHY -> EP controller
@@ -317,7 +329,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
                rx_in_os = 1'b0;
                `uvm_info("EP_CONTROLLER", $sformatf(
                   "[RX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h — full descramble from now on",
-                  rx_os_dword_count, rx_lfsr), UVM_LOW)
+                  rx_os_dword_count, rx_lfsr), UVM_HIGH)
             end
             end // foreach (monitor_logical_dwords)
          end
@@ -330,7 +342,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
     ep_ap_mon_dl.write(pcie_seq_item);
       end
        end
-       `uvm_info("EP_CONTROLLER", "EXIT_FROM_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
+       `uvm_info("EP_CONTROLLER", "EXIT_FROM_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_HIGH)
     endtask
      
    task receiving_pipe_tx(virtual PCIe_EP_interface ep_pipe_intf_tx);
@@ -350,7 +362,7 @@ class PCIe_EP_controller_monitor extends uvm_monitor;
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus_q[$];
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
-      `uvm_info("EP_CONTROLLER", "ENTERED_INTO_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_LOW)
+      `uvm_info("EP_CONTROLLER", "ENTERED_INTO_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_HIGH)
 
       dword_in_os = 0;
 
@@ -406,23 +418,23 @@ if (pcie_seq_item.tx_valid) begin
                tx_in_os = 1'b0;
                `uvm_info("EP_CONTROLLER", $sformatf(
                   "[TX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h (training stream length)",
-                  tx_os_dword_count, tx_lfsr), UVM_LOW)
+                  tx_os_dword_count, tx_lfsr), UVM_HIGH)
             end
 
             `uvm_info("EP_CONTROLLER", $sformatf(
                "[TX_DBG] LTSSM=%s IN_OS=%0b DWORD_CNT=%0d DWORD_IN_OS=%0d LFSR=%06h PIPE=%08h",
                ep_pl_model.ep_main_state.name(), tx_in_os,
-               tx_os_dword_count, dword_in_os, tx_lfsr, tx_data), UVM_LOW)
+               tx_os_dword_count, dword_in_os, tx_lfsr, tx_data), UVM_HIGH)
 
             // 1. Reverse PRECODING
             de_precoder_tx(tx_data, deprecoded_data);
             `uvm_info("EP_CONTROLLER", $sformatf("TX DWORD=%0d PIPE=%08h DEPRECODED=%08h",
-                       tx_os_dword_count, tx_data, deprecoded_data), UVM_LOW)
+                       tx_os_dword_count, tx_data, deprecoded_data), UVM_HIGH)
 
             // 2. Reverse GRAY CODING
             gray_decode_tx(deprecoded_data, gray_decoded_data);
             `uvm_info("EP_CONTROLLER", $sformatf("TX DWORD=%0d GRAY_DECODED=%08h",
-                       tx_os_dword_count, gray_decoded_data), UVM_LOW)
+                       tx_os_dword_count, gray_decoded_data), UVM_HIGH)
 
             descrambled_data = gray_decoded_data;
 
@@ -437,7 +449,7 @@ if (pcie_seq_item.tx_valid) begin
                   original_symbol = decoded_symbol;
                   `uvm_info("EP_CONTROLLER", $sformatf(
                      "[TX_DBG] BYPASS DWORD=%0d SYM=%0d LFSR_NA=%06h DATA=%02h",
-                     tx_os_dword_count, symbol_idx, tx_lfsr, original_symbol), UVM_LOW)
+                     tx_os_dword_count, symbol_idx, tx_lfsr, original_symbol), UVM_HIGH)
                end
                else begin
                   // NORMAL DESCRAMBLING
@@ -445,20 +457,20 @@ if (pcie_seq_item.tx_valid) begin
                   `uvm_info("EP_CONTROLLER", $sformatf(
                      "[TX_DBG] DESCR DWORD=%0d SYM=%0d LFSR_B=%06h LFSR_A=%06h IN=%02h OUT=%02h",
                      tx_os_dword_count, symbol_idx, lfsr_before, tx_lfsr,
-                     decoded_symbol, original_symbol), UVM_LOW)
+                     decoded_symbol, original_symbol), UVM_HIGH)
                end
                descrambled_data[(byte_idx * 8) +: 8] = original_symbol;
             end
 
             `uvm_info("EP_CONTROLLER", $sformatf(
                "[TX_DBG] FINAL DWORD=%0d DATA=%08h LFSR=%06h IN_OS=%0b",
-               tx_os_dword_count, descrambled_data, tx_lfsr, tx_in_os), UVM_LOW)
+               tx_os_dword_count, descrambled_data, tx_lfsr, tx_in_os), UVM_HIGH)
 
              pcie_seq_item.data_q_ep_mon_con_tx.push_back(descrambled_data);
              tx_total_rcvd_dwords++;
              `uvm_info("EP_CONTROLLER", $sformatf(
                 "RECEIVED_TX_DATA_IN_EP_CONTROLLER_MONITOR=%08h EP_CONTROLLER_MON_Queue_Size=%0d",
-                descrambled_data, tx_total_rcvd_dwords), UVM_LOW)
+                descrambled_data, tx_total_rcvd_dwords), UVM_HIGH)
             ep_con_tx_mon_ap.write(pcie_seq_item);
 
             tx_os_dword_count++;
@@ -472,7 +484,7 @@ if (pcie_seq_item.tx_valid) begin
                tx_in_os = 1'b0;
                `uvm_info("EP_CONTROLLER", $sformatf(
                   "[TX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h — full descramble from now on",
-                  tx_os_dword_count, tx_lfsr), UVM_LOW)
+                  tx_os_dword_count, tx_lfsr), UVM_HIGH)
             end
             end // foreach (monitor_logical_dwords)
          end
@@ -484,24 +496,24 @@ if (pcie_seq_item.tx_valid) begin
       ep_rc_ap_mon_dl.write(pcie_seq_item);
      end
      end
-      `uvm_info("EP_CONTROLLER", "EXIT_FROM_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_LOW)
+      `uvm_info("EP_CONTROLLER", "EXIT_FROM_EP_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_HIGH)
    endtask
  
    task de_precoder_rx(input bit [`PCIe_MON_DATA_W-1:0] data_in, output bit [`PCIe_MON_DATA_W-1:0] decoder_out);
       bit [1:0] current,dec;
-      `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_DE_PRECODE_TASK",UVM_LOW)
+      `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_DE_PRECODE_TASK",UVM_HIGH)
        for(int i=0;i<`PCIe_MON_DATA_W;i+=2) begin
          current = data_in[i+:2];
          dec = current^rx_previous_symbol;
          decoder_out[i+:2] = dec;
          rx_previous_symbol = current;
        end
-      `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_DE_PRECODE_TASK",UVM_LOW)
+      `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_DE_PRECODE_TASK",UVM_HIGH)
     endtask
    
     task gray_decode_rx(input  bit [`PCIe_MON_DATA_W-1:0] data_in,output bit [`PCIe_MON_DATA_W-1:0] gray_out);
       bit [1:0] symbol;
-      `uvm_info("EP_CONTROLLE_MON", "ENTERED_INTO_EP_MON_GRAY_DECODE_TASK",UVM_LOW)
+      `uvm_info("EP_CONTROLLE_MON", "ENTERED_INTO_EP_MON_GRAY_DECODE_TASK",UVM_HIGH)
       
        for (int i = 0; i < `PCIe_MON_DATA_W; i += 2) begin
          symbol = data_in[i +: 2];
@@ -518,14 +530,14 @@ if (pcie_seq_item.tx_valid) begin
                    gray_out[i +: 2] = 2'b00;
          endcase
         end
-        `uvm_info("EP_CONTROLLE_MON", "EXIT_FROM_EP_MON_GRAY_DECODE_TASK",UVM_LOW)
+        `uvm_info("EP_CONTROLLE_MON", "EXIT_FROM_EP_MON_GRAY_DECODE_TASK",UVM_HIGH)
     endtask
 
     task descrambler_rx(input  bit [`PCIe_MON_DATA-1:0] data_in,output bit [`PCIe_MON_DATA-1:0] data_out);
       bit descramble_bit;
       data_out = data_in;
      
-      `uvm_info("EP_CONTROLLER_MON","ENTERED_INTO_DESCRAMBLER_TASK",UVM_LOW)
+      `uvm_info("EP_CONTROLLER_MON","ENTERED_INTO_DESCRAMBLER_TASK",UVM_HIGH)
          for (int i = 0; i < `PCIe_MON_DATA; i++) begin
            descramble_bit = rx_lfsr[`PCIe_PL_SCRAMBLER_LFSR_W-1];
            data_out[i] = data_in[i] ^ descramble_bit;
@@ -536,20 +548,20 @@ if (pcie_seq_item.tx_valid) begin
                rx_lfsr = (rx_lfsr << 1);
            end
         end
-        `uvm_info("PCIe_EP_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_LOW)
-        `uvm_info("PCIe_EP_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_RX_TASK",UVM_LOW )
+        `uvm_info("PCIe_EP_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_HIGH)
+        `uvm_info("PCIe_EP_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_RX_TASK",UVM_HIGH )
     endtask
 
     task de_precoder_tx(input bit [`PCIe_MON_DATA_W-1:0] data_in, output bit [`PCIe_MON_DATA_W-1:0] decoder_out);
         bit [1:0] current,dec;
-       `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_DE_PRECODE_TX_TASK",UVM_LOW)
+       `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_MONITOR_DE_PRECODE_TX_TASK",UVM_HIGH)
         for(int i=0;i<`PCIe_MON_DATA_W;i+=2) begin
           current = data_in[i+:2];
           dec = current^tx_previous_symbol;
           decoder_out[i+:2] = dec;
           tx_previous_symbol = current;
         end
-       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_DE_PRECODE_TX_TASK",UVM_LOW)
+       `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_MONITOR_DE_PRECODE_TX_TASK",UVM_HIGH)
     endtask
   
     /*task parity_check_rx(input bit [31:0] gray_data);
@@ -560,13 +572,13 @@ if (pcie_seq_item.tx_valid) begin
          return;
        end
        tx_parity = rc_pl_model.tx_parity_q.pop_front();
-       `uvm_info("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("GRAY_DATA = %08h",gray_data),UVM_LOW)
-       `uvm_info("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("TX_PARITY = %0b",tx_parity),UVM_LOW)
-       `uvm_info("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("RX_PARITY = %0b",rx_parity),UVM_LOW)
+       `uvm_info("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("GRAY_DATA = %08h",gray_data),UVM_HIGH)
+       `uvm_info("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("TX_PARITY = %0b",tx_parity),UVM_HIGH)
+       `uvm_info("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("RX_PARITY = %0b",rx_parity),UVM_HIGH)
    
        if (tx_parity == rx_parity)
        begin
-        `uvm_info("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("********EP_CONTROLLR_MON_PARITY_PASS******** TX=%0b RX=%0b",tx_parity,rx_parity),UVM_LOW);
+        `uvm_info("EP_CONTROLLER_MON_PARITY_CHECK",$sformatf("********EP_CONTROLLR_MON_PARITY_PASS******** TX=%0b RX=%0b",tx_parity,rx_parity),UVM_HIGH);
        end
        else
        begin
@@ -576,7 +588,7 @@ if (pcie_seq_item.tx_valid) begin
   
     task gray_decode_tx(input  bit [`PCIe_MON_DATA_W-1:0] data_in,output bit [`PCIe_MON_DATA_W-1:0] gray_out);
         bit [1:0] symbol;
-        `uvm_info("EP_CONTROLLE_MON", "ENTERED_INTO_EP_MON_GRAY_DECODE_TX_TASK",UVM_LOW)
+        `uvm_info("EP_CONTROLLE_MON", "ENTERED_INTO_EP_MON_GRAY_DECODE_TX_TASK",UVM_HIGH)
         
          for (int i = 0; i < `PCIe_MON_DATA_W; i += 2) begin
            symbol = data_in[i +: 2];
@@ -593,13 +605,13 @@ if (pcie_seq_item.tx_valid) begin
                      gray_out[i +: 2] = 2'b00;
            endcase
          end
-        `uvm_info("EP_CONTROLLE_MON", "EXIT_FROM_EP_MON_GRAY_DECODE_TX_TASK",UVM_LOW)
+        `uvm_info("EP_CONTROLLE_MON", "EXIT_FROM_EP_MON_GRAY_DECODE_TX_TASK",UVM_HIGH)
     endtask
 
     task descrambler_tx(input  bit [`PCIe_MON_DATA-1:0] data_in,output bit [`PCIe_MON_DATA-1:0] data_out);
       bit descramble_bit;
       data_out = data_in;
-      `uvm_info("EP_CONTROLLER_MON","ENTERED_INTO_DESCRAMBLER_TX_TASK",UVM_LOW)
+      `uvm_info("EP_CONTROLLER_MON","ENTERED_INTO_DESCRAMBLER_TX_TASK",UVM_HIGH)
         for (int i = 0; i < `PCIe_MON_DATA; i++) begin
           descramble_bit = tx_lfsr[`PCIe_PL_SCRAMBLER_LFSR_W-1];
           data_out[i] = data_in[i] ^ descramble_bit;
@@ -610,8 +622,8 @@ if (pcie_seq_item.tx_valid) begin
               tx_lfsr = (tx_lfsr << 1);
           end
        end
-        `uvm_info("PCIe_EP_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_LOW)
-        `uvm_info("PCIe_EP_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_TX_TASK",UVM_LOW )
+        `uvm_info("PCIe_EP_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_HIGH)
+        `uvm_info("PCIe_EP_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_TX_TASK",UVM_HIGH )
       endtask
      
   // Collect the FLIT DLP from the PIPE interface.
@@ -626,9 +638,9 @@ if (pcie_seq_item.tx_valid) begin
 
    for(int i=0;i<`PCIe_TLP_DATA_BYTE_W;i++) begin
       word = item.data_q_ep_mon_con_tx[i/4];
-   `uvm_info("WORD",$sformatf("word=%h",word),UVM_LOW);
+   `uvm_info("WORD",$sformatf("word=%h",word),UVM_HIGH);
       tlp_ep_tx[i] = word[8*(i%4) +: 8];
-   `uvm_info("TLP_EP_TX",$sformatf("tlp_ep_tx=%h",tlp_ep_tx[i]),UVM_LOW);
+   `uvm_info("TLP_EP_TX",$sformatf("tlp_ep_tx=%h",tlp_ep_tx[i]),UVM_HIGH);
    end
 
    for(int i=0;i<`PCIe_DLP_BYTE_W;i++) begin
@@ -638,8 +650,8 @@ if (pcie_seq_item.tx_valid) begin
    end
 
 
-    `uvm_info("EP_CON_MONITOR",$sformatf("collected tlp_ep_tx from ep monitor is tlp=%p",tlp_ep_tx),UVM_LOW)
-    `uvm_info("EP_CON_MONITOR",$sformatf("collected dlp_ep_tx ep monitor is dlp=%p",dlp_ep_tx),UVM_LOW)
+    `uvm_info("EP_CON_MONITOR",$sformatf("collected tlp_ep_tx from ep monitor is tlp=%p",tlp_ep_tx),UVM_HIGH)
+    `uvm_info("EP_CON_MONITOR",$sformatf("collected dlp_ep_tx ep monitor is dlp=%p",dlp_ep_tx),UVM_HIGH)
   endtask
 
   // Collect the FLIT DLP from the PIPE interface.
@@ -665,8 +677,8 @@ if (pcie_seq_item.tx_valid) begin
       dlp_ep_rx[i] = word[8*(idx%4) +: 8];
    end
 
-    `uvm_info("EP_CON_MONITOR",$sformatf("collected tlp_ep_rx from ep monitor is tlp=%p",tlp_ep_rx),UVM_LOW)
-    `uvm_info("EP_CON_MONITOR",$sformatf("collected dlp_ep_rx from ep monitor is dlp=%p",dlp_ep_rx),UVM_LOW)
+    `uvm_info("EP_CON_MONITOR",$sformatf("collected tlp_ep_rx from ep monitor is tlp=%p",tlp_ep_rx),UVM_HIGH)
+    `uvm_info("EP_CON_MONITOR",$sformatf("collected dlp_ep_rx from ep monitor is dlp=%p",dlp_ep_rx),UVM_HIGH)
 
     // [ADDED] 242 B flit -> keep only the 236 TLP bytes and hand them to the
     // EP TL model through the analysis port.
@@ -718,7 +730,7 @@ if (pcie_seq_item.tx_valid) begin
           (b == `PCIe_TLP_DATA_BYTE_W-1))
         dump = {dump, line, "\n"};
     end
-    `uvm_info("EP_MON_TO_TL_236B", dump, UVM_LOW)
+    `uvm_info("EP_MON_TO_TL_236B", dump, UVM_HIGH)
 
     //ep_mon_tl_ap.write(tl_item);
 
@@ -1028,7 +1040,7 @@ if (pcie_seq_item.tx_valid) begin
          fec_corrected_cnt_grp[g]++;
          `uvm_info(get_type_name(),
                    $sformatf("FEC_DECODE : GROUP%0d SINGLE_SYMBOL_ERROR CORRECTED : group_byte=%0d flit_byte=%0d error_magnitude=0x%02h SYND_CHECK=0x%02h SYND_PARITY=0x%02h",
-                             g, err_byte, err_flit_pos, err_mag, synd_check, synd_parity), UVM_LOW)
+                             g, err_byte, err_flit_pos, err_mag, synd_check, synd_parity), UVM_HIGH)
        end
        else if(unc_err) begin
          fec_unc_any = 1'b1;
@@ -1053,7 +1065,7 @@ if (pcie_seq_item.tx_valid) begin
                          fec_corrected_syms, fec_unc_any,
                          fec_last_synd_check[0], fec_last_synd_parity[0],
                          fec_last_synd_check[1], fec_last_synd_parity[1],
-                         fec_last_synd_check[2], fec_last_synd_parity[2]), UVM_LOW)
+                         fec_last_synd_check[2], fec_last_synd_parity[2]), UVM_HIGH)
    endfunction : fec_decode_flit_256b
 
    // FEC correction counter summary
@@ -1209,6 +1221,28 @@ if (pcie_seq_item.tx_valid) begin
          ep_con_rx_256b_mon_ap.write(pcie_seq_item);
       end : rc_to_ep_256b_rx_flit_to_scoreboard
 
+      // ---- [DLL_TEST] error injection (after the scoreboard copy, before FEC decode) ----
+      if ((inj_count != 0) && (ep_mon_256b_flit_received_from_rc[`PCIe_TLP_DATA_BYTE_W][7:6] == 2'b01)) begin
+         if (inj_skip != 0) inj_skip--;
+         else begin
+            case (inj_type)
+              1 : ep_mon_256b_flit_received_from_rc[3] ^= 8'h5A;
+              2 : begin
+                    ep_mon_256b_flit_received_from_rc[3] ^= 8'h5A;
+                    ep_mon_256b_flit_received_from_rc[6] ^= 8'h5A;
+                  end
+              3 : begin
+                    ep_mon_256b_flit_received_from_rc[252] ^= 8'h5A;   // Check  byte of ECC group 0
+                    ep_mon_256b_flit_received_from_rc[255] ^= 8'h5A;   // Parity byte of ECC group 0
+                  end
+            endcase
+            inj_count--;
+            inj_done++;
+            `uvm_info("DLL_ERR_INJ", $sformatf("INJECTED_ERROR type=%0d on RC->EP flit %0d (seq=%0d)", inj_type, rc_to_ep_flit_cnt,
+                      {ep_mon_256b_flit_received_from_rc[`PCIe_TLP_DATA_BYTE_W][1:0],
+                       ep_mon_256b_flit_received_from_rc[`PCIe_TLP_DATA_BYTE_W+1]}), UVM_NONE)
+         end
+      end
       // ---- split received 256B flit : 242B payload + 8B CRC + 6B FEC ----
       received_242b_payload_from_rc.delete();
       for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
@@ -1246,6 +1280,7 @@ if (pcie_seq_item.tx_valid) begin
          bit                    fec_unc_any;
          int                    fec_corrected_syms;
          fec_decode_flit_256b(ep_mon_256b_flit_received_from_rc, corrected_256b_flit, fec_unc_any, fec_corrected_syms);
+         last_fec_unc = fec_unc_any;   // [DLL_TEST]
          received_242b_payload_from_rc.delete();
          for(int i = 0; i < `PCIe_DLP_FLIT_BYTE_W; i++)
             received_242b_payload_from_rc.push_back(corrected_256b_flit[i]);
@@ -1333,6 +1368,7 @@ if (pcie_seq_item.tx_valid) begin
          end
 
          pcie_seq_item.rc_to_ep_flit_fec_match = fec_6b_match;
+         if (crc_8b_match) n_crc_ok++; else n_crc_bad++;   // [DLL_TEST]
           pcie_seq_item.rc_to_ep_flit_crc_match = crc_8b_match;
          `uvm_info("EP_CONTROLLER_MONITOR",
                    $sformatf("RC_TO_EP_FLIT_MATCH_VALUES : rc_to_ep_flit_fec_match=%0b rc_to_ep_flit_crc_match=%0b | FEC_MATCH_VALUE=%0b CRC_MATCH_VALUE=%0b",
@@ -1357,7 +1393,8 @@ if (pcie_seq_item.tx_valid) begin
       begin : rc_to_ep_flit_rx_retry_gate
          // [FEC] Spec Appendix J.5 : after FEC correction, the 8B CRC check
          // decides if the flit is consumed (is_valid=1) or replayed (is_valid=0).
-         if (pcie_seq_item.rc_to_ep_flit_crc_match == 1'b1) begin
+         // [DLL_TEST] valid flit = CRC passes AND no ECC group is uncorrectable
+         if ((pcie_seq_item.rc_to_ep_flit_crc_match == 1'b1) && !(fec_unc_is_invalid && last_fec_unc)) begin
             is_valid = 1'b1;
             `uvm_info("EP_CONTROLLER_MONITOR",
                       $sformatf("RC_TO_EP_GATE : CRC_MATCH_AFTER_FEC (fec_match=%0b) => is_valid=1",

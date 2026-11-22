@@ -199,6 +199,21 @@ class PCIe_sequence_item extends uvm_sequence_item;
   rand logic [4:0] ohc;
   ohc_a_type_e     ohc_a_type;
 
+  //--------------------------------------------------------------------------
+  // [TLP_PREFIX] Flit Mode TLP Prefix controls (default OFF)
+  //   lprfx_en  : 1 => Flit Mode Local TLP Prefix (Type 8Dh, Sec 2.2.10.3)
+  //                    is put in front of the TLP (shared credits, bit = 0)
+  //   ohc_e1_en : 1 => OHC-E1 (1 DW, Sec 2.2.11) after the Header Base / OHC-A
+  //                    (End-End TLP Prefixes are carried in OHC-E in Flit Mode)
+  //   ohc_e1_dw : OHC-E1 content
+  //                    [31:28] 0001b = E-E Prefix DW
+  //                    [27:24] E[3:0] of the E-E Prefix (Vendor Defined E0/E1)
+  //                    [23:0]  bytes 1..3 of the E-E Prefix
+  //--------------------------------------------------------------------------
+  rand bit        lprfx_en;
+  rand bit        ohc_e1_en;
+  rand bit [31:0] ohc_e1_dw;
+
   rand logic [2:0] ts;
   rand logic [1:0] at;
 
@@ -492,6 +507,9 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_int  (ecrc,           UVM_ALL_ON | UVM_HEX)
     `uvm_field_enum (pcie_ecrc_state_e, ecrc_state, UVM_ALL_ON)
     `uvm_field_enum (PCIe_flit_type_e,  flit_type,  UVM_ALL_ON)
+    `uvm_field_int  (lprfx_en,       UVM_ALL_ON)               // [TLP_PREFIX]
+    `uvm_field_int  (ohc_e1_en,      UVM_ALL_ON)               // [TLP_PREFIX]
+    `uvm_field_int  (ohc_e1_dw,      UVM_ALL_ON | UVM_HEX)     // [TLP_PREFIX]
   `uvm_object_utils_end
 
    function void print_dlp_details(string label,  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp  );
@@ -527,8 +545,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
       default: replay_cmd_str = "UNKNOWN";
     endcase
     // Print in organized format
-    `uvm_info("DLP_INFO", "───────────────────────────────────────────────", UVM_LOW)
-    `uvm_info("DLP_INFO", $sformatf("[%s]", label), UVM_LOW)
+    `uvm_info("DLP_INFO", "───────────────────────────────────────────────", UVM_HIGH)
+    `uvm_info("DLP_INFO", $sformatf("[%s]", label), UVM_HIGH)
     `uvm_info("DLP_INFO", 
       $sformatf("  Seq Num      : 10'd%0d (0x%3h)", flit_seq_num, flit_seq_num), 
       UVM_LOW)
@@ -537,14 +555,14 @@ class PCIe_sequence_item extends uvm_sequence_item;
       UVM_LOW)
     `uvm_info("DLP_INFO", 
       $sformatf("  Replay Cmd   : 2'b%0b (%s)", replay_cmd, replay_cmd_str), 
-      UVM_LOW)
+      UVM_HIGH)
     `uvm_info("DLP_INFO", 
       $sformatf("  DLLP Type    : 8'h%2h", dllp_type), 
-      UVM_LOW)
+      UVM_HIGH)
     `uvm_info("DLP_INFO", 
       $sformatf("  Prior Payload: %b | DLLP Type Bit: %b", prior_was_payload, type_of_dllp_payload), 
-      UVM_LOW)
-    `uvm_info("DLP_INFO", "───────────────────────────────────────────────", UVM_LOW)
+      UVM_HIGH)
+    `uvm_info("DLP_INFO", "───────────────────────────────────────────────", UVM_HIGH)
   endfunction
 
   //--------------------------------------------------------------------------
@@ -641,9 +659,11 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     (pkt_mode != FLIT) ->
       (ohc == 5'b00000);
 
-    // FLIT -> B/C/E not supported yet
+    // FLIT -> B/C not supported, E only as OHC-E1 when ohc_e1_en == 1
     (pkt_mode == FLIT) ->
-      (ohc[4:1] == 4'b0000);
+      (ohc[2:1] == 2'b00);
+    (pkt_mode == FLIT) ->
+      (ohc[4:3] == (ohc_e1_en ? 2'b01 : 2'b00));
 
     // FLIT Memory Request with explicit BE -> OHC-A1
     // [FLIT_SEG] length == 0 encodes 1024 DW, so "more than 1 DW" is
@@ -697,6 +717,19 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   //   bit in the normal sequences would turn good traffic into Poisoned TLPs.
   //   Only PCIe_RC_3DW_Flit_DefMemWr_Poisoned_TLP_sequence sets ep == 1.
   constraint c_ep_default { soft ep == 1'b0; }
+
+  // [TLP_PREFIX] prefixes are OFF unless a sequence turns them on
+  constraint c_prefix_default {
+    soft lprfx_en  == 1'b0;
+    soft ohc_e1_en == 1'b0;
+    (pkt_mode != FLIT) -> (lprfx_en == 1'b0 && ohc_e1_en == 1'b0);   // Flit Mode only
+  }
+
+  // [TLP_PREFIX] OHC-E1 DW format (Sec 2.2.11)
+  constraint c_ohc_e1_dw {
+    ohc_e1_dw[31:28] == 4'b0001;                 // E-E Prefix DW
+    ohc_e1_dw[27:24] inside {4'b1110, 4'b1111};  // VendPrefixE0 / VendPrefixE1
+  }
 
   constraint c_atomic_rules {
     if (atomic_op != PCIe_ATOMIC_NONE) {
@@ -1024,7 +1057,7 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   // Generate OHC[4:0] bitmap
   //==========================================================================
   function void determine_ohc();
-   `uvm_info("PCIe_SEQUENCE_ITEM", $sformatf("ENTERED_INTO_DETERMINE_OHC_FOR_%s",pkt_mode.name()), UVM_LOW)
+   `uvm_info("PCIe_SEQUENCE_ITEM", $sformatf("ENTERED_INTO_DETERMINE_OHC_FOR_%s",pkt_mode.name()), UVM_HIGH)
     ohc = 5'b00000;
 
     determine_ohc_a();
@@ -1032,6 +1065,10 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
       OHC_A1, OHC_A2, OHC_A3, OHC_A4, OHC_A5 : ohc[0] = 1'b1;
       default                                : ohc[0] = 1'b0;
     endcase
+
+    // [TLP_PREFIX] OHC-E1 present -> OHC[4:3] = 01b
+    if ((pkt_mode == FLIT) && ohc_e1_en)
+      ohc[4:3] = 2'b01;
   endfunction
 
   //--------------------------------------------------------------------------

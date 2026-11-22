@@ -72,12 +72,12 @@ class PCIe_RC_3DW_Flit_MemWr_MemRd_tc_vc_sequence extends PCIe_RC_controller_bas
       `uvm_error("TC_VC_SEQ", $sformatf("randomize failed for %s on TC%0d", what, tc))
 
     `uvm_info("TC_VC_SEQ", $sformatf("%-6s TC = %0d -> VC = %s  tag=0x%0h addr=0x%0h len=%0d DW",
-              what, it.tc, it.vc.name(), it.tag, it.address, it.length), UVM_LOW)
+              what, it.tc, it.vc.name(), it.tag, it.address, it.length), UVM_HIGH)
     finish_item(it);
   endtask
 
   task body();
-    `uvm_info("TC_VC_SEQ", $sformatf("ENTERED_INTO_TC_VC_SEQUENCE_BODY : TC = %0d (%s)", tc, PCIe_sequence_item::tc_vc_map_str()), UVM_LOW)
+    `uvm_info("TC_VC_SEQ", $sformatf("ENTERED_INTO_TC_VC_SEQUENCE_BODY : TC = %0d (%s)", tc, PCIe_sequence_item::tc_vc_map_str()), UVM_HIGH)
     if (!PCIe_sequence_item::tc_enabled(tc)) begin
       `uvm_warning("TC_VC_SEQ", $sformatf("TC%0d is not mapped to an enabled VC - nothing sent for it", tc))
       return;
@@ -85,7 +85,7 @@ class PCIe_RC_3DW_Flit_MemWr_MemRd_tc_vc_sequence extends PCIe_RC_controller_bas
     send_mem(PCIe_TL_WRITE, 1'b0, p_addr,                  p_tag_base,      "MWr");
     send_mem(PCIe_TL_WRITE, 1'b1, p_addr + (p_length * 4), p_tag_base + 1,  "DMWr");
     send_mem(PCIe_TL_READ,  1'b0, p_addr,                  p_tag_base + 2,  "MRd");
-    `uvm_info("TC_VC_SEQ", $sformatf("EXIT_FROM_TC_VC_SEQUENCE_BODY : TC = %0d", tc), UVM_LOW)
+    `uvm_info("TC_VC_SEQ", $sformatf("EXIT_FROM_TC_VC_SEQUENCE_BODY : TC = %0d", tc), UVM_HIGH)
   endtask
 
 endclass

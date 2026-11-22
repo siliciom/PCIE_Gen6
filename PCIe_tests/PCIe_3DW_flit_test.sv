@@ -31,14 +31,14 @@ class PCIe_3DW_flit_test extends PCIe_base_test;
   endfunction
 
   function void build_phase(uvm_phase phase);
-    `uvm_info("PCIe_3DW_TEST","ENTERED_INTO_3DW_TEST_BUILD_PHASE", UVM_LOW)
+    `uvm_info("PCIe_3DW_TEST","ENTERED_INTO_3DW_TEST_BUILD_PHASE", UVM_HIGH)
     // Redirect the RC controller sequence to the 3DW variant before build.
     PCIe_RC_controller_base_sequence::type_id::set_type_override(
         PCIe_RC_3DW_flit_sequence::get_type());
     PCIe_EP_controller_base_sequence::type_id::set_type_override(
         PCIe_EP_3DW_flit_sequence::get_type());
     super.build_phase(phase);
-    `uvm_info("PCIe_3DW_TEST","EXIT_FROM_3DW_TEST_BUILD_PHASE", UVM_LOW)
+    `uvm_info("PCIe_3DW_TEST","EXIT_FROM_3DW_TEST_BUILD_PHASE", UVM_HIGH)
   endfunction
 
 endclass

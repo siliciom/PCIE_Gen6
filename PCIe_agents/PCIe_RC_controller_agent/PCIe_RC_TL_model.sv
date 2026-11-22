@@ -264,11 +264,11 @@ class PCIe_RC_TL_model extends uvm_component;
       `uvm_info("RC_TL_FC", $sformatf({"[TC_VC] %0d VCs enabled : every VC gets DEDICATED hdr=%0d data=%0d and SHARED hdr=%0d data=%0d (same as VC0).\n",
                 "    Port-wide shared pool = %0d x %0d hdr / %0d x %0d data credits (sum over VCs, Eq 2-6)."},
                 fc_num_vc, sz_h[FC_DED], sz_d[FC_DED], sz_h[FC_SHR], sz_d[FC_SHR],
-                fc_num_vc, fc_wire_val(sz_h[FC_SHR], FC_FSH), fc_num_vc, fc_wire_val(sz_d[FC_SHR], FC_FSD)), UVM_LOW)
+                fc_num_vc, fc_wire_val(sz_h[FC_SHR], FC_FSH), fc_num_vc, fc_wire_val(sz_d[FC_SHR], FC_FSD)), UVM_HIGH)
   endfunction
 
   function void fc_log(string msg);
-    `uvm_info("RC_TL_FC", msg, UVM_LOW)
+    `uvm_info("RC_TL_FC", msg, UVM_HIGH)
   endfunction
 
   function string fc_rx_status(int unsigned v, bit p, int unsigned c);
@@ -851,7 +851,7 @@ class PCIe_RC_TL_model extends uvm_component;
 
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
-    `uvm_info("RC_TL_MODEL","ENTERED_INTO_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
+    `uvm_info("RC_TL_MODEL","ENTERED_INTO_RC_TL_MODEL_BUILD_PHASE",UVM_HIGH)
      tx_tl_imp = new("tx_tl_imp", this);
      tlp_dl_ap  = new("tlp_dl_ap",  this);
      tl_ap  = new("tl_ap",  this);
@@ -868,7 +868,7 @@ class PCIe_RC_TL_model extends uvm_component;
      // [TL_ASSERT] same interface handle the DL assertions use
      if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", tl_aif))
        `uvm_warning("RC_TL_ASSERT", "PCIe_RC_INTERFACE not found :: TL assertions are OFF for RC")
-    `uvm_info("RC_TL_MODEL","EXIT_FROM_RC_TL_MODEL_BUILD_PHASE",UVM_LOW)
+    `uvm_info("RC_TL_MODEL","EXIT_FROM_RC_TL_MODEL_BUILD_PHASE",UVM_HIGH)
   endfunction
 
   // FLOW CONTROL : all connections are made by now - advertise the six TL buffers to the DL
@@ -887,14 +887,14 @@ class PCIe_RC_TL_model extends uvm_component;
     super.report_phase(phase);
     // fc_report();   // RC_TL FLOW CONTROL SUMMARY + FC BUFFERS : print switched off (only a print, no check)
     `uvm_info("RC_TL_MODEL", $sformatf("RX_FROM_DL_SUMMARY : TLPs received from RC DL=%0d  completions=%0d  outstanding requests still open=%0d",
-              n_tlp_rcvd, n_cpl_rcvd, outstanding.size()), UVM_LOW)
+              n_tlp_rcvd, n_cpl_rcvd, outstanding.size()), UVM_HIGH)
     // [FLIT_SEG] summary + every segmented Non-Posted request must be fully completed
     `uvm_info("RC_TL_FLIT_SEG", $sformatf("FLIT_SEGMENTATION_SUMMARY : transactions split=%0d  segment TLPs sent=%0d  segmented Non-Posted txns fully completed=%0d",
               n_seg_txn, n_seg_tlp, n_seg_txn_done), UVM_LOW)
     `uvm_info("RC_TL_FULL_CPLD", $sformatf("READ_COMPLETION_SUMMARY : reads completed=%0d  DW match=%0d  DW mismatch=%0d  DW never written=%0d  partial CplD still waiting=%0d",
-              n_rd_cpl_checked, n_rd_cpl_dw_match, n_rd_cpl_dw_mismatch, n_rd_cpl_dw_unwritten, cpl_partial.size()), UVM_LOW)
+              n_rd_cpl_checked, n_rd_cpl_dw_match, n_rd_cpl_dw_mismatch, n_rd_cpl_dw_unwritten, cpl_partial.size()), UVM_HIGH)
     `uvm_info("RC_TL_ATOMIC", $sformatf("ATOMICOP_SUMMARY : AtomicOp completions checked=%0d  errors=%0d",
-              n_atomic_cpl, n_atomic_err), UVM_LOW)                                     // [ATOMIC]
+              n_atomic_cpl, n_atomic_err), UVM_HIGH)                                     // [ATOMIC]
     if (cpl_partial.size() != 0)
       `uvm_error("RC_TL_FULL_CPLD", $sformatf("%0d read completion(s) never received their last CplD part", cpl_partial.size()))
     foreach (seg_cpl_expect[ptag]) begin
@@ -966,14 +966,14 @@ class PCIe_RC_TL_model extends uvm_component;
     dw3 = rc_rx_get_dw(item, 3);
 
     `uvm_info("RC_TL_MODEL",
-      $sformatf("RX_TLP_DW : DW0=%08h DW1=%08h DW2=%08h DW3=%08h", dw0, dw1, dw2, dw3), UVM_LOW)
+      $sformatf("RX_TLP_DW : DW0=%08h DW1=%08h DW2=%08h DW3=%08h", dw0, dw1, dw2, dw3), UVM_HIGH)
 
     ftype  = dw0[31:24];
     is_cpl = (ftype == `PCIe_FLITTYPE_CPL) || (ftype == `PCIe_FLITTYPE_CPLD);
 
     if (!is_cpl) begin
       `uvm_info("RC_TL_MODEL",
-        $sformatf("RX_TLP_IS_NOT_A_COMPLETION : type byte0=0x%02h (no completion decode)", ftype), UVM_LOW)
+        $sformatf("RX_TLP_IS_NOT_A_COMPLETION : type byte0=0x%02h (no completion decode)", ftype), UVM_HIGH)
       return;
     end
 
@@ -1016,7 +1016,7 @@ class PCIe_RC_TL_model extends uvm_component;
         "         ============================================================"},
         item.pkt_mode.name(), kind, ftype, cplr_id, req_id, tag,
         tc, attr, ts, ep_bit, bc, bc, {dw1[14], la_hi}, la_hi, len,
-        ohc, ohc[0] ? "YES" : "NO", hdr_dw, payload_dw, d0), UVM_LOW)
+        ohc, ohc[0] ? "YES" : "NO", hdr_dw, payload_dw, d0), UVM_HIGH)
 
     // [FC SHARED] RECEIVER side : the completion takes the RC CPL buffer of the
     // pool given by the prefix, and is consumed right away (the RC TL keeps the
@@ -1089,7 +1089,7 @@ class PCIe_RC_TL_model extends uvm_component;
       n_cpl_ur_rcvd++;
       `uvm_info("RC_TL_ERR_INJ",
         $sformatf("UR_COMPLETION_RECEIVED : tag=0x%0h status=UR (Unsupported Request) #%0d",
-                  cpl_it.tag, n_cpl_ur_rcvd), UVM_LOW)
+                  cpl_it.tag, n_cpl_ur_rcvd), UVM_HIGH)
     end
 
     // [FLIT_SEG] CplD split over several FLITs : Byte Count is the number of
@@ -1288,7 +1288,7 @@ class PCIe_RC_TL_model extends uvm_component;
         operand2, (req.atomic_op == PCIe_ATOMIC_CAS) ? "swap value" : "not used",
         old_val, exp_known ? ((old_val == exp_old) ? "-> MATCH with RC shadow" : "-> MISMATCH")
                            : "-> not checked (address never written by RC)",
-        new_val, cpl.byte_count), UVM_LOW)
+        new_val, cpl.byte_count), UVM_HIGH)
   endfunction
 
   //--------------------------------------------------------------------------
@@ -1361,7 +1361,7 @@ class PCIe_RC_TL_model extends uvm_component;
 
     `uvm_info("RC_TL_ATTR",
       $sformatf("ENTERED_ATTR_CHECK : sequence=%s  %s %s tag=0x%0h  attr[2:0]=%03b",
-                seq_name, tr.pkt_mode.name(), tr.txn_type.name(), tr.tag, tr.attr), UVM_LOW)
+                seq_name, tr.pkt_mode.name(), tr.txn_type.name(), tr.tag, tr.attr), UVM_HIGH)
 
     //------------------------------------------------------------------------
     // Table 2-12 : Ordering Attributes  ->  {Attr[2] IDO , Attr[1] RO}
@@ -1379,15 +1379,15 @@ class PCIe_RC_TL_model extends uvm_component;
 
     `uvm_info("RC_TL_ATTR",
       $sformatf("RO_CHECK  : sequence=%s is RO=%0b  -> Relaxed Ordering %s",
-                seq_name, tr.attr[1], tr.attr[1] ? "ENABLED" : "DISABLED"), UVM_LOW)
+                seq_name, tr.attr[1], tr.attr[1] ? "ENABLED" : "DISABLED"), UVM_HIGH)
 
     `uvm_info("RC_TL_ATTR",
       $sformatf("IDO_CHECK : sequence=%s is IDO=%0b -> ID-Based Ordering %s",
-                seq_name, tr.attr[2], tr.attr[2] ? "ENABLED" : "DISABLED"), UVM_LOW)
+                seq_name, tr.attr[2], tr.attr[2] ? "ENABLED" : "DISABLED"), UVM_HIGH)
 
     `uvm_info("RC_TL_ATTR",
       $sformatf("RO_IDO_ORDERING_ATTRIBUTES_TABLE_CHECKED : IDO(Attr[2])=%0b RO(Attr[1])=%0b -> Ordering Type = %s | Ordering Model = %s",
-                tr.attr[2], tr.attr[1], ord_type, ord_model), UVM_LOW)
+                tr.attr[2], tr.attr[1], ord_type, ord_model), UVM_HIGH)
 
     //------------------------------------------------------------------------
     // Table 2-13 : Cache Coherency Management Attribute  ->  Attr[0] NS
@@ -1403,11 +1403,11 @@ class PCIe_RC_TL_model extends uvm_component;
 
     `uvm_info("RC_TL_ATTR",
       $sformatf("NO_SNOOP_ATTRIBUTE_TABLE_CHECKED : No Snoop(Attr[0])=%0b -> Cache Coherency Management Type = %s | Coherency Model = %s",
-                tr.attr[0], snp_type, snp_model), UVM_LOW)
+                tr.attr[0], snp_type, snp_model), UVM_HIGH)
 
     `uvm_info("RC_TL_ATTR",
       $sformatf("ATTR_CHECK_DONE : sequence=%s is RO=%0b IDO=%0b NS=%0b , checked Ordering Attributes table (RO / IDO) and No Snoop Attribute table",
-                seq_name, tr.attr[1], tr.attr[2], tr.attr[0]), UVM_LOW)
+                seq_name, tr.attr[1], tr.attr[2], tr.attr[0]), UVM_HIGH)
   endfunction
 
 
@@ -1739,7 +1739,7 @@ class PCIe_RC_TL_model extends uvm_component;
   // FUNCTION: write (tx_tl_imp) - entry point from the RC controller driver.
   //--------------------------------------------------------------------------
   virtual function void write(PCIe_sequence_item tr);
-    `uvm_info("RC_TL_MODEL", $sformatf("RECEIVED_TL_PAYLOAD_FROM_RC_CONTROLLER_DRIVER %s", tr.pkt_mode.name()), UVM_LOW)
+    `uvm_info("RC_TL_MODEL", $sformatf("RECEIVED_TL_PAYLOAD_FROM_RC_CONTROLLER_DRIVER %s", tr.pkt_mode.name()), UVM_HIGH)
      send_tlp(tr);
   endfunction
 
@@ -1776,6 +1776,9 @@ class PCIe_RC_TL_model extends uvm_component;
     // Local TLP Prefix in front of the TLP. Added after the ECRC : a Local TLP
     // Prefix is not covered by ECRC.
     fc_tx_prepare_pool(tr);
+
+    // [TLP_PREFIX] Flit Mode Local TLP Prefix asked by the sequence
+    if (tr.lprfx_en) add_local_prefix(tr);
 
     // FLIT MODE : pack the TLP into the 236 byte FLIT TLP region and pad the
     // remainder with NOP TLPs (Sec 2.2.1.2). Non-Flit Mode has no such region.
@@ -1825,6 +1828,29 @@ class PCIe_RC_TL_model extends uvm_component;
   endfunction
 
   //--------------------------------------------------------------------------
+  // [TLP_PREFIX] add_local_prefix
+  //   Flit Mode Local TLP Prefix (Sec 2.2.10.3, Fig 2-77) : 1 DW in front of
+  //   the TLP, Type = 8Dh, TLP Uses Dedicated Credits = 0 (shared credits).
+  //   Added after the ECRC : a Local TLP Prefix is not covered by ECRC.
+  //   Skipped when the FC logic already put the (dedicated) prefix there.
+  //--------------------------------------------------------------------------
+  function void add_local_prefix(PCIe_sequence_item tr);
+    bit [`PCIe_TL_DATA_DW_W-1:0] tmp[];
+    if (tr.pkt_mode != FLIT) return;
+    if (tr.serialized_tlp[0][31:24] == `PCIe_FLITTYPE_PREFIX) return;
+
+    tmp    = new[tr.serialized_tlp.size() + 1];
+    tmp[0] = {`PCIe_FLITTYPE_PREFIX, 24'h000000};
+    foreach (tr.serialized_tlp[i]) tmp[i+1] = tr.serialized_tlp[i];
+
+    tr.serialized_tlp      = tmp;
+    tr.tlp_header_dw_count = tr.tlp_header_dw_count + 1;   // prefix shown with the header
+    tr.tlp_total_dw_count  = tr.serialized_tlp.size();
+
+    `uvm_info("RC_TL_PREFIX", $sformatf("Flit Mode Local TLP Prefix added : DW=%08h", tmp[0]), UVM_LOW)
+  endfunction
+
+  //--------------------------------------------------------------------------
   // FUNCTION: pack_to_tlp_data
   //
   //   The DL model consumes item.tlp_data - a packed 236 byte array where
@@ -1860,7 +1886,7 @@ class PCIe_RC_TL_model extends uvm_component;
 
     `uvm_info("RC_TL_MODEL",
       $sformatf("PACKED_FOR_DL : mode=%s src_dw=%0d packed_bytes=%0d",
-                 tr.pkt_mode.name(), src.size(), nbytes), UVM_LOW)
+                 tr.pkt_mode.name(), src.size(), nbytes), UVM_HIGH)
 
     print_tlp_data(tr);
     print_full_packet(tr);
@@ -1932,7 +1958,7 @@ class PCIe_RC_TL_model extends uvm_component;
       end
     end
 
-    `uvm_info("TL_TO_DL_236B", dump, UVM_LOW)
+    `uvm_info("TL_TO_DL_236B", dump, UVM_HIGH)
 
   endfunction
 
@@ -2011,7 +2037,7 @@ class PCIe_RC_TL_model extends uvm_component;
           dump = {dump, line, "\n"};
       end
     end
-    `uvm_info("FULL_PACKET", dump, UVM_LOW)
+    `uvm_info("FULL_PACKET", dump, UVM_HIGH)
 
   endfunction
 
@@ -2049,12 +2075,12 @@ class PCIe_RC_TL_model extends uvm_component;
         outstanding.delete(cpl.tag);
         `uvm_info(get_type_name(),
           $sformatf("RC-TL got completion tag=0x%0h status=%0d dw=%0d (total collected %0d DW)",
-                     cpl.tag, cpl.cpl_status, cpl.cpl_data.size(), req_h.cpl_data.size()), UVM_LOW)
+                     cpl.tag, cpl.cpl_status, cpl.cpl_data.size(), req_h.cpl_data.size()), UVM_HIGH)
       end
       else begin
         `uvm_info(get_type_name(),
           $sformatf("RC-TL got PART of a split completion tag=0x%0h dw=%0d byte_count_remaining=%0d (collected %0d DW so far)",
-                     cpl.tag, cpl.cpl_data.size(), bc_val, req_h.cpl_data.size()), UVM_LOW)
+                     cpl.tag, cpl.cpl_data.size(), bc_val, req_h.cpl_data.size()), UVM_HIGH)
       end
 
       // [FLIT_SEG] completion of one segment of a split Non-Posted request (DMWr)
@@ -2113,7 +2139,7 @@ class PCIe_RC_TL_model extends uvm_component;
                                          ref bit [`PCIe_TL_DATA_DW_W-1:0] hdr[]);
 
     `uvm_info("RC_TL_MODEL",
-      $sformatf("ENTERED_INTO_SERIALIZE_HEADER_FOR_%s", tr.pkt_mode.name()), UVM_LOW)
+      $sformatf("ENTERED_INTO_SERIALIZE_HEADER_FOR_%s", tr.pkt_mode.name()), UVM_HIGH)
 
     if (tr.pkt_mode == FLIT)
       serialize_flit_header(tr, hdr);
@@ -2472,6 +2498,17 @@ class PCIe_RC_TL_model extends uvm_component;
 
     end
 
+    //======================================================================
+    // [TLP_PREFIX] OHC-E1 (Sec 2.2.11) : 1 DW, last in A-B-C-E order
+    //======================================================================
+    if (tr.ohc[4:3] == 2'b01) begin
+      hdr = new[hdr.size() + 1](hdr);
+      hdr[hdr.size() - 1] = tr.ohc_e1_dw;
+      ohc_dw = ohc_dw + 1;
+      `uvm_info("FLIT_HEADER", $sformatf("OHC-E1 added : DW=%08h (E-E Prefix E[3:0]=%04b)",
+                 tr.ohc_e1_dw, tr.ohc_e1_dw[27:24]), UVM_LOW)
+    end
+
     total_header_dw = hdr.size();
 
     //======================================================================
@@ -2676,10 +2713,10 @@ class PCIe_RC_TL_model extends uvm_component;
 
     for (i = 0; i < total_dw; i++) begin
       if (i < header_dw) begin
-        `uvm_info("FULL_TLP_DW",$sformatf("TLP DW[%0d] = %08h  <-- HEADER", i, tr.serialized_tlp[i]),UVM_LOW)
+        `uvm_info("FULL_TLP_DW",$sformatf("TLP DW[%0d] = %08h  <-- HEADER", i, tr.serialized_tlp[i]),UVM_HIGH)
       end
       else begin
-        `uvm_info("FULL_TLP_DW",$sformatf("TLP DW[%0d] = %08h  <-- PAYLOAD",i, tr.serialized_tlp[i]),UVM_LOW)
+        `uvm_info("FULL_TLP_DW",$sformatf("TLP DW[%0d] = %08h  <-- PAYLOAD",i, tr.serialized_tlp[i]),UVM_HIGH)
       end
     end
 
@@ -2742,7 +2779,7 @@ class PCIe_RC_TL_model extends uvm_component;
     `uvm_info("ECRC_TX",
       $sformatf("ECRC_START : mode=%s bytes_covered=%0d variant_bits={sym%0d.bit%0d , sym%0d.bit%0d}",
                  mode.name(), nbytes,
-                 `PCIe_TL_ECRC_VAR_SYM0, `PCIe_TL_ECRC_VAR_SYM0_BIT, var_sym, var_bit), UVM_LOW)
+                 `PCIe_TL_ECRC_VAR_SYM0, `PCIe_TL_ECRC_VAR_SYM0_BIT, var_sym, var_bit), UVM_HIGH)
 
     for (int i = 0; i < nbytes; i++) begin
       b = dw_stream[i/4][ 8*(3-(i%4)) +: 8 ];
@@ -2867,7 +2904,7 @@ class PCIe_RC_TL_model extends uvm_component;
         "         ECRC sent (+1)    : 0x%08h\n",
         "         Expected at EP    : ECRC Check Failed -> Cpl with status UR\n",
         "         ============================================================"},
-        tr.txn_type.name(), tr.dir.name(), tr.tag, good_ecrc, tr.ecrc), UVM_LOW)
+        tr.txn_type.name(), tr.dir.name(), tr.tag, good_ecrc, tr.ecrc), UVM_HIGH)
   endfunction
 
   //--------------------------------------------------------------------------
@@ -2902,7 +2939,7 @@ class PCIe_RC_TL_model extends uvm_component;
         tr.txn_type.name(), tr.dir.name(), tr.address, tr.length, tr.rsvd_bits,
         tr.rsvd_bits[0], (hdr.size() > 1) ? hdr[1] : 32'h0,
         tr.rsvd_bits[3], tr.rsvd_bits[2], tr.rsvd_bits[1],
-        (tr.ohc_a_type == OHC_A1 && hdr.size() > 0) ? hdr[hdr.size()-1] : 32'h0), UVM_LOW)
+        (tr.ohc_a_type == OHC_A1 && hdr.size() > 0) ? hdr[hdr.size()-1] : 32'h0), UVM_HIGH)
   endfunction
 
   virtual function void build_idle_or_nop_flit(PCIe_sequence_item tr);

@@ -75,16 +75,16 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_contro
     grant_no = 0;     // order in which the sequencer gave the driver each item
     sent_no  = 0;     // order in which each item finished (TLP sent)
 
-    `uvm_info("FORK_SEQ", "FORK_STARTED : IOWr (WRITE) branch and IORd (READ) branch start together. Expected ordering rule : B4", UVM_LOW)
+    `uvm_info("FORK_SEQ", "FORK_STARTED : IOWr (WRITE) branch and IORd (READ) branch start together. Expected ordering rule : B4", UVM_HIGH)
 
     fork
       begin : IOWR_BRANCH
-        `uvm_info("FORK_SEQ_IOWR", $sformatf("IOWR_BRANCH_STARTED : WRITE sequence item (IOWr) waiting for sequencer @%0t", $time), UVM_LOW)
+        `uvm_info("FORK_SEQ_IOWR", $sformatf("IOWR_BRANCH_STARTED : WRITE sequence item (IOWr) waiting for sequencer @%0t", $time), UVM_HIGH)
         t1_item = PCIe_sequence_item::type_id::create("t1_item");
         start_item(t1_item);
         grant_no++;
         `uvm_info("FORK_SEQ_IOWR", $sformatf("IOWR_GRANTED : WRITE (IOWr) got the sequencer as item #%0d %s @%0t",
-                  grant_no, (grant_no == 1) ? "-> IOWr is ISSUED FIRST" : "-> IOWr is ISSUED SECOND", $time), UVM_LOW)
+                  grant_no, (grant_no == 1) ? "-> IOWr is ISSUED FIRST" : "-> IOWr is ISSUED SECOND", $time), UVM_HIGH)
         if (!t1_item.randomize() with {
              // LTSSM information
              electrical_idle_test == 1'b0;
@@ -127,18 +127,18 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_contro
                   t1_item.tag, t1_item.requester_id, t1_item.attr,
                   t1_item.attr[2], t1_item.attr[2] ? "SET -> ID-Based Ordering ENABLED" : "NOT SET",
                   t1_item.attr[1], t1_item.attr[1] ? "SET -> Relaxed Ordering ENABLED"  : "NOT SET",
-                  t1_item.attr[0], t1_item.attr[0] ? "SET -> No Snoop"                  : "NOT SET"), UVM_LOW)
+                  t1_item.attr[0], t1_item.attr[0] ? "SET -> No Snoop"                  : "NOT SET"), UVM_HIGH)
 
         `uvm_info("TL_IOWR",$sformatf("Sending_3DW_Flit_IOWr (I/O Write, NPR_WITH_DATA) - 1st TLP of IOWr followed by IORd"), UVM_LOW)
-        t1_item.print();
+        if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) t1_item.print();
 
         finish_item(t1_item);
         sent_no++;
         `uvm_info("FORK_SEQ_IOWR", $sformatf("IOWR_SENT : WRITE (IOWr) tag=0x%0h attr=%03b finished as #%0d %s @%0t",
-                  t1_item.tag, t1_item.attr, sent_no, (sent_no == 1) ? "-> IOWr WENT FIRST" : "-> IOWr WENT SECOND", $time), UVM_LOW)
+                  t1_item.tag, t1_item.attr, sent_no, (sent_no == 1) ? "-> IOWr WENT FIRST" : "-> IOWr WENT SECOND", $time), UVM_HIGH)
       end : IOWR_BRANCH
       begin : IORD_BRANCH
-        `uvm_info("FORK_SEQ_IORD", $sformatf("IORD_BRANCH_STARTED : READ sequence item (IORd) waiting for sequencer @%0t", $time), UVM_LOW)
+        `uvm_info("FORK_SEQ_IORD", $sformatf("IORD_BRANCH_STARTED : READ sequence item (IORd) waiting for sequencer @%0t", $time), UVM_HIGH)
         // [FORK] wait until the 1st branch (IOWr) has the sequencer, so the order is
         //        always 1st = IOWr, 2nd = IORd and the expected rule is checked every run.
         wait (grant_no >= 1);
@@ -146,7 +146,7 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_contro
         start_item(t2_item);
         grant_no++;
         `uvm_info("FORK_SEQ_IORD", $sformatf("IORD_GRANTED : READ (IORd) got the sequencer as item #%0d %s @%0t",
-                  grant_no, (grant_no == 1) ? "-> IORd is ISSUED FIRST" : "-> IORd is ISSUED SECOND", $time), UVM_LOW)
+                  grant_no, (grant_no == 1) ? "-> IORd is ISSUED FIRST" : "-> IORd is ISSUED SECOND", $time), UVM_HIGH)
         if (!t2_item.randomize() with {
              // LTSSM information
              electrical_idle_test == 1'b0;
@@ -189,7 +189,7 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_contro
                   t2_item.tag, t2_item.requester_id, t2_item.attr,
                   t2_item.attr[2], t2_item.attr[2] ? "SET -> ID-Based Ordering ENABLED" : "NOT SET",
                   t2_item.attr[1], t2_item.attr[1] ? "SET -> Relaxed Ordering ENABLED"  : "NOT SET",
-                  t2_item.attr[0], t2_item.attr[0] ? "SET -> No Snoop"                  : "NOT SET"), UVM_LOW)
+                  t2_item.attr[0], t2_item.attr[0] ? "SET -> No Snoop"                  : "NOT SET"), UVM_HIGH)
 
         //--------------------------------------------------------------
         // [ATTR] both TLPs are randomized now. Work out which Table 2-42
@@ -204,20 +204,20 @@ class PCIe_RC_3DW_Flit_IOWr_followed_IORd_Random_sequence extends PCIe_RC_contro
                     " -> rule %s = %s : %s"},
                     "IOWr", t1_item.attr[2], t1_item.attr[1], t1_item.requester_id,
                     "IORd", t2_item.attr[2], t2_item.attr[1], t2_item.requester_id,
-                    exp_rule, PCIe_ordering_rules::result_name(exp_res), exp_why), UVM_LOW)
+                    exp_rule, PCIe_ordering_rules::result_name(exp_res), exp_why), UVM_HIGH)
         end
 
         `uvm_info("TL_IORD",$sformatf("Sending_3DW_Flit_IORd (I/O Read, READ_REQ) - 2nd TLP of IOWr followed by IORd"), UVM_LOW)
-        t2_item.print();
+        if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) t2_item.print();
 
         finish_item(t2_item);
         sent_no++;
         `uvm_info("FORK_SEQ_IORD", $sformatf("IORD_SENT : READ (IORd) tag=0x%0h attr=%03b finished as #%0d %s @%0t",
-                  t2_item.tag, t2_item.attr, sent_no, (sent_no == 1) ? "-> IORd WENT FIRST" : "-> IORd WENT SECOND", $time), UVM_LOW)
+                  t2_item.tag, t2_item.attr, sent_no, (sent_no == 1) ? "-> IORd WENT FIRST" : "-> IORd WENT SECOND", $time), UVM_HIGH)
       end : IORD_BRANCH
     join
 
-    `uvm_info("FORK_SEQ", "FORK_JOINED : both IOWr and IORd are sent. See ORD_CHK ORDERING_DECISION for Table 2-42 rule B4", UVM_LOW)
+    `uvm_info("FORK_SEQ", "FORK_JOINED : both IOWr and IORd are sent. See ORD_CHK ORDERING_DECISION for Table 2-42 rule B4", UVM_HIGH)
 
     `uvm_info("3DW_FLIT_IOWR_FOLLOWED_IORD","EXIT_FROM_3DW_FLIT_IOWR_FOLLOWED_IORD_SEQUENCE_BODY", UVM_LOW)
   endtask

@@ -186,7 +186,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
         sb_rc_to_ep_sync_run = 0;
        tx_q.delete();
        rx_q.delete();
-       `uvm_info("PCIe_SCOREBOARD",$sformatf("%s RESYNCS=%0d MISMATCHES=%0d", why, sb_resync_count, sb_mismatch_count),UVM_LOW)
+       `uvm_info("PCIe_SCOREBOARD",$sformatf("%s RESYNCS=%0d MISMATCHES=%0d", why, sb_resync_count, sb_mismatch_count),UVM_HIGH)
     endfunction
 
     // ------------------------------------------------------------------------
@@ -236,7 +236,7 @@ class PCIe_scoreboard extends uvm_scoreboard;
               if (run >= `SB_SYNC_RUN_LEN) begin
                  synced = 1'b1;
                  `uvm_info("PCIe_SCOREBOARD",$sformatf("%s_STREAM_SYNCED after %0d consecutive dwords, RESYNCS=%0d",
-                           dir, run, resync_count),UVM_LOW)
+                           dir, run, resync_count),UVM_HIGH)
               end
               return 1'b1;
            end
@@ -670,10 +670,12 @@ class PCIe_scoreboard extends uvm_scoreboard;
 
       tx_dec = "";
       rx_dec = "";
-      for(i = 0; i < 256; i++)
-        tx_dec = $sformatf("%s%0d ", tx_dec, tx_256b[i]);
-      for(i = 0; i < 256; i++)
-        rx_dec = $sformatf("%s%0d ", rx_dec, rx_256b[i]);
+      if ((byte_mismatch_count != 0) || uvm_report_enabled(UVM_HIGH, UVM_INFO, "PCIe_SCOREBOARD")) begin
+        for(i = 0; i < 256; i++)
+          tx_dec = $sformatf("%s%0d ", tx_dec, tx_256b[i]);
+        for(i = 0; i < 256; i++)
+          rx_dec = $sformatf("%s%0d ", rx_dec, rx_256b[i]);
+      end
 
       if (byte_mismatch_count == 0) begin
         rc_ep_256b_flits_matched++;

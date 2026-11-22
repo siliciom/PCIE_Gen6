@@ -760,7 +760,7 @@ PCIe_env_config   pcie_ecfg;
    endfunction
 
 function void build_phase(uvm_phase phase);
-     `uvm_info("PCIe_SUBSCRIBER","ENTERED_INTO_SUB_BUILD_PHASE",UVM_LOW)
+     `uvm_info("PCIe_SUBSCRIBER","ENTERED_INTO_SUB_BUILD_PHASE",UVM_HIGH)
       super.build_phase(phase);
          pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item") ;
       // [COV_2CG] empty items so no handle is null before the first packet arrives
@@ -780,7 +780,7 @@ function void build_phase(uvm_phase phase);
          `uvm_fatal("PCIe_SUBSCRIBER","Cannot_get_PCIe_env_config")
       void'(uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", rc_pipe_intf));
       void'(uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf));
-     `uvm_info("PCIe_SUBSCRIBER","EXIT_FROM_SUB_BUILD_PHASE",UVM_LOW)
+     `uvm_info("PCIe_SUBSCRIBER","EXIT_FROM_SUB_BUILD_PHASE",UVM_HIGH)
     endfunction
 
    function void start_of_simulation_phase(uvm_phase phase);

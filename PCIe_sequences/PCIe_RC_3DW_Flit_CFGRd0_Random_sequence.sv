@@ -64,7 +64,7 @@ class PCIe_RC_3DW_Flit_CFGRd0_Random_sequence extends PCIe_RC_controller_base_se
       `uvm_error("3DW_FLIT_CFGRD0_RANDOM","randomize failed for cfg")
 
     `uvm_info("TL_CFG",$sformatf("Sending 3DW Flit CFGRd_Random (Type0)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

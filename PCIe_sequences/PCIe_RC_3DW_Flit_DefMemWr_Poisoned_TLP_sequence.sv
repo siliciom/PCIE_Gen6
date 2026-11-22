@@ -84,7 +84,7 @@ class PCIe_RC_3DW_Flit_DefMemWr_Poisoned_TLP_sequence extends PCIe_RC_controller
 
 
     `uvm_info("PCIE_RC_3DW_FLIT_DEFMEMWR_POISONED_TLP_SEQUENCE", "Sending 3DW Flit Deferrable MemWr with EP = 1 (Poisoned TLP)", UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
     finish_item(pcie_seq_item);
 
     `uvm_info("PCIE_RC_3DW_FLIT_DEFMEMWR_POISONED_TLP_SEQUENCE", "EXIT_FROM_SEQUENCE_BODY", UVM_LOW)

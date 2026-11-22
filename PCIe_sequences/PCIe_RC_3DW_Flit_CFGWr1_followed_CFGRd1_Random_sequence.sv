@@ -68,7 +68,7 @@ class PCIe_RC_3DW_Flit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC_co
       `uvm_error("3DW_FLIT_CFGRD1_FOLLOWED_CFGRD1_RANDOM","randomize failed for cfgwr")
 
     `uvm_info("TL_CFG",$sformatf("Sending 3DW Flit CFGWr (Type1)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
         // ---- CHECK : Endpoint must reply UR to a Type 1 config request ----
@@ -82,7 +82,7 @@ class PCIe_RC_3DW_Flit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC_co
     else if (cpl.cpl_status != `PCIe_CPL_STATUS_UR)
       `uvm_error("CFG_TYPE1", $sformatf("EXPECTED_UR but got %s", rc_tl.cpl_status_str(cpl.cpl_status)))
     else
-      `uvm_info("CFG_TYPE1", $sformatf("UR_RECEIVED_AS_EXPECTED tag=0x%0h", pcie_seq_item.tag), UVM_LOW)
+      `uvm_info("CFG_TYPE1", $sformatf("UR_RECEIVED_AS_EXPECTED tag=0x%0h", pcie_seq_item.tag), UVM_HIGH)
 
     pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
     start_item(pcie_seq_item);
@@ -129,7 +129,7 @@ class PCIe_RC_3DW_Flit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC_co
       `uvm_error("3DW_FLIT_CFGRD1_FOLLOWED_CFGRD1_RANDOM","randomize failed for cfgrd")
 
     `uvm_info("TL_CFG",$sformatf("Sending 3DW Flit CFGRd (Type1) readback"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
         // ---- CHECK : Endpoint must reply UR to a Type 1 config request ----
@@ -143,7 +143,7 @@ class PCIe_RC_3DW_Flit_CFGWr1_followed_CFGRd1_Random_sequence extends PCIe_RC_co
     else if (cpl.cpl_status != `PCIe_CPL_STATUS_UR)
       `uvm_error("CFG_TYPE1", $sformatf("EXPECTED_UR but got %s", rc_tl.cpl_status_str(cpl.cpl_status)))
     else
-      `uvm_info("CFG_TYPE1", $sformatf("UR_RECEIVED_AS_EXPECTED tag=0x%0h", pcie_seq_item.tag), UVM_LOW)
+      `uvm_info("CFG_TYPE1", $sformatf("UR_RECEIVED_AS_EXPECTED tag=0x%0h", pcie_seq_item.tag), UVM_HIGH)
     `uvm_info("3DW_FLIT_CFGRD1_FOLLOW","EXIT_FROM_3DW_FLIT_CFGRD1_FOLLOW_SEQUENCE_BODY", UVM_LOW)
   endtask
 

@@ -82,7 +82,7 @@ class PCIe_RC_3DW_Flit_MemWr_followed_MemRd_MaxPayload_sequence extends PCIe_RC_
       `uvm_error("3DW_FLIT_MEMWR_FOLLOWED_MEMRD_MAXPAYLOAD","randomize failed for mwr")
 
     `uvm_info("TL_MWR",$sformatf("Sending 3DW Flit MemWr (MaxPayload) - part of Wr followed by Rd"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 
@@ -138,7 +138,7 @@ class PCIe_RC_3DW_Flit_MemWr_followed_MemRd_MaxPayload_sequence extends PCIe_RC_
       `uvm_error("3DW_FLIT_MEMWR_FOLLOWED_MEMRD_MAXPAYLOAD","randomize failed for mrd")
 
     `uvm_info("TL_MRD",$sformatf("Sending 3DW Flit MemRd (MaxPayload) - readback of prior MemWr"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

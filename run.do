@@ -1,4 +1,4 @@
-#set testname "PCIe_base_test"
+set testname "PCIe_base_test"
 #set testname "PCIe_3DW_flit_test"
 #set testname "PCIe_IO_3DW_FLIT_test"
 #set testname "PCIe_gen6_ltssm_electrical_idle_during_training_test"
@@ -90,8 +90,13 @@
 #set testname "PCIe_gen6_4DW_Flit_MemWr_followed_MemRd_Random_test"
 #set testname "PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test"  
 #set testname "PCIe_gen6_3DW_Flit_MemRd_followed_MemWr_test"
+#set testname "PCIe_gen6_3DW_Flit_IOWr_ECRC_Error_test"
+#set testname "PCIe_gen6_3DW_Flit_MemWr_Malformed_TLP_test"
+#set testname "PCIe_gen6_3DW_Flit_DefMemWr_Poisoned_TLP_test" 
+#set testname "PCIe_gen6_3DW_LPRFX_Flit_MemWR_Random_test"
+#set testname "PCIe_gen6_3DW_E2E_PRFX_Flit__MemWr_Random_test"
 # [DLL] Data Link Layer tests
-#set testname "PCIe_gen6_dll_ack_nak_test"
+set testname "PCIe_gen6_dll_ack_nak_test"
 #set testname "PCIe_gen6_dll_crc_error_replay_test"
 #set testname "PCIe_gen6_dll_retry_request_test"
 #set testname "PCIe_gen6_dll_duplicate_flit_discard_test"
@@ -105,9 +110,19 @@
 #set testname "PCIe_gen6_dll_flow_control_credit_exhaustion_test"
 #set testname "PCIe_gen6_dll_credit_recovery_test"
 #set testname "PCIe_gen6_dll_updatefc_optimized_test"
-set testname "PCIe_gen6_dll_link_recovery_reinitialization_test"
+#set testname "PCIe_gen6_dll_link_recovery_reinitialization_test"
 #set testname "PCIe_gen6_dll_reset_replay_buffer_clear_test"
 #set testname "PCIe_gen6_dll_lost_nak_test"
+# --- DLL tests (friend) ---
+#set testname "PCIe_gen6_dll_multi_flit_replay_test"
+#set testname "PCIe_gen6_dll_sequence_gap_detection_test"
+#set testname "PCIe_gen6_dll_out_of_order_flit_test"
+#set testname "PCIe_gen6_dll_maximum_replay_buffer_test"
+#set testname "PCIe_gen6_dll_retry_buffer_overflow_test"
+#set testname "PCIe_gen6_dll_flit_crc_generation_test"
+#set testname "PCIe_gen6_dll_flit_crc_error__test"
+#set testname "PCIe_gen6_dll_uncorrectable_fec_error_test"
+#set testname "PCIe_gen6_dll_crc_and_fec_combined_test"
  
 vlib work
 vmap work work

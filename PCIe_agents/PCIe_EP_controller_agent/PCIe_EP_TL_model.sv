@@ -383,7 +383,7 @@ class PCIe_EP_TL_model extends uvm_component;
       `uvm_info("EP_TL_FC", $sformatf({"[TC_VC] %0d VCs enabled : every VC gets DEDICATED hdr=%0d data=%0d and SHARED hdr=%0d data=%0d (same as VC0).\n",
                 "    Port-wide shared pool = %0d x %0d hdr / %0d x %0d data credits (sum over VCs, Eq 2-6)."},
                 fc_num_vc, sz_h[FC_DED], sz_d[FC_DED], sz_h[FC_SHR], sz_d[FC_SHR],
-                fc_num_vc, fc_wire_val(sz_h[FC_SHR], FC_FSH), fc_num_vc, fc_wire_val(sz_d[FC_SHR], FC_FSD)), UVM_LOW)
+                fc_num_vc, fc_wire_val(sz_h[FC_SHR], FC_FSH), fc_num_vc, fc_wire_val(sz_d[FC_SHR], FC_FSD)), UVM_HIGH)
 
     // [FC_TEST] small SHARED Posted header buffer for VC0 (credit exhaustion tests)
     //   uvm_config_db#(int unsigned)::set(this, "*", "fc_test_p_hdr_credits", 4);
@@ -419,7 +419,7 @@ class PCIe_EP_TL_model extends uvm_component;
   endfunction
 
   function void fc_log(string msg);
-    `uvm_info("EP_TL_FC", msg, UVM_LOW)
+    `uvm_info("EP_TL_FC", msg, UVM_HIGH)
   endfunction
 
   function string fc_rx_status(int unsigned v, bit p, int unsigned c);
@@ -1017,7 +1017,7 @@ class PCIe_EP_TL_model extends uvm_component;
 
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
-    `uvm_info("EP_TL_MODEL","ENTERED_INTO_EP_TL_MODEL_BUILD_PHASE",UVM_LOW)
+    `uvm_info("EP_TL_MODEL","ENTERED_INTO_EP_TL_MODEL_BUILD_PHASE",UVM_HIGH)
 
     tl_imp     = new("tl_imp",     this);
     tl_mon_imp = new("tl_mon_imp", this);
@@ -1098,9 +1098,9 @@ class PCIe_EP_TL_model extends uvm_component;
         `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_CFG_SPACE_BYTES,
         `PCIe_TL_CFG_HDR_BYTES,
         `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_MEM_DATA_W, `PCIe_TL_CFG_SPACE_BYTES,
-        `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+        `PCIe_TL_CFG_HDR_BYTES), UVM_HIGH)
 
-    `uvm_info("EP_TL_MODEL","EXIT_FROM_EP_TL_MODEL_RESET_PHASE",UVM_LOW)
+    `uvm_info("EP_TL_MODEL","EXIT_FROM_EP_TL_MODEL_RESET_PHASE",UVM_HIGH)
      phase.drop_objection(this);
    endtask
 
@@ -1385,15 +1385,15 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       $sformatf({"EP_TL_SUMMARY : tlp_received=%0d completions_sent=%0d ecrc_pass=%0d ecrc_fail=%0d ",
                   "cfg_rd=%0d cfg_wr=%0d cfg_unsupported=%0d"},
                  n_tlp_rcvd, n_cpl_sent, n_ecrc_pass, n_ecrc_fail,
-                 n_cfg_rd, n_cfg_wr, n_cfg_ur), UVM_LOW)
+                 n_cfg_rd, n_cfg_wr, n_cfg_ur), UVM_HIGH)
     `uvm_info("EP_TL_FLIT_SEG",
       $sformatf("EP_FLIT_SEG_SUMMARY : DMWr received=%0d (one Cpl each)  split completions=%0d  CplD parts sent=%0d",
                  n_dmwr_rcvd, n_cpl_split_txn, n_cpl_split_parts), UVM_LOW)
     `uvm_info("EP_TL_ATOMIC",
-      $sformatf("EP_ATOMICOP_SUMMARY : AtomicOp requests executed=%0d", n_atomic_rcvd), UVM_LOW)   // [ATOMIC]
+      $sformatf("EP_ATOMICOP_SUMMARY : AtomicOp requests executed=%0d", n_atomic_rcvd), UVM_HIGH)   // [ATOMIC]
     `uvm_info("EP_TL_ERR",
       $sformatf("EP_TL_ERROR_SUMMARY : malformed(dropped)=%0d poisoned=%0d ecrc_failed=%0d ur_completions_sent=%0d",
-                 n_malformed, n_poisoned, n_ecrc_err, n_ur_err_cpl), UVM_LOW)                       // [TL_ERR_INJ]
+                 n_malformed, n_poisoned, n_ecrc_err, n_ur_err_cpl), UVM_HIGH)                       // [TL_ERR_INJ]
   endfunction
 
   //==========================================================================
@@ -1447,14 +1447,14 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     `uvm_info("EP_TL_MODEL",
       $sformatf("DECODE_INPUT : mode=%s DW0=%08h DW1=%08h DW2=%08h DW3=%08h",
                  d_mode.name(), get_dw(item,0), get_dw(item,1),
-                 get_dw(item,2), get_dw(item,3)), UVM_LOW)
+                 get_dw(item,2), get_dw(item,3)), UVM_HIGH)
 
     decode_tlp(item);
 
     if (!d_valid) begin
       `uvm_info("EP_TL_MODEL",
         $sformatf({"DECODED_AS_NOP_OR_UNSUPPORTED_TLP (mode=%s byte0=0x%02h) : ",
-                   "no memory access, no completion"}, d_mode.name(), d_byte0), UVM_LOW)
+                   "no memory access, no completion"}, d_mode.name(), d_byte0), UVM_HIGH)
       return;
     end
 
@@ -1549,7 +1549,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
     // A 1 DW all-zero header is a NOP TLP (FLIT Type 00h) - nothing to service.
     if (d_byte0 == `PCIe_FLITTYPE_NOP && d_mode == FLIT) begin
-      `uvm_info("EP_TL_DECODE","FIRST_TLP_IN_REGION_IS_A_NOP_TLP",UVM_LOW)
+      `uvm_info("EP_TL_DECODE","FIRST_TLP_IN_REGION_IS_A_NOP_TLP",UVM_HIGH)
       return;
     end
 
@@ -1564,7 +1564,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     // Base and carries [7:4] Last DW BE, [3:0] First DW BE. When no OHC is
     // present the byte enables are implied (all bytes enabled).
     //----------------------------------------------------------------------
-    if ((d_mode == FLIT) && (d_ohc_dw != 0)) begin
+    if ((d_mode == FLIT) && (d_ohc[0] == 1'b1)) begin     // [TLP_PREFIX] OHC-A only (not OHC-E)
       ohc_val       = get_dw(item, d_hdr_base_dw);
       d_last_dw_be  = ohc_val[7:4];
       d_first_dw_be = ohc_val[3:0];
@@ -1574,7 +1574,16 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
         d_rsvd_val[3:1] = {ohc_val[31], ohc_val[29], ohc_val[28]};
       `uvm_info("EP_TL_DECODE",
         $sformatf("OHC_DW=%08h -> first_dw_be=%04b last_dw_be=%04b",
-                   ohc_val, d_first_dw_be, d_last_dw_be), UVM_LOW)
+                   ohc_val, d_first_dw_be, d_last_dw_be), UVM_HIGH)
+    end
+
+    // [TLP_PREFIX] OHC-E1 : 1 DW right after the Header Base (+ OHC-A)
+    if ((d_mode == FLIT) && (d_ohc[4:3] == 2'b01)) begin
+      ohc_val = get_dw(item, d_hdr_base_dw + d_ohc[0]);
+      `uvm_info("EP_TL_DECODE",
+        $sformatf("OHC-E1_DW=%08h -> entry=%04b (%s) E[3:0]=%04b content=%06h",
+                   ohc_val, ohc_val[31:28], (ohc_val[31:28] == 4'b0001) ? "E-E Prefix DW" : "No Entry",
+                   ohc_val[27:24], ohc_val[23:0]), UVM_LOW)
     end
 
     //----------------------------------------------------------------------
@@ -1658,6 +1667,13 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     d_td = (d_ts == `PCIe_TL_TS_1DW_ECRC);
 
     d_ohc_dw = (d_ohc[0] == 1'b1) ? `PCIe_TL_OHC_A_DW : 0;
+    // [TLP_PREFIX] OHC-E size : 01b = E1 (1 DW), 10b = E2 (2 DW), 11b = E4 (4 DW)
+    case (d_ohc[4:3])
+      2'b01   : d_ohc_dw = d_ohc_dw + 1;
+      2'b10   : d_ohc_dw = d_ohc_dw + 2;
+      2'b11   : d_ohc_dw = d_ohc_dw + 4;
+      default : ;
+    endcase
 
     case (d_byte0)
       `PCIe_FLITTYPE_MRD_32   : begin d_txn_type=PCIe_TL_MEM; d_dir=PCIe_TL_READ;  d_is_4dw=0; d_has_data=0; end
@@ -1924,7 +1940,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       item.ecrc_state = PCIe_ECRC_ABSENT;
       `uvm_info("ECRC_RX",
         $sformatf("NO_ECRC_IN_THIS_TLP (mode=%s TD=%0b TS=%03b) - nothing to check",
-                   d_mode.name(), d_td, d_ts), UVM_LOW)
+                   d_mode.name(), d_td, d_ts), UVM_HIGH)
       return;
     end
 
@@ -1950,7 +1966,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       n_ecrc_pass++;
       `uvm_info("ECRC_RX",
         $sformatf("******** ECRC_PASS ******** mode=%s covered=%0d B received=%08h recalculated=%08h",
-                   d_mode.name(), covered_bytes, rx_digest, recomputed), UVM_LOW)
+                   d_mode.name(), covered_bytes, rx_digest, recomputed), UVM_HIGH)
     end
     else begin
       item.ecrc_state = PCIe_ECRC_FAIL;
@@ -1990,7 +2006,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     `uvm_info("EP_TL_MEM",
       $sformatf("%s_%s : mode=%s addr=0x%016h len=%0d DW depth=%0d",
                  mem_name, (op == PCIe_TL_MEM_OP_WRITE) ? "WRITE" : "READ",
-                 mode.name(), addr, len_dw, depth), UVM_LOW)
+                 mode.name(), addr, len_dw, depth), UVM_HIGH)
 
     rdata = new[(op == PCIe_TL_MEM_OP_READ) ? len_dw : 0];
 
@@ -2019,7 +2035,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
     `uvm_info("EP_TL_MEM",
       $sformatf("%s_%s_COMPLETE : %0d DW touched : data = [ %s ]",
-                 mem_name, (op == PCIe_TL_MEM_OP_WRITE) ? "WRITE" : "READ", len_dw, data_str), UVM_LOW)
+                 mem_name, (op == PCIe_TL_MEM_OP_WRITE) ? "WRITE" : "READ", len_dw, data_str), UVM_HIGH)
 
   endfunction
  
@@ -2097,7 +2113,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
         old_val, new_val,
         (d_atomic_op != PCIe_ATOMIC_CAS)  ? "(written)" :
         (old_val == operand1)              ? "(compare MATCHED -> swap written)"
-                                           : "(compare FAILED -> memory unchanged)"), UVM_LOW)
+                                           : "(compare FAILED -> memory unchanged)"), UVM_HIGH)
   endfunction
 
     //==========================================================================
@@ -2123,13 +2139,13 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       rdata      = '0;
       `uvm_info("EP_TL_IO",
         $sformatf("io3dw_WRITE : mode=%s addr=0x%08h io3dw[%0d] <= %08h",
-                   mode.name(), addr[31:0], idx, wdata), UVM_LOW)
+                   mode.name(), addr[31:0], idx, wdata), UVM_HIGH)
     end
     else begin
       rdata = io3dw[idx];
       `uvm_info("EP_TL_IO",
         $sformatf("io3dw_READ  : mode=%s addr=0x%08h io3dw[%0d] => %08h",
-                   mode.name(), addr[31:0], idx, rdata), UVM_LOW)
+                   mode.name(), addr[31:0], idx, rdata), UVM_HIGH)
     end
 
   endfunction
@@ -2204,7 +2220,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     if (op == PCIe_TL_CFG_READ) begin
       rdata = space[idx];
       `uvm_info("EP_TL_CFG",
-        $sformatf("CFG_READ  : byte_offset=0x%03h (DW idx=%0d) => %08h", byte_offset, idx, rdata), UVM_LOW)
+        $sformatf("CFG_READ  : byte_offset=0x%03h (DW idx=%0d) => %08h", byte_offset, idx, rdata), UVM_HIGH)
     end
     else begin
       // ---- generalized read-modify-write : byte-enable AND read-only mask
@@ -2213,12 +2229,12 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
       `uvm_info("EP_TL_CFG",
         $sformatf("CFG_WRITE : byte_offset=0x%03h (DW idx=%0d) wdata=%08h first_dw_be=%04b ro_mask=%08h writable_mask=%08h old=%08h",
-                   byte_offset, idx, wdata, first_dw_be, ro_mask[idx], writable_mask, space[idx]), UVM_LOW)
+                   byte_offset, idx, wdata, first_dw_be, ro_mask[idx], writable_mask, space[idx]), UVM_HIGH)
 
       space[idx] = (space[idx] & ~writable_mask) | (wdata & writable_mask);
 
       `uvm_info("EP_TL_CFG",
-        $sformatf("CFG_WRITE_COMPLETE : cfg_space[%0d] <= %08h", idx, space[idx]), UVM_LOW)
+        $sformatf("CFG_WRITE_COMPLETE : cfg_space[%0d] <= %08h", idx, space[idx]), UVM_HIGH)
     end
 
   endfunction
@@ -2254,7 +2270,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       `uvm_info("EP_TL_ERR",
         $sformatf("REQUEST_NOT_EXECUTED : %s %s addr=0x%0h tag=0x%0h -> %s",
                    d_txn_type.name(), d_dir.name(), d_address, d_tag,
-                   need_cpl ? "Cpl with status UR (Unsupported Request)" : "Posted, dropped (no completion)"), UVM_LOW)
+                   need_cpl ? "Cpl with status UR (Unsupported Request)" : "Posted, dropped (no completion)"), UVM_HIGH)
     end
     else
     case (d_txn_type)
@@ -2337,7 +2353,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
           if (d_payload_dw > 0) begin
             cfg_wdata = d_payload[0];
             `uvm_info("EP_TL_CFG",
-              $sformatf("CFG_WRITE_DATA_SOURCE=DECODED_PAYLOAD (%08h)", cfg_wdata), UVM_LOW)
+              $sformatf("CFG_WRITE_DATA_SOURCE=DECODED_PAYLOAD (%08h)", cfg_wdata), UVM_HIGH)
           end
           else begin
             cfg_wdata = '0;
@@ -2353,7 +2369,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 	    `uvm_info("EP_TL_CFG",
            $sformatf("CFG_SPACE_TYPE1_WRITE_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
                  `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
-                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_HIGH)
 
           end
 
@@ -2364,7 +2380,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
           `uvm_info("EP_TL_CFG",
            $sformatf("CFG_SPACE_TYPE0_WRITE_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
                  `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
-                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_HIGH)
 
 	  end
 
@@ -2381,7 +2397,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
             `uvm_info("EP_TL_CFG",
                $sformatf("CFG_SPACE_TYPE1_READ_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
                  `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
-                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_HIGH)
 
 	  end
 
@@ -2392,7 +2408,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
              `uvm_info("EP_TL_CFG",
                $sformatf("CFG_SPACE_TYPE0_READ_INITIALISED : %0d DW total, %0d DW (%0d B) header populated",
                  `PCIe_TL_CFG_SPACE_DW_DEPTH, `PCIe_TL_CFG_HDR_DW_DEPTH,
-                 `PCIe_TL_CFG_HDR_BYTES), UVM_LOW)
+                 `PCIe_TL_CFG_HDR_BYTES), UVM_HIGH)
 
           end
 
@@ -2418,11 +2434,11 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
           $sformatf("CONFIGURATION_REQUEST : bus=%0d dev=%0d fn=%0d byte_off=0x%03h %s -> %s",
                      d_cfg_bus_num, d_cfg_dev_num, d_cfg_fn_num, d_cfg_reg_num,
                      (d_dir == PCIe_TL_WRITE) ? "WRITE" : "READ",
-                     cfg_ur ? "UNSUPPORTED_REQUEST" : "SUCCESSFUL_COMPLETION"), UVM_LOW)
+                     cfg_ur ? "UNSUPPORTED_REQUEST" : "SUCCESSFUL_COMPLETION"), UVM_HIGH)
       end
 
       default: begin
-        `uvm_info("EP_TL_MODEL","POSTED_OR_UNHANDLED_TXN_TYPE : no completion",UVM_LOW)
+        `uvm_info("EP_TL_MODEL","POSTED_OR_UNHANDLED_TXN_TYPE : no completion",UVM_HIGH)
       end
 
     endcase
@@ -2430,7 +2446,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     if (!need_cpl) begin
       `uvm_info("EP_TL_MODEL",
         $sformatf("POSTED_REQUEST (%s %s) : no Completion generated",
-                   d_txn_type.name(), d_dir.name()), UVM_LOW)
+                   d_txn_type.name(), d_dir.name()), UVM_HIGH)
       return;
     end
     if (tl_aif != null) tl_aif.tl_np_rx_cnt++;   // [TL_ASSERT] Non-Posted : a completion must follow
@@ -2469,7 +2485,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     n_cpl_sent++;
 
     `uvm_info("EP_TL_MODEL",
-      $sformatf("COMPLETION_SENT_FROM_EP_TL_MODEL_TO_EP_DL_MODEL #%0d", n_cpl_sent), UVM_LOW)
+      $sformatf("COMPLETION_SENT_FROM_EP_TL_MODEL_TO_EP_DL_MODEL #%0d", n_cpl_sent), UVM_HIGH)
 
 //    fc_account_cpl(cpl);          // FLOW CONTROL : completion credits consumed
     tl_ap.write(cpl);
@@ -2944,7 +2960,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
         (d_txn_type == PCIe_TL_CFG) ?
           $sformatf("cfg_space  bus=0x%02h dev=0x%02h fn=0x%01h byte_off=0x%03h (Type%0d)",
                      d_cfg_bus_num, d_cfg_dev_num, d_cfg_fn_num, d_cfg_reg_num, d_cfg_type1) :
-        (d_txn_type == PCIe_TL_IO) ? "io3dw" : (d_is_4dw ? "mem4dw" : "mem3dw")), UVM_LOW)
+        (d_txn_type == PCIe_TL_IO) ? "io3dw" : (d_is_4dw ? "mem4dw" : "mem3dw")), UVM_HIGH)
 
     for (int i = 0; i < d_payload_dw; i++)
       `uvm_info("EP_TL_RX_PAYLOAD_DW",
@@ -2997,7 +3013,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     foreach (cpl.serialized_tlp[i])
       `uvm_info("EP_TL_COMPLETION_DW",
         $sformatf("CPL DW[%0d] = %08h  %s", i, cpl.serialized_tlp[i],
-                   (i < cpl.tlp_header_dw_count) ? "<-- HEADER/OHC" : "<-- DATA"), UVM_LOW)
+                   (i < cpl.tlp_header_dw_count) ? "<-- HEADER/OHC" : "<-- DATA"), UVM_HIGH)
 
     dump = "\n";
     line = "";
@@ -3009,7 +3025,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
           (b == `PCIe_TLP_DATA_BYTE_W-1))
         dump = {dump, line, "\n"};
     end
-    `uvm_info("EP_TL_COMPLETION_236B", dump, UVM_LOW)
+    `uvm_info("EP_TL_COMPLETION_236B", dump, UVM_HIGH)
 
   endfunction
 
@@ -3048,7 +3064,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
     `uvm_info("EP_TL_ATTR",
       $sformatf("ENTERED_ATTR_CHECK [%s] : sequence=%s  %s %s tag=0x%0h  attr[2:0]=%03b",
-                where, seq_name, tr.pkt_mode.name(), tr.txn_type.name(), tr.tag, tr.attr), UVM_LOW)
+                where, seq_name, tr.pkt_mode.name(), tr.txn_type.name(), tr.tag, tr.attr), UVM_HIGH)
 
     // Ordering Attributes table : {Attr[2] IDO , Attr[1] RO}
     case ({tr.attr[2], tr.attr[1]})
@@ -3064,15 +3080,15 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
     `uvm_info("EP_TL_ATTR",
       $sformatf("RO_CHECK  [%s] : sequence=%s is RO=%0b  -> Relaxed Ordering %s",
-                where, seq_name, tr.attr[1], tr.attr[1] ? "ENABLED" : "DISABLED"), UVM_LOW)
+                where, seq_name, tr.attr[1], tr.attr[1] ? "ENABLED" : "DISABLED"), UVM_HIGH)
 
     `uvm_info("EP_TL_ATTR",
       $sformatf("IDO_CHECK [%s] : sequence=%s is IDO=%0b -> ID-Based Ordering %s",
-                where, seq_name, tr.attr[2], tr.attr[2] ? "ENABLED" : "DISABLED"), UVM_LOW)
+                where, seq_name, tr.attr[2], tr.attr[2] ? "ENABLED" : "DISABLED"), UVM_HIGH)
 
     `uvm_info("EP_TL_ATTR",
       $sformatf("RO_IDO_ORDERING_ATTRIBUTES_TABLE_CHECKED [%s] : IDO(Attr[2])=%0b RO(Attr[1])=%0b -> Ordering Type = %s | Ordering Model = %s",
-                where, tr.attr[2], tr.attr[1], ord_type, ord_model), UVM_LOW)
+                where, tr.attr[2], tr.attr[1], ord_type, ord_model), UVM_HIGH)
 
     // No Snoop Attribute table : Attr[0]
     if (tr.attr[0]) begin
@@ -3086,11 +3102,11 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
 
     `uvm_info("EP_TL_ATTR",
       $sformatf("NO_SNOOP_ATTRIBUTE_TABLE_CHECKED [%s] : No Snoop(Attr[0])=%0b -> Cache Coherency Management Type = %s | Coherency Model = %s",
-                where, tr.attr[0], snp_type, snp_model), UVM_LOW)
+                where, tr.attr[0], snp_type, snp_model), UVM_HIGH)
 
     `uvm_info("EP_TL_ATTR",
       $sformatf("ATTR_CHECK_DONE [%s] : sequence=%s is RO=%0b IDO=%0b NS=%0b , checked Ordering Attributes table (RO / IDO) and No Snoop Attribute table",
-                where, seq_name, tr.attr[1], tr.attr[2], tr.attr[0]), UVM_LOW)
+                where, seq_name, tr.attr[1], tr.attr[2], tr.attr[0]), UVM_HIGH)
   endfunction
 
 

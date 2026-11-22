@@ -66,7 +66,7 @@ class PCIe_RC_3DW_Flit_CFGRd1_Random_sequence extends PCIe_RC_controller_base_se
       `uvm_error("3DW_FLIT_CFGRD1_RANDOM","randomize failed for cfg")
 
     `uvm_info("TL_CFG",$sformatf("Sending 3DW Flit CFGRd_Random (Type1)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
         // ---- CHECK : Endpoint must reply UR to a Type 1 config request ----
@@ -80,7 +80,7 @@ class PCIe_RC_3DW_Flit_CFGRd1_Random_sequence extends PCIe_RC_controller_base_se
     else if (cpl.cpl_status != `PCIe_CPL_STATUS_UR)
       `uvm_error("CFG_TYPE1", $sformatf("EXPECTED_UR but got %s", rc_tl.cpl_status_str(cpl.cpl_status)))
     else
-      `uvm_info("CFG_TYPE1", $sformatf("UR_RECEIVED_AS_EXPECTED tag=0x%0h", pcie_seq_item.tag), UVM_LOW)
+      `uvm_info("CFG_TYPE1", $sformatf("UR_RECEIVED_AS_EXPECTED tag=0x%0h", pcie_seq_item.tag), UVM_HIGH)
 
     `uvm_info("3DW_FLIT_CFGRD1_RANDOM","EXIT_FROM_3DW_FLIT_CFGRD1_RANDOM_SEQUENCE_BODY", UVM_LOW)
   endtask
