@@ -251,7 +251,6 @@ package PCIe_pkg;
 	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_CAS_1dwPayload_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_4DW_Flit_CAS_2dwPayload_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_dll_ack_nak_sequence.sv"
-	// [DLL] one sequence per DLL test (each one is complete : its own MemWr code)
 	`include "../PCIe_sequences/PCIe_RC_dll_crc_error_replay_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_dll_retry_request_sequence.sv"
 	`include "../PCIe_sequences/PCIe_RC_dll_duplicate_flit_discard_sequence.sv"
@@ -298,11 +297,6 @@ package PCIe_pkg;
         `include "../PCIe_tests/PCIe_gen6_ltssm_electrical_idle_during_training_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_detect_no_receiver_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_basic_linkup_L0_test.sv"
-        `include "../PCIe_tests/PCIe_gen6_dll_inactive_state_test.sv"
-`include "../PCIe_tests/PCIe_gen6_dll_initfc1_test.sv"
-`include "../PCIe_tests/PCIe_gen6_dll_initfc2_test.sv"
-`include "../PCIe_tests/PCIe_gen6_dll_feature_negotiation_test.sv"
-`include "../PCIe_tests/PCIe_gen6_dll_active_state_test.sv"
         `include "../PCIe_tests/PCIe_gen6_enumeration_test.sv"   // [ENUM]
 	// [RECOVERY] Directed Recovery / sequential rate negotiation testcase.
 	// One test drives the complete Gen1 -> Gen2 -> ... -> Gen6 walk.
@@ -456,8 +450,13 @@ package PCIe_pkg;
 	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_swap_2dwPayload_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_CAS_1dwPayload_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_4DW_Flit_CAS_2dwPayload_test.sv"
+	// [DLL] Data Link Layer tests (all DLL tests in one place)
+	`include "../PCIe_tests/PCIe_gen6_dll_inactive_state_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_dll_initfc1_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_dll_initfc2_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_dll_feature_negotiation_test.sv"
+	`include "../PCIe_tests/PCIe_gen6_dll_active_state_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_dll_ack_nak_test.sv"
-	// [DLL] Data Link Layer tests (each test extends PCIe_base_test)
 	`include "../PCIe_tests/PCIe_gen6_dll_crc_error_replay_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_dll_retry_request_test.sv"
 	`include "../PCIe_tests/PCIe_gen6_dll_duplicate_flit_discard_test.sv"
