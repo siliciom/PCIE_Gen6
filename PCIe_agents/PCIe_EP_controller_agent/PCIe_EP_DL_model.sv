@@ -1607,6 +1607,8 @@ class PCIe_EP_DL_model extends uvm_component;
         n_rx_dropped++;
         `uvm_info("EP_DL_TEST", $sformatf("FLIT_LOST : payload flit seq=%0d dropped (never reaches the DL)",
                   {item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W][1:0], item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W+1]}), UVM_NONE)
+        PCIe_flow_log::print("INJECT", $sformatf("flit seq %0d lost on the link (never reaches the EP DL)",
+                  {item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W][1:0], item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W+1]}));   // [FLOW]
         return;
       end
     end
@@ -1619,6 +1621,8 @@ class PCIe_EP_DL_model extends uvm_component;
         swap_held_item = item;
         `uvm_info("EP_DL_TEST", $sformatf("FLIT_HELD : payload flit seq=%0d will arrive after the next one",
                   {item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W][1:0], item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W+1]}), UVM_NONE)
+        PCIe_flow_log::print("INJECT", $sformatf("flit seq %0d held, it arrives AFTER the next flit (out of order)",
+                  {item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W][1:0], item.dlp_flit_out[`PCIe_TLP_DATA_BYTE_W+1]}));   // [FLOW]
         return;
       end
     end

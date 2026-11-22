@@ -81,8 +81,10 @@ class PCIe_gen6_dll_base_test extends PCIe_base_test;
     seq_start.wait_on();                // test sequence is about to send
     snap_counters();
     `uvm_info(get_type_name(), "========== DLL TEST BODY START ==========", UVM_NONE)
+    PCIe_flow_log::print("TEST", {get_type_name(), " : START"});   // [FLOW]
     dll_test_body();
     `uvm_info(get_type_name(), "========== DLL TEST BODY DONE  ==========", UVM_NONE)
+    PCIe_flow_log::print("TEST", {get_type_name(), " : END"});     // [FLOW]
     #2us;
     phase.drop_objection(this);
   endtask
@@ -164,6 +166,8 @@ class PCIe_gen6_dll_base_test extends PCIe_base_test;
   function void dll_check(bit ok, string name, string detail);
     if (ok) begin pass_cnt++; `uvm_info("DLL_CHECK", {"PASS : ", name, " : ", detail}, UVM_NONE) end
     else    begin fail_cnt++; `uvm_error("DLL_CHECK", {"FAIL : ", name, " : ", detail}) end
+    if (ok) PCIe_flow_log::print("CHECK", {"PASS ", name});                     // [FLOW]
+    else    PCIe_flow_log::print("CHECK", {"FAIL ", name, " : ", detail});
   endfunction
 
   // checks used by every test at the end
