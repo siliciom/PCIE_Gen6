@@ -59,7 +59,7 @@ class PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test extends PCIe_base_test;
     PCIe_RC_3DW_Flit_IOWr_sequence              io_seq;
     PCIe_RC_3DW_Flit_CFGWr0_sequence            cfg_seq;
     PCIe_RC_3DW_Flit_MsgWr_withoutdata_sequence msg_seq;
-    `uvm_info("PCIE_GEN6_TC_VC_TEST","ENTERED_INTO_TC_VC_TEST_RUN_PHASE",UVM_LOW)
+    `uvm_info("PCIE_GEN6_TC_VC_TEST","ENTERED_INTO_TC_VC_TEST_RUN_PHASE",UVM_HIGH)
     phase.raise_objection(this);
 
     fork
@@ -70,7 +70,7 @@ class PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test extends PCIe_base_test;
       begin : RC_TC_VC_TRAFFIC
         curr_addr = 32'h0000_2000;
         tc_perm.shuffle();  // random permutation of 0..7, no repeats
-        `uvm_info("TEST", $sformatf("TC issue order = %p  (expected send order : VC7 VC6 ... VC0)", tc_perm), UVM_LOW)
+        `uvm_info("TEST", $sformatf("TC issue order = %p  (expected send order : VC7 VC6 ... VC0)", tc_perm), UVM_HIGH)
 
         for (int i = 0; i < 8; i++) begin
           Seq_tx = PCIe_RC_3DW_Flit_MemWr_MemRd_tc_vc_sequence::type_id::create("Seq_tx");
@@ -80,7 +80,7 @@ class PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test extends PCIe_base_test;
           Seq_tx.tc         = tc_perm[i];  // assign directly, no need to randomize in sequence
           Seq_tx.start(pcie_environment.rc_top_agent.rc_controller_agent.rc_controller_sequencer);
           curr_addr += 2 * Seq_tx.p_length * 4;   // MWr area + DMWr area
-          `uvm_info("TEST", $sformatf("curr_addr = %0h, tc = %0d", curr_addr, tc_perm[i]), UVM_LOW)
+          `uvm_info("TEST", $sformatf("curr_addr = %0h, tc = %0d", curr_addr, tc_perm[i]), UVM_HIGH)
         end
 
         // TC0 only : IO, Configuration and Message requests (TC0 -> VC0)
@@ -95,7 +95,7 @@ class PCIe_gen6_3DW_Flit_MemWr_MemRd_tc_vc_test extends PCIe_base_test;
 
     #20000;
     phase.drop_objection(this);
-    `uvm_info("PCIE_GEN6_TC_VC_TEST","EXIT_FROM_TC_VC_TEST_RUN_PHASE",UVM_LOW)
+    `uvm_info("PCIE_GEN6_TC_VC_TEST","EXIT_FROM_TC_VC_TEST_RUN_PHASE",UVM_HIGH)
   endtask
 
 endclass

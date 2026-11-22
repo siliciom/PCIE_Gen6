@@ -72,7 +72,7 @@ class PCIe_env_config extends uvm_object;
        num_vc = 1;
      end
      PCIe_sequence_item::set_tc2vc_table(num_vc, tc2vc_table);
-     `uvm_info("TC_VC_CFG", $sformatf("TC/VC CONFIGURATION : %s", PCIe_sequence_item::tc_vc_map_str()), UVM_LOW)
+     `uvm_info("TC_VC_CFG", $sformatf("TC/VC CONFIGURATION : %s", PCIe_sequence_item::tc_vc_map_str()), UVM_HIGH)
    endfunction
    
 endclass

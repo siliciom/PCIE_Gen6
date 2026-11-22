@@ -40,7 +40,7 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
 	   tx_ap=new("tx_ap",this);
    endfunction
    function void build_phase(uvm_phase phase);
-    `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_BUILD_PHASE",UVM_LOW)
+    `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_BUILD_PHASE",UVM_HIGH)
      super.build_phase(phase);
       pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
       replayed_item = PCIe_sequence_item::type_id::create("replayed_item");
@@ -51,10 +51,10 @@ class PCIe_EP_controller_driver extends uvm_driver #(PCIe_sequence_item);
         `uvm_fatal("NO_VIF", "EP_PIPE_INTERFACE_not_found")
     if (!uvm_config_db#(virtual PCIe_EP_interface)::get(this, "", "PCIe_EP_INTERFACE", ep_pipe_intf_rx))
         `uvm_fatal("NO_VIF", "EP_PIPE_INTERFACE_not_found")
-        `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_DRIVER_BUILD_PHASE",UVM_LOW)
+        `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_DRIVER_BUILD_PHASE",UVM_HIGH)
   endfunction
 task run_phase(uvm_phase phase);
-  `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_RUN_PHASE",UVM_LOW)
+  `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_DRIVER_RUN_PHASE",UVM_HIGH)
       `uvm_info("EP_CONTROLLER",$sformatf("DLCMSM_STATE_IS %s",ep_dl_model.DL_STATE.name()),UVM_LOW)
   forever begin
       if(!ep_pl_model.link_up)begin
@@ -208,7 +208,7 @@ task run_phase(uvm_phase phase);
       if(ep_dl_model.REPLAY_SCHEDULED_TYPE==STANDARD_REPLAY) begin
         if(replayed_item.seq_num>=N) begin
           tx_ap.write(replayed_item);
-          `uvm_info("EP_CONTROLLER","writing on the port now....",UVM_LOW)
+          `uvm_info("EP_CONTROLLER","writing on the port now....",UVM_HIGH)
         end
       end
       else if(ep_dl_model.REPLAY_SCHEDULED_TYPE==SELECTIVE_REPLAY) begin

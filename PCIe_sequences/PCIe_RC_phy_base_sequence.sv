@@ -25,10 +25,10 @@ class PCIe_RC_phy_base_sequence extends uvm_sequence#(PCIe_sequence_item);
 
     task body();
       pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
-     `uvm_info("RC_PHY","ENTERED_INTO_RC_PHY_BASE_SEQUENCE_TASK_BODY",UVM_LOW)
+     `uvm_info("RC_PHY","ENTERED_INTO_RC_PHY_BASE_SEQUENCE_TASK_BODY",UVM_HIGH)
        	start_item(pcie_seq_item);
        	finish_item(pcie_seq_item);
-     `uvm_info("RC_PHY","EXIT_FROM_RC_PHY_BASE_SEQUENCE_TASK_BODY",UVM_LOW)
+     `uvm_info("RC_PHY","EXIT_FROM_RC_PHY_BASE_SEQUENCE_TASK_BODY",UVM_HIGH)
     endtask
     
 endclass

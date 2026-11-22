@@ -75,7 +75,7 @@ class PCIe_RC_3DW_NonFlit_CFGWr0_sequence extends PCIe_RC_controller_base_sequen
       `uvm_error("3DW_NONFLIT_CFGWR0","randomize failed for cfg")
 
     `uvm_info("TL_CFG",$sformatf("Sending 3DW NonFlit CFGWr (Type0)"), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

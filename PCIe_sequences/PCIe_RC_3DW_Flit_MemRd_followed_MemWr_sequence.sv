@@ -72,16 +72,16 @@ class PCIe_RC_3DW_Flit_MemRd_followed_MemWr_sequence extends PCIe_RC_controller_
     grant_no = 0;     // order in which the sequencer gave the driver each item
     sent_no  = 0;     // order in which each item finished (TLP sent)
 
-    `uvm_info("FORK_SEQ", "FORK_STARTED : MemRd (READ) branch and MemWr (WRITE) branch start together. Expected ordering rule : A3", UVM_LOW)
+    `uvm_info("FORK_SEQ", "FORK_STARTED : MemRd (READ) branch and MemWr (WRITE) branch start together. Expected ordering rule : A3", UVM_HIGH)
 
     fork
       begin : MEMRD_BRANCH
-        `uvm_info("FORK_SEQ_MEMRD", $sformatf("MEMRD_BRANCH_STARTED : READ sequence item (MemRd) waiting for sequencer @%0t", $time), UVM_LOW)
+        `uvm_info("FORK_SEQ_MEMRD", $sformatf("MEMRD_BRANCH_STARTED : READ sequence item (MemRd) waiting for sequencer @%0t", $time), UVM_HIGH)
         t1_item = PCIe_sequence_item::type_id::create("t1_item");
         start_item(t1_item);
         grant_no++;
         `uvm_info("FORK_SEQ_MEMRD", $sformatf("MEMRD_GRANTED : READ (MemRd) got the sequencer as item #%0d %s @%0t",
-                  grant_no, (grant_no == 1) ? "-> MemRd is ISSUED FIRST" : "-> MemRd is ISSUED SECOND", $time), UVM_LOW)
+                  grant_no, (grant_no == 1) ? "-> MemRd is ISSUED FIRST" : "-> MemRd is ISSUED SECOND", $time), UVM_HIGH)
         if (!t1_item.randomize() with {
              // LTSSM information
              electrical_idle_test == 1'b0;
@@ -128,18 +128,18 @@ class PCIe_RC_3DW_Flit_MemRd_followed_MemWr_sequence extends PCIe_RC_controller_
                   t1_item.tag, t1_item.requester_id, t1_item.attr,
                   t1_item.attr[2], t1_item.attr[2] ? "SET -> ID-Based Ordering ENABLED" : "NOT SET",
                   t1_item.attr[1], t1_item.attr[1] ? "SET -> Relaxed Ordering ENABLED"  : "NOT SET",
-                  t1_item.attr[0], t1_item.attr[0] ? "SET -> No Snoop"                  : "NOT SET"), UVM_LOW)
+                  t1_item.attr[0], t1_item.attr[0] ? "SET -> No Snoop"                  : "NOT SET"), UVM_HIGH)
 
         `uvm_info("TL_MEMRD",$sformatf("Sending_3DW_Flit_MemRd (Memory Read, READ_REQ) - 1st TLP of MemRd followed by MemWr"), UVM_LOW)
-        t1_item.print();
+        if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) t1_item.print();
 
         finish_item(t1_item);
         sent_no++;
         `uvm_info("FORK_SEQ_MEMRD", $sformatf("MEMRD_SENT : READ (MemRd) tag=0x%0h attr=%03b finished as #%0d %s @%0t",
-                  t1_item.tag, t1_item.attr, sent_no, (sent_no == 1) ? "-> MemRd WENT FIRST" : "-> MemRd WENT SECOND", $time), UVM_LOW)
+                  t1_item.tag, t1_item.attr, sent_no, (sent_no == 1) ? "-> MemRd WENT FIRST" : "-> MemRd WENT SECOND", $time), UVM_HIGH)
       end : MEMRD_BRANCH
       begin : MEMWR_BRANCH
-        `uvm_info("FORK_SEQ_MEMWR", $sformatf("MEMWR_BRANCH_STARTED : WRITE sequence item (MemWr) waiting for sequencer @%0t", $time), UVM_LOW)
+        `uvm_info("FORK_SEQ_MEMWR", $sformatf("MEMWR_BRANCH_STARTED : WRITE sequence item (MemWr) waiting for sequencer @%0t", $time), UVM_HIGH)
         // [FORK] wait until the 1st branch (MemRd) has the sequencer, so the order is
         //        always 1st = MemRd, 2nd = MemWr and the expected rule is checked every run.
         wait (grant_no >= 1);
@@ -147,7 +147,7 @@ class PCIe_RC_3DW_Flit_MemRd_followed_MemWr_sequence extends PCIe_RC_controller_
         start_item(t2_item);
         grant_no++;
         `uvm_info("FORK_SEQ_MEMWR", $sformatf("MEMWR_GRANTED : WRITE (MemWr) got the sequencer as item #%0d %s @%0t",
-                  grant_no, (grant_no == 1) ? "-> MemWr is ISSUED FIRST" : "-> MemWr is ISSUED SECOND", $time), UVM_LOW)
+                  grant_no, (grant_no == 1) ? "-> MemWr is ISSUED FIRST" : "-> MemWr is ISSUED SECOND", $time), UVM_HIGH)
         if (!t2_item.randomize() with {
              // LTSSM information
              electrical_idle_test == 1'b0;
@@ -195,7 +195,7 @@ class PCIe_RC_3DW_Flit_MemRd_followed_MemWr_sequence extends PCIe_RC_controller_
                   t2_item.tag, t2_item.requester_id, t2_item.attr,
                   t2_item.attr[2], t2_item.attr[2] ? "SET -> ID-Based Ordering ENABLED" : "NOT SET",
                   t2_item.attr[1], t2_item.attr[1] ? "SET -> Relaxed Ordering ENABLED"  : "NOT SET",
-                  t2_item.attr[0], t2_item.attr[0] ? "SET -> No Snoop"                  : "NOT SET"), UVM_LOW)
+                  t2_item.attr[0], t2_item.attr[0] ? "SET -> No Snoop"                  : "NOT SET"), UVM_HIGH)
 
         //--------------------------------------------------------------
         // [ATTR] both TLPs are randomized now. Work out which Table 2-42
@@ -210,20 +210,20 @@ class PCIe_RC_3DW_Flit_MemRd_followed_MemWr_sequence extends PCIe_RC_controller_
                     " -> rule %s = %s : %s"},
                     "MemRd", t1_item.attr[2], t1_item.attr[1], t1_item.requester_id,
                     "MemWr", t2_item.attr[2], t2_item.attr[1], t2_item.requester_id,
-                    exp_rule, PCIe_ordering_rules::result_name(exp_res), exp_why), UVM_LOW)
+                    exp_rule, PCIe_ordering_rules::result_name(exp_res), exp_why), UVM_HIGH)
         end
 
         `uvm_info("TL_MEMWR",$sformatf("Sending_3DW_Flit_MemWr (Memory Write, POSTED) - 2nd TLP of MemRd followed by MemWr"), UVM_LOW)
-        t2_item.print();
+        if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) t2_item.print();
 
         finish_item(t2_item);
         sent_no++;
         `uvm_info("FORK_SEQ_MEMWR", $sformatf("MEMWR_SENT : WRITE (MemWr) tag=0x%0h attr=%03b finished as #%0d %s @%0t",
-                  t2_item.tag, t2_item.attr, sent_no, (sent_no == 1) ? "-> MemWr WENT FIRST" : "-> MemWr WENT SECOND", $time), UVM_LOW)
+                  t2_item.tag, t2_item.attr, sent_no, (sent_no == 1) ? "-> MemWr WENT FIRST" : "-> MemWr WENT SECOND", $time), UVM_HIGH)
       end : MEMWR_BRANCH
     join
 
-    `uvm_info("FORK_SEQ", "FORK_JOINED : both MemRd and MemWr are sent. See ORD_CHK ORDERING_DECISION for Table 2-42 rule A3", UVM_LOW)
+    `uvm_info("FORK_SEQ", "FORK_JOINED : both MemRd and MemWr are sent. See ORD_CHK ORDERING_DECISION for Table 2-42 rule A3", UVM_HIGH)
 
     `uvm_info("3DW_FLIT_MEMRD_FOLLOWED_MEMWR","EXIT_FROM_3DW_FLIT_MEMRD_FOLLOWED_MEMWR_SEQUENCE_BODY", UVM_LOW)
   endtask

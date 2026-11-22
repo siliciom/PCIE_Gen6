@@ -545,8 +545,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
       default: replay_cmd_str = "UNKNOWN";
     endcase
     // Print in organized format
-    `uvm_info("DLP_INFO", "───────────────────────────────────────────────", UVM_LOW)
-    `uvm_info("DLP_INFO", $sformatf("[%s]", label), UVM_LOW)
+    `uvm_info("DLP_INFO", "───────────────────────────────────────────────", UVM_HIGH)
+    `uvm_info("DLP_INFO", $sformatf("[%s]", label), UVM_HIGH)
     `uvm_info("DLP_INFO", 
       $sformatf("  Seq Num      : 10'd%0d (0x%3h)", flit_seq_num, flit_seq_num), 
       UVM_LOW)
@@ -555,14 +555,14 @@ class PCIe_sequence_item extends uvm_sequence_item;
       UVM_LOW)
     `uvm_info("DLP_INFO", 
       $sformatf("  Replay Cmd   : 2'b%0b (%s)", replay_cmd, replay_cmd_str), 
-      UVM_LOW)
+      UVM_HIGH)
     `uvm_info("DLP_INFO", 
       $sformatf("  DLLP Type    : 8'h%2h", dllp_type), 
-      UVM_LOW)
+      UVM_HIGH)
     `uvm_info("DLP_INFO", 
       $sformatf("  Prior Payload: %b | DLLP Type Bit: %b", prior_was_payload, type_of_dllp_payload), 
-      UVM_LOW)
-    `uvm_info("DLP_INFO", "───────────────────────────────────────────────", UVM_LOW)
+      UVM_HIGH)
+    `uvm_info("DLP_INFO", "───────────────────────────────────────────────", UVM_HIGH)
   endfunction
 
   //--------------------------------------------------------------------------
@@ -1057,7 +1057,7 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   // Generate OHC[4:0] bitmap
   //==========================================================================
   function void determine_ohc();
-   `uvm_info("PCIe_SEQUENCE_ITEM", $sformatf("ENTERED_INTO_DETERMINE_OHC_FOR_%s",pkt_mode.name()), UVM_LOW)
+   `uvm_info("PCIe_SEQUENCE_ITEM", $sformatf("ENTERED_INTO_DETERMINE_OHC_FOR_%s",pkt_mode.name()), UVM_HIGH)
     ohc = 5'b00000;
 
     determine_ohc_a();

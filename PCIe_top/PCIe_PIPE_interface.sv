@@ -668,7 +668,7 @@ interface PCIe_RC_interface(input logic pclk);
    always @(posedge pclk) begin
       if (!tl_off && (tl_checks_started == 1'b0)) begin
          tl_checks_started = 1'b1;
-         `uvm_info({SIDE,"_TL_STATUS"}, "TL assertions STARTED checking", UVM_LOW)
+         `uvm_info({SIDE,"_TL_STATUS"}, "TL assertions STARTED checking", UVM_HIGH)
       end
    end
 
@@ -687,7 +687,7 @@ interface PCIe_RC_interface(input logic pclk);
                 "  Completions received     : %0d\n",
                 "  TL assertion failures    : %0d\n",
                 "  TL assertions            : %s\n"},
-                tl_tx_cnt, tl_rx_cnt, tl_cpl_cnt, fail_cnt, result), UVM_LOW)
+                tl_tx_cnt, tl_rx_cnt, tl_cpl_cnt, fail_cnt, result), UVM_HIGH)
    end
 
    // [TL_ASSERT] end of TL assertions
@@ -1309,7 +1309,7 @@ interface PCIe_EP_interface(input logic pclk);
    always @(posedge pclk) begin
       if (!tl_off && (tl_checks_started == 1'b0)) begin
          tl_checks_started = 1'b1;
-         `uvm_info({SIDE,"_TL_STATUS"}, "TL assertions STARTED checking", UVM_LOW)
+         `uvm_info({SIDE,"_TL_STATUS"}, "TL assertions STARTED checking", UVM_HIGH)
       end
    end
 
@@ -1328,7 +1328,7 @@ interface PCIe_EP_interface(input logic pclk);
                 "  Completions sent         : %0d\n",
                 "  TL assertion failures    : %0d\n",
                 "  TL assertions            : %s\n"},
-                tl_req_cnt, tl_cpl_cnt, fail_cnt, result), UVM_LOW)
+                tl_req_cnt, tl_cpl_cnt, fail_cnt, result), UVM_HIGH)
    end
 
    // [TL_ASSERT] end of TL assertions

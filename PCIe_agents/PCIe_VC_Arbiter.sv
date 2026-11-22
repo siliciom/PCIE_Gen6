@@ -70,7 +70,7 @@ class PCIe_VC_Arbiter extends uvm_component;
     vc_q[v].push_back(item);
     n_push[v]++;
     `uvm_info("VC_ARB", $sformatf("Enqueued TC%0d -> %s : %s | queue depth%s",
-              item.tc, v.name(), item.convert2string(), depths_str()), UVM_LOW)
+              item.tc, v.name(), item.convert2string(), depths_str()), UVM_HIGH)
   endfunction
 
   function bit any_pending();
@@ -100,7 +100,7 @@ class PCIe_VC_Arbiter extends uvm_component;
       if (rc_tl_model.fc_tlp_can_send_now(vc_q[v][0])) begin
         n_round++;
         `uvm_info("VC_ARB", $sformatf("ROUND %0d : queues%s -> Arbitration winner: VC%0d (strict priority, VC7 highest / VC0 lowest)%s",
-                  n_round, depths_str(), v, (skipped == "") ? "" : {" | skipped :", skipped}), UVM_LOW)
+                  n_round, depths_str(), v, (skipped == "") ? "" : {" | skipped :", skipped}), UVM_HIGH)
         item   = vc_q[v].pop_front();
         vc_won = vc_id_e'(v);
         n_won[v]++;
@@ -150,7 +150,7 @@ class PCIe_VC_Arbiter extends uvm_component;
         s = {s, $sformatf("\n  VC%0d : queued=%0d sent=%0d left=%0d  max rounds lost in a row=%0d  rounds head blocked on credit=%0d",
                           v, n_push[v], n_won[v], vc_q[v].size(), starve_count_max[v], n_skip_credit[v])};
     s = {s, "\n  send order : ", won_order};
-    `uvm_info("VC_ARB", s, UVM_LOW)
+    `uvm_info("VC_ARB", s, UVM_HIGH)
     foreach (vc_q[v])
       if (vc_q[v].size() != 0)
         `uvm_error("VC_ARB", $sformatf("VC%0d : %0d TLP(s) never sent", v, vc_q[v].size()))

@@ -323,7 +323,7 @@ class PCIe_EP_DL_model extends uvm_component;
      `uvm_info("EP_DL_PROC","[DL_DATA_PROC] DL_ACTIVE :: STARTING_ACK_NAK_REPLAY_PROCESSING",UVM_LOW)
      forever begin
         if (EP_REPLAY_IN_PROGRESS) begin
-           `uvm_info("EP_DL_PROC","[DL_DATA_PROC] REPLAY_IN_PROGRESS :: REPLAYING_TX_RETRY_BUFFER",UVM_LOW)
+           `uvm_info("EP_DL_PROC","[DL_DATA_PROC] REPLAY_IN_PROGRESS :: REPLAYING_TX_RETRY_BUFFER",UVM_HIGH)
            handle_replay_from_buffer();
         end
         else if (NAK_SCHEDULED && !hold_nak) begin   // [DLL_TEST] hold_nak
@@ -711,12 +711,12 @@ class PCIe_EP_DL_model extends uvm_component;
 
   // Log the receiver error in register
   function void log_data_link_protocol_error();
-    `uvm_info("EP_DL_MODEL","ERROR: Data Link Protocol Error Logged",UVM_LOW);
+    `uvm_info("EP_DL_MODEL","ERROR: Data Link Protocol Error Logged",UVM_HIGH);
   endfunction
 
   // NAK Schedule Implementation
   function void execute_nak_schedule(int id);
-    `uvm_info("EP_DL_MODEL","Entered nak schedule task",UVM_LOW);
+    `uvm_info("EP_DL_MODEL","Entered nak schedule task",UVM_HIGH);
 
     case (id)
       0: begin
@@ -787,7 +787,7 @@ class PCIe_EP_DL_model extends uvm_component;
 
   // ACK Schedule Implementation
   function void execute_ack_schedule(int id);
-    `uvm_info("EP_DL_MODEL","Entered execute ack schedule",UVM_LOW);
+    `uvm_info("EP_DL_MODEL","Entered execute ack schedule",UVM_HIGH);
     rx_flit_accepted = 1'b1;   // [DLL_TEST] this flit is taken in order
 
     case (id)
@@ -841,7 +841,7 @@ class PCIe_EP_DL_model extends uvm_component;
     sequence_number = {dlp[0][1:0],dlp[1]};
     is_nop = (!(sequence_number == 10'h0) && dlp[0][7:6] == 2'b00);
     prior_was_payload = dlp[0][5];
-    `uvm_info("SEQ_DEBUG",$sformatf("dlp=%p :: %b :: %b",dlp,dlp[0][1:0],dlp[1]),UVM_LOW)
+    `uvm_info("SEQ_DEBUG",$sformatf("dlp=%p :: %b :: %b",dlp,dlp[0][1:0],dlp[1]),UVM_HIGH)
     replay_cmd = dlp[0][3:2];   // [FC FIX] was dlp[4] : that is DLLP payload (now carries InitFC/UpdateFC)
     flit_usage = dlp[0][7:6];
     is_payload = (flit_usage == 2'b01);
@@ -895,24 +895,24 @@ class PCIe_EP_DL_model extends uvm_component;
       else discard_flit(0);
     end
     else begin
-      `uvm_info("EP_DL_MODEL","ENTERED_NORMAL_DL_TASK",UVM_LOW);
+      `uvm_info("EP_DL_MODEL","ENTERED_NORMAL_DL_TASK",UVM_HIGH);
 
       if (NAK_SCHEDULED) begin
         if (NAK_SCHEDULED_TYPE == STANDARD_NAK) standard_nak_procedure();
         else selective_nak_procedure();
       end
       else begin
-        `uvm_info("EP_DL_MODEL","ENTERED_NORMAL_DL_TASK",UVM_LOW);
+        `uvm_info("EP_DL_MODEL","ENTERED_NORMAL_DL_TASK",UVM_HIGH);
         if (duplicate_sequence_number()) discard_flit(0);
         else if (bad_sequence_number()) begin
-          `uvm_info("EP_DL_MODEL","ENTERED_NAK_SCHEDULE_TASK",UVM_LOW);
+          `uvm_info("EP_DL_MODEL","ENTERED_NAK_SCHEDULE_TASK",UVM_HIGH);
           n_seq_gap_detected++;   // [DLL_TEST]
           `uvm_info("EP_DL_TEST", $sformatf("SEQUENCE_GAP_DETECTED : expected seq=%0d received seq=%0d -> Nak",
                     NEXT_EXPECTED_RX_FLIT_SEQ_NUM, IMPLICIT_RX_FLIT_SEQ_NUM), UVM_NONE)
           execute_nak_schedule(2);
         end
         else begin
-          `uvm_info("EP_DL_MODEL","ENTERED_ACK_SCHEDULE_TASK",UVM_LOW);
+          `uvm_info("EP_DL_MODEL","ENTERED_ACK_SCHEDULE_TASK",UVM_HIGH);
           execute_ack_schedule(0);
 	  ACK_SCHEDULED=1;
           success = 1;
@@ -941,7 +941,7 @@ class PCIe_EP_DL_model extends uvm_component;
       REPLAY_SCHEDULED_TYPE = SELECTIVE_REPLAY;
     end
 
-    `uvm_info("EP_DL_MODEL",$sformatf("PROCESS_RECIEVED_ACK_NACK :: N = %d :: is_nak = %d :: is_ack = %d",N,is_nak,is_ack),UVM_LOW);
+    `uvm_info("EP_DL_MODEL",$sformatf("PROCESS_RECIEVED_ACK_NACK :: N = %d :: is_nak = %d :: is_ack = %d",N,is_nak,is_ack),UVM_HIGH);
 
     if (N == 10'h0) return;
 
@@ -969,7 +969,7 @@ class PCIe_EP_DL_model extends uvm_component;
       end
     end
     else if (is_nak) begin
-      `uvm_info("EP_DL_MODEL","Entered the nak logic",UVM_LOW);
+      `uvm_info("EP_DL_MODEL","Entered the nak logic",UVM_HIGH);
 
       if (N == mod1023_sub(NEXT_TX_FLIT_SEQ_NUM,10'h1)) begin
         NAK_IGNORE_FLIT_SEQ_NUM = N;
@@ -988,7 +988,7 @@ class PCIe_EP_DL_model extends uvm_component;
   endfunction
 
   function void purge_tx_retry_buffer(bit [`PCIe_SEQ_NUM_W-1:0] N);
-    `uvm_info("EP_DL_MODEL",$sformatf("PURGING: Entry size of buffer :: %d",tx_retry_buffer.size()),UVM_LOW);
+    `uvm_info("EP_DL_MODEL",$sformatf("PURGING: Entry size of buffer :: %d",tx_retry_buffer.size()),UVM_HIGH);
 
     while (tx_retry_buffer.size() > 0) begin
       bit [`PCIe_SEQ_NUM_W-1:0] S = tx_retry_buffer[0].seq_num;
@@ -1005,7 +1005,7 @@ class PCIe_EP_DL_model extends uvm_component;
   endfunction
 
   function void schedule_replay(bit [`PCIe_SEQ_NUM_W-1:0] start_seq);
-    `uvm_info("EP_DL_MODEL","Entered the replay schedule task_",UVM_LOW);
+    `uvm_info("EP_DL_MODEL","Entered the replay schedule task_",UVM_HIGH);
     REPLAY_SCHEDULED = 1'b1;
     EP_REPLAY_IN_PROGRESS = 1'b1;
     TX_REPLAY_FLIT_SEQ_NUM = start_seq;
@@ -1033,7 +1033,7 @@ class PCIe_EP_DL_model extends uvm_component;
     if (is_valid && !is_idle && is_explicit && (N != 10'h0)) begin
       IMPLICIT_RX_FLIT_SEQ_NUM = N;
       NON_IDLE_EXPLICIT_SEQ_NUM_FLIT_RCVD = 1'b1;
-      `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_ASSIGNED_TO_N",UVM_LOW);
+      `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_ASSIGNED_TO_N",UVM_HIGH);
     end
 
     // 2. No Change Rules
@@ -1045,7 +1045,7 @@ class PCIe_EP_DL_model extends uvm_component;
       (is_valid && is_payload && !is_explicit && (NAK_WITHDRAWAL_ALLOWED && !prior_was_payload))
     ) begin
       IMPLICIT_RX_FLIT_SEQ_NUM = IMPLICIT_RX_FLIT_SEQ_NUM;
-      `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_NO_CHANGE",UVM_LOW);
+      `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_NO_CHANGE",UVM_HIGH);
     end
 
     // 3. Increment Rules
@@ -1054,7 +1054,7 @@ class PCIe_EP_DL_model extends uvm_component;
       (is_valid && is_payload && !is_explicit && (!NAK_WITHDRAWAL_ALLOWED || prior_was_payload))
     ) begin
       IMPLICIT_RX_FLIT_SEQ_NUM = mod1023_add(IMPLICIT_RX_FLIT_SEQ_NUM,10'h1);
-      `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_INCREMENTED",UVM_LOW);
+      `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_INCREMENTED",UVM_HIGH);
     end
 
     // 4. Decrement Rules
@@ -1066,13 +1066,13 @@ class PCIe_EP_DL_model extends uvm_component;
       !prior_was_payload
     ) begin
       IMPLICIT_RX_FLIT_SEQ_NUM = mod1023_sub(IMPLICIT_RX_FLIT_SEQ_NUM,10'h1);
-      `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_DECREMENTED",UVM_LOW);
+      `uvm_info("EP_DL_MODEL","IMPLICIT_NUMBER_DECREMENTED",UVM_HIGH);
     end
   endfunction
 
   // DL model consumes TL output, creates the DLP, then publishes to PL.
   function void write(PCIe_sequence_item item);
-    `uvm_info("EP_DL_MODEL",$sformatf("DL -> PL: item from driver = %p",item.tlp_data),UVM_LOW)
+    `uvm_info("EP_DL_MODEL",$sformatf("DL -> PL: item from driver = %p",item.tlp_data),UVM_HIGH)
     form_dl_packet(item.tlp_data,item.is_payload,item.dlp_flit_out);
 
     // [DL_ASSERT] used by DL_TLP_ONLY_IN_ACTIVE_CHECK (TLP flit only in DL_ACTIVE)
@@ -1456,7 +1456,7 @@ endfunction
     int unsigned v;
     v = it.fc_vc;
     `uvm_info("EP_DL_FC", $sformatf("[FC_TL->DL] %s VC%0d :: DL_EXTRACTED %s  (from %s, reason=%s)",
-              it.fc_kind.name(), v, it.fc_values_str(), it.fc_origin, it.fc_reason), UVM_LOW)
+              it.fc_kind.name(), v, it.fc_values_str(), it.fc_origin, it.fc_reason), UVM_HIGH)
     if (it.fc_kind == FC_ADV_INIT || it.fc_kind == FC_ADV_UPDATE) begin
       for (int c = 0; c < 3; c++)
         begin
@@ -1523,9 +1523,9 @@ endfunction
       for (int c = 0; c < 3; c++) q.push_back(fc_build_shared(typ, c, v));     // [FC SHARED]
       `uvm_info("EP_DL_FC", $sformatf("[FC_DL_TX] %s ROUND VC%0d :: advertising  DED: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d  SHR: PH=%0d PD=%0d | NPH=%0d NPD=%0d | CPLH=%0d CPLD=%0d",
                 nm, v, adv_h[v][0], adv_d[v][0], adv_h[v][1], adv_d[v][1], adv_h[v][2], adv_d[v][2],
-                adv_h_shr[v][0], adv_d_shr[v][0], adv_h_shr[v][1], adv_d_shr[v][1], adv_h_shr[v][2], adv_d_shr[v][2]), UVM_LOW)
+                adv_h_shr[v][0], adv_d_shr[v][0], adv_h_shr[v][1], adv_d_shr[v][1], adv_h_shr[v][2], adv_d_shr[v][2]), UVM_HIGH)
       foreach (q[i]) begin
-        `uvm_info("EP_DL_FC", $sformatf("[FC_DL_TX] %s VC%0d %0d/6 : %s", nm, v, i+1, PCIe_sequence_item::fc_dllp_str(q[i])), UVM_LOW)
+        `uvm_info("EP_DL_FC", $sformatf("[FC_DL_TX] %s VC%0d %0d/6 : %s", nm, v, i+1, PCIe_sequence_item::fc_dllp_str(q[i])), UVM_HIGH)
         send_dllp_flit(q[i]);
         if (typ == `PCIe_FC_TYPE_INITFC1) n_initfc1_tx++; else n_initfc2_tx++;
       end
@@ -1544,7 +1544,7 @@ endfunction
           v = fc_build_dedicated(`PCIe_FC_TYPE_UPDATEFC, c, vc);
           `uvm_info("EP_DL_FC", $sformatf("[FC_DL_TX] UpdateFC VC%0d class %s : CREDITS_ALLOCATED %s=%0d %s=%0d :: %s",
                     vc, PCIe_sequence_item::fc_cls_name(c), PCIe_sequence_item::fc_hdr_name(c), adv_h[vc][c],
-                    PCIe_sequence_item::fc_dat_name(c), adv_d[vc][c], PCIe_sequence_item::fc_dllp_str(v)), UVM_LOW)
+                    PCIe_sequence_item::fc_dat_name(c), adv_d[vc][c], PCIe_sequence_item::fc_dllp_str(v)), UVM_HIGH)
           if (fc_multi_vc()) wait (fc_tx_allowed);
           fc_send_active(v);
           n_updfc_tx++;
@@ -1554,7 +1554,7 @@ endfunction
           v = fc_build_shared(`PCIe_FC_TYPE_UPDATEFC, c, vc);
           `uvm_info("EP_DL_FC", $sformatf("[FC_DL_TX] UpdateFC-SHARED VC%0d class %s : SHARED CREDITS_ALLOCATED %s=%0d %s=%0d :: %s",
                     vc, PCIe_sequence_item::fc_cls_name(c), PCIe_sequence_item::fc_hdr_name(c), adv_h_shr[vc][c],
-                    PCIe_sequence_item::fc_dat_name(c), adv_d_shr[vc][c], PCIe_sequence_item::fc_dllp_str(v)), UVM_LOW)
+                    PCIe_sequence_item::fc_dat_name(c), adv_d_shr[vc][c], PCIe_sequence_item::fc_dllp_str(v)), UVM_HIGH)
           if (fc_multi_vc()) wait (fc_tx_allowed);
           fc_send_active(v);
           n_updfc_tx_shr++;
@@ -1603,11 +1603,11 @@ endfunction
     v = {dlp[2], dlp[3], dlp[4], dlp[5]};
     if (!PCIe_sequence_item::fc_is_dllp(v)) return;
     PCIe_sequence_item::fc_decode(v, typ, cls, shared, vc, hs, hfc, ds, dfc);
-    `uvm_info("EP_DL_FC", $sformatf("[FC_DL_RX] %s", PCIe_sequence_item::fc_dllp_str(v)), UVM_LOW)
+    `uvm_info("EP_DL_FC", $sformatf("[FC_DL_RX] %s", PCIe_sequence_item::fc_dllp_str(v)), UVM_HIGH)
     // [TC_VC] OLD : if (vc != `PCIe_FC_VC0) return;   // only VC0 exists
     if (!fc_vc_on(vc)) begin
       n_fc_dllp_dis_vc++;
-      `uvm_info("EP_DL_FC", $sformatf("[FC_DL_RX] VC%0d is not enabled on this Port -> FC DLLP ignored", vc), UVM_LOW)
+      `uvm_info("EP_DL_FC", $sformatf("[FC_DL_RX] VC%0d is not enabled on this Port -> FC DLLP ignored", vc), UVM_HIGH)
       return;
     end
     c    = cls;
@@ -1678,7 +1678,7 @@ endfunction
     `uvm_info("EP_DL_FC", $sformatf("[FC_DL->TL] %s VC%0d class %s : %s=%0d %s=%0d  (%s %s)",
               it.fc_kind.name(), vc, PCIe_sequence_item::fc_cls_name(c),
               PCIe_sequence_item::fc_hdr_name(c), hfc, PCIe_sequence_item::fc_dat_name(c), dfc,
-              PCIe_sequence_item::fc_type_name(typ), shared ? "SHARED" : "DEDICATED"), UVM_LOW)
+              PCIe_sequence_item::fc_type_name(typ), shared ? "SHARED" : "DEDICATED"), UVM_HIGH)
     fc_tl_ap.write(it);
   endfunction
 
@@ -1836,7 +1836,7 @@ endfunction
         peer_h_shr[0][0], peer_d_shr[0][0], peer_h_shr[0][1], peer_d_shr[0][1], peer_h_shr[0][2], peer_d_shr[0][2],
         n_initfc1_tx, n_initfc1_rx, n_initfc2_tx, n_initfc2_rx, n_updfc_tx, n_updfc_rx,
         n_updfc_tx_shr, n_updfc_rx_shr,
-        fi1_done(), fi2_done(), fc_vc_report_str()), UVM_LOW)
+        fi1_done(), fi2_done(), fc_vc_report_str()), UVM_HIGH)
     flit_cnt_report();   // [FLIT_CNT]
   endfunction
 

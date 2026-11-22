@@ -31,7 +31,7 @@ class PCIe_RC_3DW_flit_sequence extends PCIe_RC_controller_base_sequence;
   endfunction
 
   task body();
-    `uvm_info("RC_3DW","ENTERED_INTO_RC_3DW_SEQUENCE_BODY", UVM_LOW)
+    `uvm_info("RC_3DW","ENTERED_INTO_RC_3DW_SEQUENCE_BODY", UVM_HIGH)
 
     // 3DW Memory Write (MWr_32)
     pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
@@ -89,8 +89,8 @@ class PCIe_RC_3DW_flit_sequence extends PCIe_RC_controller_base_sequence;
        })
       `uvm_error("RC_3DW","randomize failed for 3DW MWr")
 
-    `uvm_info("TL_RC_3DW",$sformatf("Sending 3DW MWr"), UVM_LOW)
-    pcie_seq_item.print();
+    `uvm_info("TL_RC_3DW",$sformatf("Sending 3DW MWr"), UVM_HIGH)
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
 
     finish_item(pcie_seq_item);
 

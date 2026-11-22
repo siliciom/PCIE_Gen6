@@ -31,7 +31,7 @@ class PCIe_EP_controller_agent extends uvm_agent;
     endfunction
 
     function void build_phase(uvm_phase phase);
-     `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_AGENT_BUILD_PHASE",UVM_LOW)
+     `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_AGENT_BUILD_PHASE",UVM_HIGH)
       super.build_phase(phase);   
          ep_controller_driver    = PCIe_EP_controller_driver::type_id::create("ep_controller_driver",this);
          ep_controller_monitor   = PCIe_EP_controller_monitor::type_id::create("ep_controller_monitor",this);
@@ -39,11 +39,11 @@ class PCIe_EP_controller_agent extends uvm_agent;
          ep_tl_model = PCIe_EP_TL_model::type_id::create("ep_tl_model", this);
          ep_dl_model = PCIe_EP_DL_model::type_id::create("ep_dl_model", this);
          ep_pl_model = PCIe_EP_PL_model::type_id::create("ep_pl_model", this);
-      `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_AGENT_BUILD_PHASE",UVM_LOW)
+      `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_AGENT_BUILD_PHASE",UVM_HIGH)
     endfunction
   
     function void connect_phase(uvm_phase phase);
-     `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
+     `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_AGENT_CONNECT_PHASE",UVM_HIGH)
        super.connect_phase(phase);
        ep_controller_driver.seq_item_port.connect(ep_controller_sequencer.seq_item_export);
 	   ep_controller_driver.tx_ap.connect(ep_tl_model.tl_imp);
@@ -59,7 +59,7 @@ class PCIe_EP_controller_agent extends uvm_agent;
        ep_dl_model.fc_tl_ap.connect(ep_tl_model.fc_dl_imp);
        // [ADDED] EP controller monitor -> EP DL : 242B RC->EP flit + is_valid, once per flit
        ep_controller_monitor.ep_mon_dl_242b_ap.connect(ep_dl_model.dl_mon_242b_imp);
-      `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_AGENT_CONNECT_PHASE",UVM_LOW)
+      `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_AGENT_CONNECT_PHASE",UVM_HIGH)
     endfunction
   
 endclass

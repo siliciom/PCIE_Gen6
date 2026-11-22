@@ -25,7 +25,7 @@ class PCIe_EP_controller_base_sequence extends uvm_sequence#(PCIe_sequence_item)
 
    task body();
       pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
-     `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_BASE_SEQUENCE_TASK_BODY",UVM_LOW)
+     `uvm_info("EP_CONTROLLER","ENTERED_INTO_EP_CONTROLLER_BASE_SEQUENCE_TASK_BODY",UVM_HIGH)
       repeat(1)
       begin
        start_item(pcie_seq_item);
@@ -33,7 +33,7 @@ class PCIe_EP_controller_base_sequence extends uvm_sequence#(PCIe_sequence_item)
 	     pcie_seq_item.is_payload=1;
        finish_item(pcie_seq_item);
       end
-      `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_BASE_SEQUENCE_TASK_BODY",UVM_LOW)
+      `uvm_info("EP_CONTROLLER","EXIT_FROM_EP_CONTROLLER_BASE_SEQUENCE_TASK_BODY",UVM_HIGH)
     endtask
 
 endclass

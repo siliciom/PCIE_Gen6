@@ -174,7 +174,7 @@ class PCIe_RC_4DW_Flit_FetchAdd_1dwPayload_sequence extends PCIe_RC_controller_b
       `uvm_error("4DW_FLIT_FETCHADD_1DW","randomize failed for seed MemWr")
 
     `uvm_info("TL_MWR", $sformatf("STEP 1 : Sending 4DW Flit MemWr (seed 0x%0h) addr=0x%0h", m_seed, m_addr), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
     finish_item(pcie_seq_item);
   endtask
 
@@ -226,7 +226,7 @@ class PCIe_RC_4DW_Flit_FetchAdd_1dwPayload_sequence extends PCIe_RC_controller_b
 
     `uvm_info("TL_ATOMIC", $sformatf("STEP 2 : Sending 4DW Flit %s addr=0x%0h operand1=0x%0h operand2=0x%0h",
               PCIe_sequence_item::atomic_name(m_op, m_operand_dw), m_addr, m_operand1, m_operand2), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
     finish_item(pcie_seq_item);
   endtask
 
@@ -277,7 +277,7 @@ class PCIe_RC_4DW_Flit_FetchAdd_1dwPayload_sequence extends PCIe_RC_controller_b
       `uvm_error("4DW_FLIT_FETCHADD_1DW","randomize failed for readback MemRd")
 
     `uvm_info("TL_MRD", $sformatf("STEP 4 : Sending 4DW Flit MemRd (readback) addr=0x%0h", m_addr), UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
     finish_item(pcie_seq_item);
   endtask
 

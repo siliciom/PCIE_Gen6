@@ -137,7 +137,7 @@ class PCIe_EP_PL_model extends uvm_component;
    endfunction
 
    function void build_phase(uvm_phase phase);
-    `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_PL_MODEL_BUILD_PHASE",UVM_LOW)
+    `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_PL_MODEL_BUILD_PHASE",UVM_HIGH)
       super.build_phase(phase);
        pcie_seq_item = PCIe_sequence_item::type_id::create("pcie_seq_item");
       if(!uvm_config_db#(PCIe_env_config)::get(this,"","PCIe_env_config",pcie_ecfg))
@@ -148,14 +148,14 @@ class PCIe_EP_PL_model extends uvm_component;
             `uvm_fatal("NO_VIF", "EC_PIPE_INTERFACE_not_found")
       uvm_ep_l0_to_dl_ev = uvm_event_pool::get_global("ep_l0_to_dl_event");
        //if(pcie_ecfg.mode == FLIT)
-      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_PL_MODEL_BUILD_PHASE",UVM_HIGH)
     endfunction
    
    task reset_phase(uvm_phase phase);
      phase.raise_objection(this);
    
      `uvm_info("PCIE_EP_PL_MODEL",
-               "Entering RESET phase", UVM_LOW)
+               "Entering RESET phase", UVM_HIGH)
         polynomial = `PCIe_PL_SCRAMBLER_POLYNOMIAL;
        // polynomial = 23'b01000010000000100100101;
         reset_scrambler();
@@ -199,7 +199,7 @@ class PCIe_EP_PL_model extends uvm_component;
         ep_rx_idle_count   = 0;
         for (int i = 0; i < `PCIe_TS_OS_SIZE; i++) ep_rx_os_sym[i] = 8'h00;
 
-        `uvm_info("PCIE_EP_PL_MODEL","Reset deasserted", UVM_LOW)
+        `uvm_info("PCIE_EP_PL_MODEL","Reset deasserted", UVM_HIGH)
 
         phase.drop_objection(this);
    
@@ -341,14 +341,14 @@ class PCIe_EP_PL_model extends uvm_component;
            ep_cur_rate = RATE_GEN1;
            ep_adv_rate = RATE_GEN1;
            `uvm_info("EP_LTSSM",$sformatf("DIRECTED_RECOVERY_ENABLED_TARGET_GEN=%0d_STARTING_AT=%s",
-                     pcie_seq_item.target_gen, ep_cur_rate.name()),UVM_LOW)
+                     pcie_seq_item.target_gen, ep_cur_rate.name()),UVM_HIGH)
         end
         else begin
            // Preserve the existing single link-up behaviour (Gen6 / 3'b101)
            ep_cur_rate = RATE_GEN6;
            ep_adv_rate = RATE_GEN6;
            `uvm_info("EP_LTSSM",$sformatf("DIRECTED_RECOVERY_DISABLED_SINGLE_LINKUP_AT=%s",
-                     ep_cur_rate.name()),UVM_LOW)
+                     ep_cur_rate.name()),UVM_HIGH)
         end
         // [TIMEOUT_TEST] start directly in the requested state/substate.
         timeout_test_done = 1'b0;
@@ -373,7 +373,7 @@ class PCIe_EP_PL_model extends uvm_component;
                  endcase
                  if (electrical_idle_test_done) break;
                  if (no_receiver_test && detect_fail_count >= 1) begin
-                    `uvm_info("EP_LTSSM","EP_NO_RECEIVER_TEST_FAILED_RECEIVER_DETECTION",UVM_LOW)
+                    `uvm_info("EP_LTSSM","EP_NO_RECEIVER_TEST_FAILED_RECEIVER_DETECTION",UVM_HIGH)
                     break;
                  end
               end
@@ -509,23 +509,23 @@ class PCIe_EP_PL_model extends uvm_component;
     task ep_state_detect_quiet(PCIe_sequence_item item);
        bit is_timeout_target;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_DETECT_QUIET);
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        `uvm_info("EP_LTSSM","LTSSM_STATE_DETECT",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_DETECT_Quiet",UVM_LOW)
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        //================Drive Default PIPE Signals=======================
        ep_pipe_intf_tx.tx_elec_idle   <= item.tx_elec_idle;
        ep_pipe_intf_tx.tx_valid      <= 1'b0;
        ep_pipe_intf_tx.rate          <= item.rate;
-       `uvm_info("EP_LTSSM","Driving_PIPE_Signals",UVM_LOW)
-       `uvm_info("EP_LTSSM",$sformatf("TxElecIdle  = %0b",item.tx_elec_idle),UVM_LOW)
-       `uvm_info("EP_LTSSM",$sformatf("TxDataValid = %0b",item.tx_valid),UVM_LOW)
-       `uvm_info("EP_LTSSM",$sformatf("Rate        = %0b",item.rate),UVM_LOW)
+       `uvm_info("EP_LTSSM","Driving_PIPE_Signals",UVM_HIGH)
+       `uvm_info("EP_LTSSM",$sformatf("TxElecIdle  = %0b",item.tx_elec_idle),UVM_HIGH)
+       `uvm_info("EP_LTSSM",$sformatf("TxDataValid = %0b",item.tx_valid),UVM_HIGH)
+       `uvm_info("EP_LTSSM",$sformatf("Rate        = %0b",item.rate),UVM_HIGH)
        if (item.electrical_idle_test) begin
           electrical_idle_test_done = 1'b1;
-          `uvm_info("EP_LTSSM","EP_Electrical_Idle_Test_EP_entering_DETECT_QUIET",UVM_LOW)
-          `uvm_info("EP_LTSSM",$sformatf("EP Verify: tx_elec_idle=%0b tx_valid=%0b rate=%02b",item.tx_elec_idle, item.tx_valid, item.rate),UVM_LOW)
-          `uvm_info("EP_LTSSM","EP Electrical Idle Test: Intentionally remaining in DETECT.QUIET",UVM_LOW)
+          `uvm_info("EP_LTSSM","EP_Electrical_Idle_Test_EP_entering_DETECT_QUIET",UVM_HIGH)
+          `uvm_info("EP_LTSSM",$sformatf("EP Verify: tx_elec_idle=%0b tx_valid=%0b rate=%02b",item.tx_elec_idle, item.tx_valid, item.rate),UVM_HIGH)
+          `uvm_info("EP_LTSSM","EP Electrical Idle Test: Intentionally remaining in DETECT.QUIET",UVM_HIGH)
            return;
        end
        //===============Wait for Detect.Quiet Timer or Electrical Idle Break==============
@@ -536,7 +536,7 @@ class PCIe_EP_PL_model extends uvm_component;
            end
            begin
               ep_ltssm_timer(`PCIe_LTSSM_T_DETECT_QUIET);
-              `uvm_info("EP_LTSSM","12ms timeout in DETECT_QUIET -> DETECT_ACTIVE",UVM_LOW)
+              `uvm_info("EP_LTSSM","12ms timeout in DETECT_QUIET -> DETECT_ACTIVE",UVM_HIGH)
            end
         join_any
         disable fork;
@@ -547,7 +547,7 @@ class PCIe_EP_PL_model extends uvm_component;
         end
 
         //===============Inform PHY to Start Receiver Detection==============
-       `uvm_info("EP_LTSSM","Request_sent_to_PHY_to_Start_Receiver_Detection",UVM_LOW)
+       `uvm_info("EP_LTSSM","Request_sent_to_PHY_to_Start_Receiver_Detection",UVM_HIGH)
        `uvm_info("EP_LTSSM","Transition_DETECT_Quiet_DETECT_Active",UVM_LOW)
         ep_detect_state = DETECT_ACTIVE;
        `uvm_info("EP_LTSSM",$sformatf("STATE=%s",ep_detect_state),UVM_LOW)
@@ -559,20 +559,20 @@ class PCIe_EP_PL_model extends uvm_component;
         bit is_timeout_target;
         timeout_occured = 1'b0;
         is_timeout_target = ep_is_timeout_target(LTSSM_TO_DETECT_ACTIVE);
-        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
         `uvm_info("EP_LTSSM","LTSSM_STATE_DETECT",UVM_LOW)
         `uvm_info("EP_LTSSM","SUB_STATE_DETECT_Active",UVM_LOW)
-        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
         //===================Wait for PHY to Start Receiver Detection===================
         // `uvm_info("EP_LTSSM","Waiting for PHY to Assert TxDetectRx...",UVM_LOW)
         // wait(ep_pipe_intf_tx.tx_detect_rx == 1'b1);
         //Request PHY to perform receiver detection
          ep_present =1;
-        `uvm_info("EP_LTSSM",$sformatf("EP_PRESENT=%0d",ep_present),UVM_LOW)
+        `uvm_info("EP_LTSSM",$sformatf("EP_PRESENT=%0d",ep_present),UVM_HIGH)
          ep_pipe_intf_tx.tx_detect_rx <= 1'b1;
-        `uvm_info("EP_LTSSM","RC_MAC_Asserted_TxDetectRx",UVM_LOW)
+        `uvm_info("EP_LTSSM","RC_MAC_Asserted_TxDetectRx",UVM_HIGH)
         //==================Wait for Receiver Detection Completion======================
-        `uvm_info("EP_LTSSM","Waiting_for_PHY_Receiver_Detection_Result...",UVM_LOW)
+        `uvm_info("EP_LTSSM","Waiting_for_PHY_Receiver_Detection_Result...",UVM_HIGH)
         fork : EP_DETECT_ACTIVE_WATCHDOG
            begin
               if (!is_timeout_target) wait(ep_pipe_intf_tx.phy_status == 1'b1);
@@ -595,11 +595,11 @@ class PCIe_EP_PL_model extends uvm_component;
            ep_detect_state = DETECT_QUIET;
            return;
         end
-        `uvm_info("EP_LTSSM",$sformatf("phy_status = %0b  rx_status = %03b",ep_pipe_intf_tx.phy_status,ep_pipe_intf_tx.rx_status),UVM_LOW)
+        `uvm_info("EP_LTSSM",$sformatf("phy_status = %0b  rx_status = %03b",ep_pipe_intf_tx.phy_status,ep_pipe_intf_tx.rx_status),UVM_HIGH)
         //=================Receiver Found===================================
         if(ep_pipe_intf_tx.rx_status == 3'b011)
          begin
-           `uvm_info("EP_LTSSM","Receiver_Detection_SUCCESS",UVM_LOW)
+           `uvm_info("EP_LTSSM","Receiver_Detection_SUCCESS",UVM_HIGH)
             ep_pipe_intf_tx.tx_elec_idle <= 1'b0;
             ep_main_state    = POLLING;
             ep_poll_state    = POLLING_ACTIVE;
@@ -608,11 +608,11 @@ class PCIe_EP_PL_model extends uvm_component;
         //=================Receiver Not Found===============================
         else
          begin
-           `uvm_info("EP_LTSSM","Receiver_Detection_FAILED",UVM_LOW)
+           `uvm_info("EP_LTSSM","Receiver_Detection_FAILED",UVM_HIGH)
             ep_detect_state = DETECT_QUIET;
             if (no_receiver_test) begin
                detect_fail_count = detect_fail_count + 1;
-               `uvm_info("EP_LTSSM",$sformatf("EP_No_Receiver_Test_detect_fail_count=%0d",detect_fail_count),UVM_LOW)
+               `uvm_info("EP_LTSSM",$sformatf("EP_No_Receiver_Test_detect_fail_count=%0d",detect_fail_count),UVM_HIGH)
             end
            `uvm_info("EP_LTSSM","LTSSM_Transition_DETECT_Active_TO_DETECT_Quiet",UVM_LOW)
          end
@@ -625,16 +625,16 @@ class PCIe_EP_PL_model extends uvm_component;
         bit is_timeout_target;
         timeout_occured = 1'b0;
         is_timeout_target = ep_is_timeout_target(LTSSM_TO_POLLING_ACTIVE);
-        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
         `uvm_info("EP_LTSSM","LTSSM_STATE_POLLING",UVM_LOW)
         `uvm_info("EP_LTSSM","SUB_STATE_POLLING_ACTIVE",UVM_LOW)
-        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
          ep_pipe_intf_tx.tx_elec_idle <= 1'b0;
          // Drive the currently negotiated rate on the sideband (RC drives
          // rc_cur_rate in Polling.Active); for directed recovery this is
          // Gen1 until the first directed speed change.
          ep_pipe_intf_tx.rate <= ep_cur_rate;
-         `uvm_info("EP_LTSSM",$sformatf("POLLING_ACTIVE_DRIVING_RATE=%0b_%s",ep_cur_rate,ep_cur_rate.name()),UVM_LOW)
+         `uvm_info("EP_LTSSM",$sformatf("POLLING_ACTIVE_DRIVING_RATE=%0b_%s",ep_cur_rate,ep_cur_rate.name()),UVM_HIGH)
          build_ep_ts1();
          //print_ts1();
          fork : EP_POLLING_ACTIVE_WATCHDOG
@@ -643,9 +643,9 @@ class PCIe_EP_PL_model extends uvm_component;
                   // THREAD 1 : RC -> EP 8 TS1 CHECKER
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_RC_8_TS1_CHECKER",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_RC_8_TS1_CHECKER",UVM_HIGH)
                          ep_check_rc_ts1(`PCIe_TS1_RX_COUNT,rx_ts1_8_done);
-                        `uvm_info("EP_LTSSM",$sformatf("RC_8_TS1_CHECKER_DONE_RX_DONE=%0b",rx_ts1_8_done),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("RC_8_TS1_CHECKER_DONE_RX_DONE=%0b",rx_ts1_8_done),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -653,10 +653,10 @@ class PCIe_EP_PL_model extends uvm_component;
                   begin
                      if (!is_timeout_target) begin
                         @(posedge ep_pipe_intf_rx.pclk);
-                        `uvm_info("EP_LTSSM","STARTING_EP_10_TS1_TRANSMISSION",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_EP_10_TS1_TRANSMISSION",UVM_HIGH)
                          send_ordered_set(ep_ts1_os,`PCIe_TS1_TX_COUNT,"TS1");
                          tx_ts1_10_done = 1'b1;
-                        `uvm_info("EP_LTSSM","EP_10_TS1_TRANSMISSION_COMPLETED",UVM_LOW)
+                        `uvm_info("EP_LTSSM","EP_10_TS1_TRANSMISSION_COMPLETED",UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -673,15 +673,15 @@ class PCIe_EP_PL_model extends uvm_component;
               ep_timeout_test_finish("POLLING_ACTIVE");
               return;
            end
-           `uvm_info("EP_LTSSM","Polling.Active 24ms timeout",UVM_LOW)
+           `uvm_info("EP_LTSSM","Polling.Active 24ms timeout",UVM_HIGH)
            if (rx_ts1_8_done) ep_poll_state = POLLING_CONFIGURATION;
            else              ep_poll_state = POLLING_COMPLIANCE;
            return;
         end
-        `uvm_info("EP_LTSSM",$sformatf("FINAL_CHECK_TX_10_DONE=%0b_RX_8_DONE=%0b",tx_ts1_10_done,rx_ts1_8_done),UVM_LOW)
+        `uvm_info("EP_LTSSM",$sformatf("FINAL_CHECK_TX_10_DONE=%0b_RX_8_DONE=%0b",tx_ts1_10_done,rx_ts1_8_done),UVM_HIGH)
         if ((tx_ts1_10_done == 1'b1) && (rx_ts1_8_done  == 1'b1)) begin
-           `uvm_info("EP_LTSSM","10_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_LOW)
-           `uvm_info("EP_LTSSM","POLLING_ACTIVE_TO_POLLING_CONFIGURATION",UVM_LOW)
+           `uvm_info("EP_LTSSM","10_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_HIGH)
+           `uvm_info("EP_LTSSM","POLLING_ACTIVE_TO_POLLING_CONFIGURATION",UVM_HIGH)
            ep_poll_state = POLLING_CONFIGURATION;
         end
     endtask
@@ -693,10 +693,10 @@ class PCIe_EP_PL_model extends uvm_component;
         bit is_timeout_target;
         timeout_occured = 1'b0;
         is_timeout_target = ep_is_timeout_target(LTSSM_TO_POLLING_CONFIGURATION);
-        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
         `uvm_info("EP_LTSSM","LTSSM_STATE_POLLING",UVM_LOW)
         `uvm_info("EP_LTSSM","SUB_STATE_POLLING_Configuration",UVM_LOW)
-        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
          // Build TS2
         build_ep_ts2();
          //print_ts2();
@@ -709,20 +709,20 @@ class PCIe_EP_PL_model extends uvm_component;
                   // THREAD 1 : EP TRANSMITS 16 TS2
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_RC_16_TS2_TRANSMISSION",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_RC_16_TS2_TRANSMISSION",UVM_HIGH)
                          send_ordered_set(ep_ts2_os,`PCIe_TS2_TX_COUNT,"TS2");
                          ts2_tx_count += `PCIe_TS2_TX_COUNT;
                          tx_ts2_16_done = 1'b1;
-                        `uvm_info("EP_LTSSM",$sformatf("RC_TS2_TX_COMPLETED_COUNT=%0d",ts2_tx_count),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("RC_TS2_TX_COMPLETED_COUNT=%0d",ts2_tx_count),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
                   // THREAD 2 : WAIT FOR EP 8 TS2
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","WAITING_FOR_8_CONSECUTIVE_TS2_FROM_EP",UVM_LOW)
+                        `uvm_info("EP_LTSSM","WAITING_FOR_8_CONSECUTIVE_TS2_FROM_EP",UVM_HIGH)
                         ep_check_rc_ts2(`PCIe_TS2_RX_COUNT,rx_ts2_8_done);
-                        `uvm_info("EP_LTSSM","EP_8_TS2_RECEIVED",UVM_LOW)
+                        `uvm_info("EP_LTSSM","EP_8_TS2_RECEIVED",UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -739,21 +739,21 @@ class PCIe_EP_PL_model extends uvm_component;
               ep_timeout_test_finish("POLLING_CONFIGURATION");
               return;
            end
-           `uvm_info("EP_LTSSM","Polling.Configuration 48ms timeout",UVM_LOW)
+           `uvm_info("EP_LTSSM","Polling.Configuration 48ms timeout",UVM_HIGH)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
            return;
         end
         if ((tx_ts2_16_done == 1'b1) && (rx_ts2_8_done  == 1'b1)) begin
-           `uvm_info("EP_LTSSM","16_TS2_TX_AND_8_TS2_RX_CONDITIONS_SATISFIED",UVM_LOW)
+           `uvm_info("EP_LTSSM","16_TS2_TX_AND_8_TS2_RX_CONDITIONS_SATISFIED",UVM_HIGH)
            // Check Training Control
            if (ep_ts2_os[6] == 8'h01) begin
-              `uvm_info("EP_LTSSM","TRAINING_CONTROL=1",UVM_LOW)
+              `uvm_info("EP_LTSSM","TRAINING_CONTROL=1",UVM_HIGH)
               `uvm_info("EP_LTSSM","LTSSM_TRANSITION_POLLING.Configuration_TO_POLLING_Compliance",UVM_LOW)
                ep_poll_state = POLLING_COMPLIANCE;
            end
            else begin
-              `uvm_info("EP_LTSSM","TRAINING_CONTROL=0",UVM_LOW)
+              `uvm_info("EP_LTSSM","TRAINING_CONTROL=0",UVM_HIGH)
               `uvm_info("EP_LTSSM","LTSSM_TRANSITION_POLLING.Configuration_TO_CONFIGURATION_LinkWidth_Start",UVM_LOW)
                ep_main_state = CONFIGURATION;
                ep_cfg_state  = LINKWIDTH_START;
@@ -761,7 +761,7 @@ class PCIe_EP_PL_model extends uvm_component;
            // Reset counters
            ts2_tx_count       = 0;
            rx_ts2_8_done  = 1'b0;
-           `uvm_info("EP_LTSSM","TS2_COUNTER_AND_RX_FLAG_RESET",UVM_LOW)
+           `uvm_info("EP_LTSSM","TS2_COUNTER_AND_RX_FLAG_RESET",UVM_HIGH)
         end
     endtask
 
@@ -774,20 +774,20 @@ class PCIe_EP_PL_model extends uvm_component;
        rx_ts1_8_done = 1'b0;
        timeout_occured = 1'b0;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_LINKWIDTH_START);
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LinkWidth_Start",UVM_LOW)
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        //---------------------------------------------------------------
        // Directed link-control exit (before Link Number negotiation).
        //---------------------------------------------------------------
        if (ep_ctrl_item != null && ep_ctrl_item.link_ctrl_disable_link) begin
-          `uvm_info("EP_LTSSM","LINK_DISABLE_SET_PRIOR_TO_ENTRY_IMMEDIATE_EP_DISABLED",UVM_LOW)
+          `uvm_info("EP_LTSSM","LINK_DISABLE_SET_PRIOR_TO_ENTRY_IMMEDIATE_EP_DISABLED",UVM_HIGH)
           ep_main_state = DISABLED;
           return;
        end
        if (ep_ctrl_item != null && ep_ctrl_item.link_ctrl_enter_loopback) begin
-          `uvm_info("EP_LTSSM","ENTER_LOOPBACK_SET_PRIOR_TO_ENTRY_IMMEDIATE_LOOPBACK_ENTRY",UVM_LOW)
+          `uvm_info("EP_LTSSM","ENTER_LOOPBACK_SET_PRIOR_TO_ENTRY_IMMEDIATE_LOOPBACK_ENTRY",UVM_HIGH)
           ep_main_state = LOOPBACK_ENTRY;
           return;
        end
@@ -803,19 +803,19 @@ class PCIe_EP_PL_model extends uvm_component;
               fork : EP_CFG_LWSTART_THREADS
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_RC_8_TS1_CHECKER",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_RC_8_TS1_CHECKER",UVM_HIGH)
                         ep_check_rc_ts1(8, rx_ts1_8_done);
-                        `uvm_info("EP_LTSSM",$sformatf("RC_8_TS1_CHECKER_DONE_RX_DONE=%0b",rx_ts1_8_done),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("RC_8_TS1_CHECKER_DONE_RX_DONE=%0b",rx_ts1_8_done),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_EP_8_TS1_TRANSMISSION",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_EP_8_TS1_TRANSMISSION",UVM_HIGH)
                         send_ordered_set(ep_ts1_os,8,"TS1");
                         ts1_tx_count += 8;
                         tx_ts1_8_done = 1'b1;
-                        `uvm_info("EP_LTSSM",$sformatf("LINKWIDTH_START_8_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("LINKWIDTH_START_8_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -832,15 +832,15 @@ class PCIe_EP_PL_model extends uvm_component;
               ep_timeout_test_finish("CFG_LINKWIDTH_START");
               return;
            end
-           `uvm_info("EP_LTSSM","Configuration.Linkwidth.Start 24ms timeout",UVM_LOW)
+           `uvm_info("EP_LTSSM","Configuration.Linkwidth.Start 24ms timeout",UVM_HIGH)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
            return;
         end
-        `uvm_info("EP_LTSSM",$sformatf("FINAL_CHECK_TX_8_DONE=%0b_RX_8_DONE=%0b",tx_ts1_8_done,rx_ts1_8_done),UVM_LOW)
+        `uvm_info("EP_LTSSM",$sformatf("FINAL_CHECK_TX_8_DONE=%0b_RX_8_DONE=%0b",tx_ts1_8_done,rx_ts1_8_done),UVM_HIGH)
        if ((tx_ts1_8_done == 1'b1) && (rx_ts1_8_done == 1'b1)) begin
-          `uvm_info("EP_LTSSM","8_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_LOW)
-          `uvm_info("EP_LTSSM",$sformatf("ADOPTED_LINK_NUM=0x%02h",ep_link_num),UVM_LOW)
+          `uvm_info("EP_LTSSM","8_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_HIGH)
+          `uvm_info("EP_LTSSM",$sformatf("ADOPTED_LINK_NUM=0x%02h",ep_link_num),UVM_HIGH)
           `uvm_info("EP_LTSSM","LTSSM_TRANSITION_CONFIGURATION_LinkWidth_Start_CONFIGURATION_LinkWidth_Accept",UVM_LOW)
           ts1_tx_count = 0;
           ep_cfg_state = LINKWIDTH_ACCEPT;
@@ -856,13 +856,13 @@ class PCIe_EP_PL_model extends uvm_component;
        rx_ts1_2_done = 1'b0;
        timeout_occured = 1'b0;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_LINKWIDTH_ACCEPT);
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LinkWidth_Accept",UVM_LOW)
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        // Reset precoder state for reliable K-symbol detection at the peer
        previous_symbol = 2'b11;
-       `uvm_info("EP_LTSSM",$sformatf("ASSIGNED_LANE_NUM=0x%02h_ON_LINK=0x%02h",ep_lane_num,ep_link_num),UVM_LOW)
+       `uvm_info("EP_LTSSM",$sformatf("ASSIGNED_LANE_NUM=0x%02h_ON_LINK=0x%02h",ep_lane_num,ep_link_num),UVM_HIGH)
        build_ep_ts1();
        //print_ts1();
        fork : EP_CFG_LWACCEPT_WATCHDOG
@@ -870,18 +870,18 @@ class PCIe_EP_PL_model extends uvm_component;
               fork : EP_CFG_LWACCEPT_THREADS
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_HIGH)
                          ep_check_rc_ts1(2,rx_ts1_2_done);
                      end
                      else wait(1'b0);
                   end
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_HIGH)
                         send_ordered_set(ep_ts1_os,2,"TS1");
                         ts1_tx_count += 2;
                         tx_ts1_2_done = 1'b1;
-                        `uvm_info("EP_LTSSM",$sformatf("LINKWIDTH_ACCEPT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("LINKWIDTH_ACCEPT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -898,13 +898,13 @@ class PCIe_EP_PL_model extends uvm_component;
               ep_timeout_test_finish("CFG_LINKWIDTH_ACCEPT");
               return;
            end
-           `uvm_info("EP_LTSSM","Configuration.Linkwidth.Accept 2ms timeout",UVM_LOW)
+           `uvm_info("EP_LTSSM","Configuration.Linkwidth.Accept 2ms timeout",UVM_HIGH)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
            return;
         end
         if ((tx_ts1_2_done == 1'b1) && (rx_ts1_2_done == 1'b1)) begin
-          `uvm_info("EP_LTSSM","2_TS1_TX_AND_2_TS1_RX_CONDITIONS_SATISFIED",UVM_LOW)
+          `uvm_info("EP_LTSSM","2_TS1_TX_AND_2_TS1_RX_CONDITIONS_SATISFIED",UVM_HIGH)
           `uvm_info("EP_LTSSM","LTSSM_TRANSITION_CONFIGURATION_LinkWidth_Accept_CONFIGURATION_LaneNum_Wait",UVM_LOW)
           ts1_tx_count = 0;
           ep_cfg_state = LANENUM_WAIT;
@@ -920,10 +920,10 @@ class PCIe_EP_PL_model extends uvm_component;
        rx_ts1_2_done = 1'b0;
        timeout_occured = 1'b0;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_LANENUM_WAIT);
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LaneNum_Wait",UVM_LOW)
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        // Reset precoder state for reliable K-symbol detection at the peer
        previous_symbol = 2'b11;
        // Link/Lane unchanged from LinkWidth.Accept.
@@ -934,18 +934,18 @@ class PCIe_EP_PL_model extends uvm_component;
               fork : EP_CFG_LNWAIT_THREADS
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_HIGH)
                          ep_check_rc_ts1(2, rx_ts1_2_done);
                      end
                      else wait(1'b0);
                   end
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_HIGH)
                         send_ordered_set(ep_ts1_os,2,"TS1");
                         ts1_tx_count += 2;
                         tx_ts1_2_done = 1'b1;
-                        `uvm_info("EP_LTSSM",$sformatf("LANENUM_WAIT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("LANENUM_WAIT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -962,13 +962,13 @@ class PCIe_EP_PL_model extends uvm_component;
               ep_timeout_test_finish("CFG_LANENUM_WAIT");
               return;
            end
-           `uvm_info("EP_LTSSM","Configuration.Lanenum.Wait 2ms timeout",UVM_LOW)
+           `uvm_info("EP_LTSSM","Configuration.Lanenum.Wait 2ms timeout",UVM_HIGH)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
            return;
         end
         if ((tx_ts1_2_done == 1'b1) && (rx_ts1_2_done == 1'b1)) begin
-          `uvm_info("EP_LTSSM","2_TS1_TX_AND_2_TS1_RX_CONDITIONS_SATISFIED",UVM_LOW)
+          `uvm_info("EP_LTSSM","2_TS1_TX_AND_2_TS1_RX_CONDITIONS_SATISFIED",UVM_HIGH)
           `uvm_info("EP_LTSSM","LTSSM_TRANSITION_CONFIGURATION_LaneNum_Wait_CONFIGURATION_LaneNum_Accept",UVM_LOW)
           ts1_tx_count = 0;
           ep_cfg_state = LANENUM_ACCEPT;
@@ -984,10 +984,10 @@ class PCIe_EP_PL_model extends uvm_component;
        rx_ts1_2_done = 1'b0;
        timeout_occured = 1'b0;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_LANENUM_ACCEPT);
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_LaneNum_Accept",UVM_LOW)
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        // Reset precoder state for reliable K-symbol detection at the peer
        previous_symbol = 2'b11;
        build_ep_ts1();
@@ -997,18 +997,18 @@ class PCIe_EP_PL_model extends uvm_component;
               fork : EP_CFG_LNACCEPT_THREADS
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_RC_2_TS1_CHECKER",UVM_HIGH)
                         ep_check_rc_ts1(2, rx_ts1_2_done);
                      end
                      else wait(1'b0);
                   end
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_EP_2_TS1_TRANSMISSION",UVM_HIGH)
                         send_ordered_set(ep_ts1_os,2,"TS1");
                         ts1_tx_count += 2;
                         tx_ts1_2_done = 1'b1;
-                        `uvm_info("EP_LTSSM",$sformatf("LANENUM_ACCEPT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("LANENUM_ACCEPT_2_TS1_TX_COMPLETED_COUNT=%0d",ts1_tx_count),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -1025,13 +1025,13 @@ class PCIe_EP_PL_model extends uvm_component;
               ep_timeout_test_finish("CFG_LANENUM_ACCEPT");
               return;
            end
-           `uvm_info("EP_LTSSM","Configuration.Lanenum.Accept 2ms timeout",UVM_LOW)
+           `uvm_info("EP_LTSSM","Configuration.Lanenum.Accept 2ms timeout",UVM_HIGH)
            ep_main_state   = DETECT;
            ep_detect_state = DETECT_QUIET;
            return;
         end
         if ((tx_ts1_2_done == 1'b1) && (rx_ts1_2_done == 1'b1)) begin
-          `uvm_info("EP_LTSSM","2_TS1_TX_AND_2_TS1_RX_CONDITIONS_SATISFIED",UVM_LOW)
+          `uvm_info("EP_LTSSM","2_TS1_TX_AND_2_TS1_RX_CONDITIONS_SATISFIED",UVM_HIGH)
           `uvm_info("EP_LTSSM","LTSSM_TRANSITION_CONFIGURATION_LaneNum_Accept_CONFIGURATION_Complete",UVM_LOW)
           ts1_tx_count = 0;
           ep_cfg_state = CONFIG_COMPLETE;
@@ -1047,10 +1047,10 @@ task ep_state_config_complete();
        rx_ts2_8_done  = 1'b0;
        timeout_occured = 1'b0;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_COMPLETE);
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_Complete",UVM_LOW)
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        // Reset precoder state for reliable K-symbol detection at the peer
        previous_symbol = 2'b11;
        build_ep_ts2();
@@ -1060,18 +1060,18 @@ task ep_state_config_complete();
               fork : EP_CFG_COMPLETE_THREADS
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","WAITING_FOR_8_CONSECUTIVE_TS2_FROM_RC",UVM_LOW)
+                        `uvm_info("EP_LTSSM","WAITING_FOR_8_CONSECUTIVE_TS2_FROM_RC",UVM_HIGH)
                          ep_check_rc_ts2(`PCIe_TS2_RX_COUNT, rx_ts2_8_done);
                      end
                      else wait(1'b0);
                   end
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_EP_16_TS2_TRANSMISSION",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_EP_16_TS2_TRANSMISSION",UVM_HIGH)
                         send_ordered_set(ep_ts2_os,`PCIe_TS2_TX_COUNT,"TS2");
                         ts2_tx_count += `PCIe_TS2_TX_COUNT;
                         tx_ts2_16_done = 1'b1;
-                        `uvm_info("EP_LTSSM",$sformatf("CONFIG_COMPLETE_16_TS2_TX_COMPLETED_COUNT=%0d",ts2_tx_count),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("CONFIG_COMPLETE_16_TS2_TX_COMPLETED_COUNT=%0d",ts2_tx_count),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -1088,7 +1088,7 @@ task ep_state_config_complete();
               ep_timeout_test_finish("CFG_COMPLETE");
               return;
            end
-           `uvm_info("EP_LTSSM","Configuration.Complete 2ms timeout",UVM_LOW)
+           `uvm_info("EP_LTSSM","Configuration.Complete 2ms timeout",UVM_HIGH)
            if ((ep_rate_gen_num(ep_cur_rate) <= 2) ||
                (ep_idle_to_rlock_transitioned == 8'hFF)) begin
               ep_main_state   = DETECT;
@@ -1100,7 +1100,7 @@ task ep_state_config_complete();
            return;
         end
         if ((tx_ts2_16_done == 1'b1) && (rx_ts2_8_done == 1'b1)) begin
-           `uvm_info("EP_LTSSM","16_TS2_TX_AND_8_TS2_RX_CONDITIONS_SATISFIED",UVM_LOW)
+           `uvm_info("EP_LTSSM","16_TS2_TX_AND_8_TS2_RX_CONDITIONS_SATISFIED",UVM_HIGH)
            `uvm_info("EP_LTSSM","LTSSM_TRANSITION_CONFIGURATION_Complete_CONFIGURATION_Idle",UVM_LOW)
            ts2_tx_count = 0;
            ep_cfg_state = CONFIG_IDLE;
@@ -1116,10 +1116,10 @@ task ep_state_config_complete();
        rx_idle_2_done = 1'b0;
        timeout_occured = 1'b0;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_CFG_IDLE);
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        `uvm_info("EP_LTSSM","LTSSM_STATE_CONFIGURATION",UVM_LOW)
        `uvm_info("EP_LTSSM","SUB_STATE_CONFIGURATION_Idle",UVM_LOW)
-       `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+       `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
        // Reset precoder state for reliable K-symbol detection at the peer
        previous_symbol = 2'b11;
        build_ep_idle();
@@ -1129,18 +1129,18 @@ task ep_state_config_complete();
               fork : EP_CFG_IDLE_THREADS
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","WAITING_FOR_2_CONSECUTIVE_IDLE_FROM_RC",UVM_LOW)
+                        `uvm_info("EP_LTSSM","WAITING_FOR_2_CONSECUTIVE_IDLE_FROM_RC",UVM_HIGH)
                          ep_check_rc_idle(2, rx_idle_2_done);
-                        `uvm_info("EP_LTSSM",$sformatf("RC_2_IDLE_CHECKER_DONE_RX_DONE=%0b",rx_idle_2_done),UVM_LOW)
+                        `uvm_info("EP_LTSSM",$sformatf("RC_2_IDLE_CHECKER_DONE_RX_DONE=%0b",rx_idle_2_done),UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
                   begin
                      if (!is_timeout_target) begin
-                        `uvm_info("EP_LTSSM","STARTING_EP_2_IDLE_FLIT_TRANSMISSION",UVM_LOW)
+                        `uvm_info("EP_LTSSM","STARTING_EP_2_IDLE_FLIT_TRANSMISSION",UVM_HIGH)
                         send_ordered_set(ep_idle_os,2,"IDLE_FLIT");
                         tx_idle_2_done = 1'b1;
-                        `uvm_info("EP_LTSSM","CONFIG_IDLE_2_IDLE_FLIT_TX_COMPLETED",UVM_LOW)
+                        `uvm_info("EP_LTSSM","CONFIG_IDLE_2_IDLE_FLIT_TX_COMPLETED",UVM_HIGH)
                      end
                      else wait(1'b0);
                   end
@@ -1157,7 +1157,7 @@ task ep_state_config_complete();
               ep_timeout_test_finish("CFG_IDLE");
               return;
            end
-           `uvm_info("EP_LTSSM","Configuration.Idle 2ms timeout",UVM_LOW)
+           `uvm_info("EP_LTSSM","Configuration.Idle 2ms timeout",UVM_HIGH)
            if (ep_idle_to_rlock_transitioned != 8'hFF) begin
               if (ep_rate_gen_num(ep_cur_rate) >= 3)
                  ep_idle_to_rlock_transitioned++;
@@ -1172,9 +1172,9 @@ task ep_state_config_complete();
            end
            return;
         end
-        `uvm_info("EP_LTSSM",$sformatf("FINAL_CHECK_TX_2_IDLE_DONE=%0b_RX_2_IDLE_DONE=%0b",tx_idle_2_done,rx_idle_2_done),UVM_LOW)
+        `uvm_info("EP_LTSSM",$sformatf("FINAL_CHECK_TX_2_IDLE_DONE=%0b_RX_2_IDLE_DONE=%0b",tx_idle_2_done,rx_idle_2_done),UVM_HIGH)
        if ((tx_idle_2_done == 1'b1) && (rx_idle_2_done == 1'b1)) begin
-          `uvm_info("EP_LTSSM","2_IDLE_TX_AND_2_IDLE_RX_CONDITIONS_SATISFIED",UVM_LOW)
+          `uvm_info("EP_LTSSM","2_IDLE_TX_AND_2_IDLE_RX_CONDITIONS_SATISFIED",UVM_HIGH)
           `uvm_info("EP_LTSSM","LTSSM_TRANSITION_CONFIGURATION_Idle_L0",UVM_LOW)
           ep_main_state = L0;
        end
@@ -1187,7 +1187,7 @@ task ep_state_config_complete();
        bit is_timeout_target;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_DISABLED);
        if (is_timeout_target) begin
-          `uvm_info("EP_LTSSM","TIMEOUT_TEST_DISABLED_WAITING_DECLARED_TIMEOUT",UVM_LOW)
+          `uvm_info("EP_LTSSM","TIMEOUT_TEST_DISABLED_WAITING_DECLARED_TIMEOUT",UVM_HIGH)
           ep_ltssm_timer(`PCIe_LTSSM_T_DISABLED);
           ep_timeout_test_finish("DISABLED");
           return;
@@ -1252,7 +1252,7 @@ task ep_state_config_complete();
            return;
         end
         if (rx_done) begin
-          `uvm_info("EP_LTSSM","LOOPBACK_ENTRY_SYMBOL_LOCK_TO_LOOPBACK_ACTIVE",UVM_LOW)
+          `uvm_info("EP_LTSSM","LOOPBACK_ENTRY_SYMBOL_LOCK_TO_LOOPBACK_ACTIVE",UVM_HIGH)
           ep_main_state = LOOPBACK_ACTIVE;
        end
        else begin
@@ -1293,7 +1293,7 @@ task ep_state_config_complete();
        bit is_timeout_target;
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_LOOPBACK_EXIT);
        if (is_timeout_target) begin
-          `uvm_info("EP_LTSSM","TIMEOUT_TEST_LOOPBACK_EXIT_WAITING_DECLARED_TIMEOUT",UVM_LOW)
+          `uvm_info("EP_LTSSM","TIMEOUT_TEST_LOOPBACK_EXIT_WAITING_DECLARED_TIMEOUT",UVM_HIGH)
           ep_ltssm_timer(`PCIe_LTSSM_T_LOOPBACK_EXIT_IDLE);
           ep_timeout_test_finish("LOOPBACK_EXIT");
           return;
@@ -1351,7 +1351,7 @@ task ep_state_config_complete();
            return;
         end
          if (echo_done && (ep_ctrl_item != null) && ep_ctrl_item.hot_reset_remain_directed) begin
-           `uvm_info("EP_LTSSM","HOT_RESET_MATCHING_TS1S_STILL_ARRIVING_REMAIN",UVM_LOW)
+           `uvm_info("EP_LTSSM","HOT_RESET_MATCHING_TS1S_STILL_ARRIVING_REMAIN",UVM_HIGH)
            remain = 1'b1;
            return;
         end
@@ -1362,11 +1362,11 @@ task ep_state_config_complete();
 
      task ep_state_l0(PCIe_sequence_item item);
 
-        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
-	  item.print();
+        `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
+	  if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) item.print();
         `uvm_info("EP_LTSSM","LTSSM_STATE=L0",UVM_LOW)
         `uvm_info("EP_LTSSM","ENTERING_L0_STATE",UVM_LOW)
-        `uvm_info("EP_LTSSM","==========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","==========================================",UVM_HIGH)
         ep_l0_visit_count++;
         //-------------------------------------------------------------------
         // Apply the rate for THIS L0 entry here rather than relying on a value
@@ -1383,14 +1383,14 @@ task ep_state_config_complete();
            ep_pipe_intf_tx.rate <= ep_cur_rate;
         end
         `uvm_info("EP_LTSSM",$sformatf("L0_VISIT=%0d OPERATING_RATE=%s TARGET_GEN=%0d",
-                  ep_l0_visit_count, ep_cur_rate.name(), item.target_gen),UVM_LOW)
+                  ep_l0_visit_count, ep_cur_rate.name(), item.target_gen),UVM_HIGH)
 
         if (ep_l0_visit_count < item.target_gen) begin
            //---------------------------------------------------------------
            // Section 4.2.7.4 : an intermediate L0 is a directed speed change.
            // link_up stays 0 so no DL/TL traffic is allowed yet.
            //---------------------------------------------------------------
-           `uvm_info("EP_LTSSM","L0_IS_NOT_FINAL_TRAFFIC_REMAINS_BLOCKED",UVM_LOW)
+           `uvm_info("EP_LTSSM","L0_IS_NOT_FINAL_TRAFFIC_REMAINS_BLOCKED",UVM_HIGH)
            ep_adv_rate       = ep_rate_of_gen(ep_l0_visit_count + 1);
            ep_speed_change   = 1'b1;
            ep_eq_phase       = EQ_PHASE_0;
@@ -1403,23 +1403,23 @@ task ep_state_config_complete();
         else begin
         // LINK UP
         link_up = 1'b1;
-        `uvm_info("EP_LTSSM","LINK_UP=1",UVM_LOW)
-        `uvm_info("EP_LTSSM",$sformatf("FINAL_L0_REACHED_AT_RATE=%s",ep_cur_rate.name()),UVM_LOW)
+        `uvm_info("EP_LTSSM","LINK_UP=1",UVM_HIGH)
+        `uvm_info("EP_LTSSM",$sformatf("FINAL_L0_REACHED_AT_RATE=%s",ep_cur_rate.name()),UVM_HIGH)
         // INFORM DL THAT LINK IS UP
         uvm_ep_l0_to_dl_ev.trigger();
-        `uvm_info("EP_LTSSM","EP_L0_TO_DL_EVENT_TRIGGERED",UVM_LOW)
+        `uvm_info("EP_LTSSM","EP_L0_TO_DL_EVENT_TRIGGERED",UVM_HIGH)
         // SELECT FLIT / NON-FLIT MODE
         //case (pcie_ecfg.mode);
         case (item.pkt_mode)
            NON_FLIT: begin
-              `uvm_info("EP_LTSSM","L0_MODE=NON_FLIT_MODE",UVM_LOW)
+              `uvm_info("EP_LTSSM","L0_MODE=NON_FLIT_MODE",UVM_HIGH)
                //ep_l0_non_flit_mode();
            end
            FLIT: begin
-              `uvm_info("EP_LTSSM","L0_MODE=FLIT_MODE",UVM_LOW)
+              `uvm_info("EP_LTSSM","L0_MODE=FLIT_MODE",UVM_HIGH)
            end
            default: begin
-              `uvm_error("EP_LTSSM","INVALID_PCIE_MODE")
+              // `uvm_error("EP_LTSSM","INVALID_PCIE_MODE")
            end
         endcase
         end
@@ -1430,17 +1430,17 @@ task ep_state_config_complete();
        int ts1_count;
        rx_done   = 1'b0;
        ts1_count = 0;
-       `uvm_info("EP_LTSSM",$sformatf("WAITING_FOR_%0d_TS1_FROM_RC",count),UVM_LOW)
+       `uvm_info("EP_LTSSM",$sformatf("WAITING_FOR_%0d_TS1_FROM_RC",count),UVM_HIGH)
        forever begin
           @(negedge ep_pipe_intf_rx.pclk);
           if (ep_pipe_intf_rx.rx_valid) begin
              rx_symbol = ep_pipe_intf_rx.rx_data[1:0];
              if (rx_symbol == 2'b11) begin
                 ts1_count++;
-                `uvm_info("EP_LTSSM",$sformatf("TS1_FIRST_SYMBOL_DETECTED = %02b COUNT = %0d",rx_symbol, ts1_count),UVM_LOW)
+                `uvm_info("EP_LTSSM",$sformatf("TS1_FIRST_SYMBOL_DETECTED = %02b COUNT = %0d",rx_symbol, ts1_count),UVM_HIGH)
              end
              if (ts1_count >= count) begin
-                `uvm_info("EP_LTSSM",$sformatf("%0d_TS1_RECEIVED_FROM_RC",count),UVM_LOW)
+                `uvm_info("EP_LTSSM",$sformatf("%0d_TS1_RECEIVED_FROM_RC",count),UVM_HIGH)
                 rx_done = 1'b1;
                 break;
              end
@@ -1453,17 +1453,17 @@ task ep_state_config_complete();
        int ts2_count;
        rx_done   = 1'b0;
        ts2_count = 0;
-       `uvm_info("EP_LTSSM",$sformatf("WAITING_FOR_%0d_TS2_FROM_RC",count),UVM_LOW)
+       `uvm_info("EP_LTSSM",$sformatf("WAITING_FOR_%0d_TS2_FROM_RC",count),UVM_HIGH)
        forever begin
           @(negedge ep_pipe_intf_rx.pclk);
           if (ep_pipe_intf_rx.rx_valid) begin
              rx_symbol = ep_pipe_intf_rx.rx_data[1:0];
              if (rx_symbol == 2'b10) begin
                 ts2_count++;
-                `uvm_info("EP_LTSSM",$sformatf("TS2_FIRST_SYMBOL_DETECTED = %02b COUNT = %0d",rx_symbol,ts2_count),UVM_LOW)
+                `uvm_info("EP_LTSSM",$sformatf("TS2_FIRST_SYMBOL_DETECTED = %02b COUNT = %0d",rx_symbol,ts2_count),UVM_HIGH)
              end
              if (ts2_count >= count) begin
-                `uvm_info("EP_LTSSM",$sformatf("%0d_TS2_RECEIVED_FROM_RC",count),UVM_LOW)
+                `uvm_info("EP_LTSSM",$sformatf("%0d_TS2_RECEIVED_FROM_RC",count),UVM_HIGH)
                 rx_done = 1'b1;
                 break;
              end
@@ -1476,17 +1476,17 @@ task ep_state_config_complete();
        int idle_count;
        rx_done    = 1'b0;
        idle_count = 0;
-       `uvm_info("EP_LTSSM",$sformatf("WAITING_FOR_%0d_IDLE_FROM_RC", count),UVM_LOW)
+       `uvm_info("EP_LTSSM",$sformatf("WAITING_FOR_%0d_IDLE_FROM_RC", count),UVM_HIGH)
        forever begin
           @(negedge ep_pipe_intf_rx.pclk);
           if (ep_pipe_intf_rx.rx_valid) begin
              rx_symbol = ep_pipe_intf_rx.rx_data[1:0];
              if (rx_symbol == 2'b00) begin
                 idle_count++;
-                `uvm_info("EP_LTSSM",$sformatf("IDLE_FIRST_SYMBOL_DETECTED = %02b COUNT = %0d",rx_symbol, idle_count),UVM_LOW)
+                `uvm_info("EP_LTSSM",$sformatf("IDLE_FIRST_SYMBOL_DETECTED = %02b COUNT = %0d",rx_symbol, idle_count),UVM_HIGH)
              end
              if (idle_count >= count) begin
-                `uvm_info("EP_LTSSM",$sformatf("%0d_IDLE_RECEIVED_FROM_RC", count),UVM_LOW)
+                `uvm_info("EP_LTSSM",$sformatf("%0d_IDLE_RECEIVED_FROM_RC", count),UVM_HIGH)
                 rx_done = 1'b1;
                 break;
              end
@@ -1522,7 +1522,7 @@ task ep_state_config_complete();
        int symbol_idx;
    
        for (os_count = 0; os_count < count; os_count++) begin
-           `uvm_info("EP_LTSSM",$sformatf("EP_TX %s OS_COUNT=%0d/%0d START",os_name, os_count+1, count),UVM_LOW)
+           `uvm_info("EP_LTSSM",$sformatf("EP_TX %s OS_COUNT=%0d/%0d START",os_name, os_count+1, count),UVM_HIGH)
            for (dword = 0;dword < (`PCIe_TS_OS_SIZE / 4);dword++) begin
             raw_data = '0;
             for (byte_idx = 0; byte_idx < 4; byte_idx++) begin
@@ -1530,22 +1530,22 @@ task ep_state_config_complete();
                 if ((symbol_idx == 0) || (symbol_idx == 8) || (symbol_idx == 15)) begin
                     processed_symbol = ordered_set[symbol_idx];
                     `uvm_info("EP_LTSSM",$sformatf("EP_TX_ODERED_SET %s OS=%0d SYMBOL=%0d BYPASS_ORIGINAL=%02h AFTER=%02h",
-                              os_name, os_count,symbol_idx,ordered_set[symbol_idx],processed_symbol), UVM_LOW)
+                              os_name, os_count,symbol_idx,ordered_set[symbol_idx],processed_symbol), UVM_HIGH)
                 end
                 else begin
                     scramble(ordered_set[symbol_idx], processed_symbol);
                     `uvm_info("EP_LTSSM",$sformatf("EP_TX_ODERED_SET %s OS=%0d SYMBOL=%0d SCRAMBLED_ORIGINAL=%02h AFTER=%02h",
-                              os_name,os_count,symbol_idx, ordered_set[symbol_idx], processed_symbol), UVM_LOW)
+                              os_name,os_count,symbol_idx, ordered_set[symbol_idx], processed_symbol), UVM_HIGH)
                 end
                 raw_data[(byte_idx * 8) +: 8] = processed_symbol;
             end
-            `uvm_info("EP_LTSSM",$sformatf("EP_TX %s OS=%0d DWORD=%0d DATA_AFTER_SCRAMBLING=%08h", os_name, os_count, dword,raw_data),UVM_LOW)
+            `uvm_info("EP_LTSSM",$sformatf("EP_TX %s OS=%0d DWORD=%0d DATA_AFTER_SCRAMBLING=%08h", os_name, os_count, dword,raw_data),UVM_HIGH)
             tx_gray_encode(raw_data, gray_data);
-            `uvm_info("EP_LTSSM",$sformatf("EP_TX_DATA_AFTER_GRAYCODE =%08h",gray_data),UVM_LOW)
+            `uvm_info("EP_LTSSM",$sformatf("EP_TX_DATA_AFTER_GRAYCODE =%08h",gray_data),UVM_HIGH)
             tx_parity_generate(gray_data, parity);
             tx_parity_q.push_back(parity);
             tx_precoder(gray_data, pre_data);
-            `uvm_info("EP_LTSSM",$sformatf("EP_TX_DATA_AFTER_PRECODE =%08h",pre_data),UVM_LOW)
+            `uvm_info("EP_LTSSM",$sformatf("EP_TX_DATA_AFTER_PRECODE =%08h",pre_data),UVM_HIGH)
             // Wait for the posedge BEFORE driving. The old order drove first
             // and waited afterwards, so dword 0 of a burst was launched at
             // whatever time the previous substate happened to leave us - which
@@ -1558,7 +1558,7 @@ task ep_state_config_complete();
             ep_pipe_intf_tx.tx_data  <= pre_data;
             ep_pipe_intf_tx.tx_valid <= 1'b1;
             ep_tx_os_dword_total++;   // [MERGE] training-stream length for the monitors
-            `uvm_info("EP_LTSSM",$sformatf("EP_TX %s OS=%0d DWORD=%0d PIPE_DATA=%08h TX_VALID=1",os_name,os_count,dword,pre_data),UVM_LOW)
+            `uvm_info("EP_LTSSM",$sformatf("EP_TX %s OS=%0d DWORD=%0d PIPE_DATA=%08h TX_VALID=1",os_name,os_count,dword,pre_data),UVM_HIGH)
          end
        end
        // End of Ordered Set transmission.
@@ -1572,15 +1572,15 @@ task ep_state_config_complete();
        @(posedge ep_pipe_intf_tx.pclk);
         ep_pipe_intf_tx.tx_data  <= 32'h00000000;
         ep_pipe_intf_tx.tx_valid <= 1'b0;
-        `uvm_info("EP_LTSSM",$sformatf("EP_TX %s TRANSMISSION_COMPLETED ORDERED_SETS=%0d",os_name,count),UVM_LOW)
+        `uvm_info("EP_LTSSM",$sformatf("EP_TX %s TRANSMISSION_COMPLETED ORDERED_SETS=%0d",os_name,count),UVM_HIGH)
     endtask
    
     /*task print_ts1();
-        `uvm_info("EP_TS1","========== EP TS1 ORDERED SET ==========",UVM_LOW)
+        `uvm_info("EP_TS1","========== EP TS1 ORDERED SET ==========",UVM_HIGH)
         for (int i = 0; i < 16; i++) begin
-            `uvm_info("EP_TS1",$sformatf("TS1[%0d] = 0x%02h",i, ep_ts1_os[i]),UVM_LOW)
+            `uvm_info("EP_TS1",$sformatf("TS1[%0d] = 0x%02h",i, ep_ts1_os[i]),UVM_HIGH)
         end
-        `uvm_info("EP_TS1","========================================",UVM_LOW)
+        `uvm_info("EP_TS1","========================================",UVM_HIGH)
     endtask*/
 
     task build_ep_ts1();
@@ -1602,7 +1602,7 @@ task ep_state_config_complete();
         ep_ts1_os[15] = 8'h4A;
         
         for (int i = 0; i < 16; i++) begin
-            `uvm_info("EP_TS1",$sformatf("TS1[%0d] = 0x%02h",i, ep_ts1_os[i]),UVM_LOW)
+            `uvm_info("EP_TS1",$sformatf("TS1[%0d] = 0x%02h",i, ep_ts1_os[i]),UVM_HIGH)
         end
     endtask
 
@@ -1625,16 +1625,16 @@ task ep_state_config_complete();
          ep_ts2_os[15] = 8'h00;
         
          for (int i = 0; i < 16; i++) begin
-            `uvm_info("EP_LTSSM",$sformatf("TS2[%0d] = %02h",i,ep_ts2_os[i]),UVM_LOW)
+            `uvm_info("EP_LTSSM",$sformatf("TS2[%0d] = %02h",i,ep_ts2_os[i]),UVM_HIGH)
          end
     endtask
 
     /*task print_ts2();
-        `uvm_info("EP_LTSSM","========== EP TS2 ORDERED SET ==========",UVM_LOW)
+        `uvm_info("EP_LTSSM","========== EP TS2 ORDERED SET ==========",UVM_HIGH)
         for (int i = 0; i < 16; i++) begin
-            `uvm_info("EP_LTSSM",$sformatf("TS2[%0d] = %02h",i,ep_ts2_os[i]),UVM_LOW)
+            `uvm_info("EP_LTSSM",$sformatf("TS2[%0d] = %02h",i,ep_ts2_os[i]),UVM_HIGH)
         end
-        `uvm_info("EP_LTSSM","========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","========================================",UVM_HIGH)
     endtask*/
 
     task build_ep_idle();
@@ -1644,11 +1644,11 @@ task ep_state_config_complete();
     endtask
 
     task print_idle();
-        `uvm_info("EP_LTSSM","========== EP IDLE FLIT ==========",UVM_LOW)
+        `uvm_info("EP_LTSSM","========== EP IDLE FLIT ==========",UVM_HIGH)
         for (int i = 0; i < 16; i++) begin
-            `uvm_info("EP_LTSSM",$sformatf("IDLE[%0d] = 0x%02h",i,ep_idle_os[i]),UVM_LOW)
+            `uvm_info("EP_LTSSM",$sformatf("IDLE[%0d] = 0x%02h",i,ep_idle_os[i]),UVM_HIGH)
         end
-        `uvm_info("EP_LTSSM","========================================",UVM_LOW)
+        `uvm_info("EP_LTSSM","========================================",UVM_HIGH)
     endtask
 
     //=======================================================================
@@ -1713,7 +1713,7 @@ task ep_state_config_complete();
        ep_ts1_os[`PCIe_OS_SYM_EQ_CTRL] = {6'b000000, ep_eq_phase};
        ep_ts1_os[`PCIe_OS_SYM_EQ_COEF] = 8'h00;
        `uvm_info("EP_RECOVERY",$sformatf("TS1_RATE_ID_SYMBOL=0x%02h SPEED_CHANGE=%0b EQ_PHASE=%0d",
-                 ep_ts1_os[`PCIe_OS_SYM_RATE_ID], ep_speed_change, ep_eq_phase),UVM_LOW)
+                 ep_ts1_os[`PCIe_OS_SYM_RATE_ID], ep_speed_change, ep_eq_phase),UVM_HIGH)
     endtask
 
     task ep_build_recovery_ts2();
@@ -1721,7 +1721,7 @@ task ep_state_config_complete();
        build_ep_ts2();
        ep_ts2_os[`PCIe_OS_SYM_RATE_ID] = {2'b00, ep_rate_to_dri(ep_adv_rate), ep_speed_change};
        `uvm_info("EP_RECOVERY",$sformatf("TS2_RATE_ID_SYMBOL=0x%02h SPEED_CHANGE=%0b",
-                 ep_ts2_os[`PCIe_OS_SYM_RATE_ID], ep_speed_change),UVM_LOW)
+                 ep_ts2_os[`PCIe_OS_SYM_RATE_ID], ep_speed_change),UVM_HIGH)
     endtask
 
     //-------------------------------------------------------------------------
@@ -1941,12 +1941,12 @@ task ep_state_config_complete();
           if (best != 0)
              `uvm_info("EP_RECOVERY_RX_OS",$sformatf(
                        "DESCRAMBLER_RELOCKED SYM0=0x%02h OFFSET_BYTES=%0d OTHER_MATCHES=%0d",
-                       k, best, hits - 1),UVM_LOW)
+                       k, best, hits - 1),UVM_HIGH)
        end
        else begin
           `uvm_info("EP_RECOVERY_RX_OS",$sformatf(
                     "DESCRAMBLER_PHASE_NOT_FOUND SYM0=0x%02h SEARCHED_BYTES=%0d",
-                    k, `PCIe_RX_LFSR_PHASE_SEARCH),UVM_LOW)
+                    k, `PCIe_RX_LFSR_PHASE_SEARCH),UVM_HIGH)
        end
     endtask
 
@@ -2124,11 +2124,11 @@ task ep_state_config_complete();
           for (int t = 0; t < ((`PCIe_TS_OS_SIZE / 4) - 1); t++)
              ep_rx_os_raw[t] = ep_rx_os_raw[t + 1];
           ep_rx_os_fill--;
-          `uvm_info("EP_RECOVERY_RX_OS","UNSOLVABLE_OS_SLIDING_WINDOW",UVM_LOW)
+          `uvm_info("EP_RECOVERY_RX_OS","UNSOLVABLE_OS_SLIDING_WINDOW",UVM_HIGH)
           return;
        end
        if (cand_cnt > 1)
-          `uvm_info("EP_RECOVERY_RX_OS",$sformatf("AMBIGUOUS_OS_SYM0=0x%02h CANDIDATES=%0d USING_ENTRY=%0d", k_first, cand_cnt, win),UVM_LOW)
+          `uvm_info("EP_RECOVERY_RX_OS",$sformatf("AMBIGUOUS_OS_SYM0=0x%02h CANDIDATES=%0d USING_ENTRY=%0d", k_first, cand_cnt, win),UVM_HIGH)
 
        // ---- re-acquire the descrambler phase, then descramble the 13 non K bytes ----
        ep_rx_os_phase_solve(k_first, win_sym);
@@ -2154,9 +2154,9 @@ task ep_state_config_complete();
          default            : ;
        endcase
        `uvm_info("EP_RECOVERY_RX_OS",$sformatf("DECODED_PEER_OS_SYM0=0x%02h TS1_CNT=%0d TS2_CNT=%0d IDLE_CNT=%0d",
-                 k_first, ep_rx_ts1_count, ep_rx_ts2_count, ep_rx_idle_count),UVM_LOW)
+                 k_first, ep_rx_ts1_count, ep_rx_ts2_count, ep_rx_idle_count),UVM_HIGH)
        `uvm_info("EP_RECOVERY_RX_OS",$sformatf("DECODED_PEER_OS_RATE_ID_SYMBOL=0x%02h DRI=%05b SPEED_CHANGE=%0b",
-                 ep_rx_os_sym[`PCIe_OS_SYM_RATE_ID], ep_rx_dri_rate, ep_rx_speed_change),UVM_LOW)
+                 ep_rx_os_sym[`PCIe_OS_SYM_RATE_ID], ep_rx_dri_rate, ep_rx_speed_change),UVM_HIGH)
     endtask
 
     //-------------------------------------------------------------------------
@@ -2168,7 +2168,7 @@ task ep_state_config_complete();
        int ts2_count;
        rx_done   = 1'b0;
        ts2_count = 0;
-       `uvm_info("EP_RECOVERY",$sformatf("WAITING_FOR_%0d_TS2_FROM_RC",count),UVM_LOW)
+       `uvm_info("EP_RECOVERY",$sformatf("WAITING_FOR_%0d_TS2_FROM_RC",count),UVM_HIGH)
        forever begin
           @(negedge ep_pipe_intf_rx.pclk);
           if (ep_pipe_intf_rx.rx_valid) begin
@@ -2180,7 +2180,7 @@ task ep_state_config_complete();
                 repeat (8) @(negedge ep_pipe_intf_rx.pclk);
                 rx_done = 1'b1;
                 `uvm_info("EP_RECOVERY",$sformatf("%0d_TS2_RECEIVED_FROM_RC_PEER_DRI=%05b",
-                          count, ep_rx_dri_rate),UVM_LOW)
+                          count, ep_rx_dri_rate),UVM_HIGH)
                 break;
              end
           end
@@ -2216,12 +2216,12 @@ task ep_state_config_complete();
     task ep_wait_rc_ts1_os(input int count, input int base_cnt, output bit rx_done);
        rx_done = 1'b0;
        `uvm_info("EP_RECOVERY",$sformatf("WAITING_FOR_%0d_TS1_FROM_RC_DECODED_BASE_TS1_CNT=%0d",
-                 count, base_cnt),UVM_LOW)
+                 count, base_cnt),UVM_HIGH)
        forever begin
           @(negedge ep_pipe_intf_rx.pclk);
           if ((ep_rx_ts1_count - base_cnt) >= count) begin
              `uvm_info("EP_RECOVERY",$sformatf("%0d_DECODED_TS1_RECEIVED_FROM_RC NEW_TS1_CNT=%0d",
-                       count, ep_rx_ts1_count-base_cnt),UVM_LOW)
+                       count, ep_rx_ts1_count-base_cnt),UVM_HIGH)
              rx_done = 1'b1;
              break;
           end
@@ -2231,12 +2231,12 @@ task ep_state_config_complete();
     task ep_wait_rc_ts2_os_rate(input int count, input int base_cnt, output bit rx_done);
        rx_done = 1'b0;
        `uvm_info("EP_RECOVERY",$sformatf("WAITING_FOR_%0d_TS2_FROM_RC_DECODED_BASE_TS2_CNT=%0d",
-                 count, base_cnt),UVM_LOW)
+                 count, base_cnt),UVM_HIGH)
        forever begin
           @(negedge ep_pipe_intf_rx.pclk);
           if ((ep_rx_ts2_count - base_cnt) >= count) begin
              `uvm_info("EP_RECOVERY",$sformatf("%0d_DECODED_TS2_RECEIVED_FROM_RC_PEER_DRI=%05b NEW_TS2_CNT=%0d",
-                       count, ep_rx_dri_rate, ep_rx_ts2_count-base_cnt),UVM_LOW)
+                       count, ep_rx_dri_rate, ep_rx_ts2_count-base_cnt),UVM_HIGH)
              rx_done = 1'b1;
              break;
           end
@@ -2246,12 +2246,12 @@ task ep_state_config_complete();
     task ep_wait_rc_idle_os(input int count, input int base_cnt, output bit rx_done);
        rx_done = 1'b0;
        `uvm_info("EP_RECOVERY",$sformatf("WAITING_FOR_%0d_IDLE_FROM_RC_DECODED_BASE_IDLE_CNT=%0d",
-                 count, base_cnt),UVM_LOW)
+                 count, base_cnt),UVM_HIGH)
        forever begin
           @(negedge ep_pipe_intf_rx.pclk);
           if ((ep_rx_idle_count - base_cnt) >= count) begin
              `uvm_info("EP_RECOVERY",$sformatf("%0d_DECODED_IDLE_RECEIVED_FROM_RC NEW_IDLE_CNT=%0d",
-                       count, ep_rx_idle_count-base_cnt),UVM_LOW)
+                       count, ep_rx_idle_count-base_cnt),UVM_HIGH)
              rx_done = 1'b1;
              break;
           end
@@ -2286,12 +2286,12 @@ task ep_state_config_complete();
        base_ts1    = ep_rx_ts1_count;
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_RcvrLock",UVM_LOW)
-       `uvm_info("EP_RECOVERY","==========================================",UVM_LOW)
+       `uvm_info("EP_RECOVERY","==========================================",UVM_HIGH)
        ep_build_recovery_ts1();
        fork : EP_RECOVERY_RCVR_LOCK_THREADS
           begin
              if (!is_timeout_target) begin
-                `uvm_info("EP_RECOVERY","STARTING_EP_8_TS1_TRANSMISSION",UVM_LOW)
+                `uvm_info("EP_RECOVERY","STARTING_EP_8_TS1_TRANSMISSION",UVM_HIGH)
                 send_ordered_set(ep_ts1_os,`PCIe_RECOVERY_TS1_TX_COUNT,"RECOVERY_TS1");
                 tx_ts1_done = 1'b1;
              end
@@ -2299,7 +2299,7 @@ task ep_state_config_complete();
           end
           begin
              if (!is_timeout_target) begin
-                `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS1_FROM_RC",UVM_LOW)
+                `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS1_FROM_RC",UVM_HIGH)
                 ep_wait_rc_ts1_os(`PCIe_RECOVERY_TS1_RX_COUNT, base_ts1, rx_ts1_done);
              end
              else wait(1'b0);
@@ -2314,7 +2314,7 @@ task ep_state_config_complete();
           return;
        end
        if (tx_ts1_done && rx_ts1_done) begin
-          `uvm_info("EP_RECOVERY","8_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_LOW)
+          `uvm_info("EP_RECOVERY","8_TS1_TX_AND_8_TS1_RX_CONDITIONS_SATISFIED",UVM_HIGH)
           // Equalization applies to the rate being moved to (8 GT/s and above)
           if (ep_rate_gen_num(ep_adv_rate) >= `PCIe_EQ_MIN_GEN) begin
              ep_recovery_state = RECOVERY_EQUALIZATION;
@@ -2343,11 +2343,11 @@ task ep_state_config_complete();
        is_timeout_target = ep_is_timeout_target(LTSSM_TO_RCVRY_EQUALIZATION);
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_Equalization",UVM_LOW)
-       `uvm_info("EP_RECOVERY",$sformatf("EQUALIZING_AT_RATE=%s",ep_cur_rate.name()),UVM_LOW)
+       `uvm_info("EP_RECOVERY",$sformatf("EQUALIZING_AT_RATE=%s",ep_cur_rate.name()),UVM_HIGH)
        if (is_timeout_target) begin
           ep_eq_phase = EQ_PHASE_1;
           ep_build_recovery_ts1();
-          `uvm_info("EP_RECOVERY","TIMEOUT_TEST_EQUALIZATION_WAITING_PHASE1_DECLARED_TIMEOUT",UVM_LOW)
+          `uvm_info("EP_RECOVERY","TIMEOUT_TEST_EQUALIZATION_WAITING_PHASE1_DECLARED_TIMEOUT",UVM_HIGH)
           ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_EQ_PH1);
           ep_timeout_test_finish("RECOVERY_EQUALIZATION");
           return;
@@ -2392,7 +2392,7 @@ task ep_state_config_complete();
           end
           if (tx_eq_done && rx_eq_done) begin
              ep_eq_phase_count++;
-             `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_COMPLETED",phase),UVM_LOW)
+             `uvm_info("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_COMPLETED",phase),UVM_HIGH)
           end
           else begin
              `uvm_error("EP_RECOVERY",$sformatf("EQUALIZATION_PHASE_%0d_TX_RX_CONDITIONS_NOT_MET",phase))
@@ -2413,7 +2413,7 @@ task ep_state_config_complete();
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_Speed",UVM_LOW)
        `uvm_info("EP_RECOVERY",$sformatf("PEER_ADVERTISED=%s WE_ADVERTISED=%s COMMON_RATE=%s",
-                 ep_rx_adv_rate.name(), ep_adv_rate.name(), ep_agreed_rate.name()),UVM_LOW)
+                 ep_rx_adv_rate.name(), ep_adv_rate.name(), ep_agreed_rate.name()),UVM_HIGH)
        ep_adv_rate       = ep_agreed_rate;
        ep_cur_rate       = ep_agreed_rate;
        ep_speed_change   = 1'b0;
@@ -2441,7 +2441,7 @@ task ep_state_config_complete();
        fork : EP_RECOVERY_RCVR_CFG_THREADS
           begin
              if (!is_timeout_target) begin
-                `uvm_info("EP_RECOVERY","STARTING_EP_16_TS2_TRANSMISSION",UVM_LOW)
+                `uvm_info("EP_RECOVERY","STARTING_EP_16_TS2_TRANSMISSION",UVM_HIGH)
                 send_ordered_set(ep_ts2_os,`PCIe_RECOVERY_TS2_TX_COUNT,"RECOVERY_TS2");
                 tx_ts2_done = 1'b1;
              end
@@ -2449,7 +2449,7 @@ task ep_state_config_complete();
           end
           begin
              if (!is_timeout_target) begin
-                `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS2_FROM_RC",UVM_LOW)
+                `uvm_info("EP_RECOVERY","WAITING_FOR_8_TS2_FROM_RC",UVM_HIGH)
                 ep_wait_rc_ts2_os_rate(`PCIe_RECOVERY_TS2_RX_COUNT, base_ts2, rx_ts2_done);
              end
              else wait(1'b0);
@@ -2470,7 +2470,7 @@ task ep_state_config_complete();
           else
              ep_agreed_rate = ep_adv_rate;
           `uvm_info("EP_RECOVERY",$sformatf("RATE_NEGOTIATION WE_ADVERTISE=%s PEER_ADVERTISES=%s AGREED=%s",
-                    ep_adv_rate.name(), ep_rx_adv_rate.name(), ep_agreed_rate.name()),UVM_LOW)
+                    ep_adv_rate.name(), ep_rx_adv_rate.name(), ep_agreed_rate.name()),UVM_HIGH)
           if (ep_rx_adv_rate != ep_adv_rate) begin
              ep_cur_rate = ep_agreed_rate;
              ep_pipe_intf_tx.rate <= ep_cur_rate;
@@ -2509,7 +2509,7 @@ task ep_state_config_complete();
        `uvm_info("EP_RECOVERY","LTSSM_STATE_RECOVERY",UVM_LOW)
        `uvm_info("EP_RECOVERY","SUB_STATE_RECOVERY_Idle",UVM_LOW)
        if (is_timeout_target) begin
-          `uvm_info("EP_RECOVERY","TIMEOUT_TEST_RECOVERY_IDLE_WAITING_DECLARED_TIMEOUT",UVM_LOW)
+          `uvm_info("EP_RECOVERY","TIMEOUT_TEST_RECOVERY_IDLE_WAITING_DECLARED_TIMEOUT",UVM_HIGH)
           ep_ltssm_timer(`PCIe_LTSSM_T_RCVRY_IDLE);
           ep_timeout_test_finish("RECOVERY_IDLE");
           return;
@@ -2517,7 +2517,7 @@ task ep_state_config_complete();
        // Directed Hot Reset (PCIe Base 6.0, Sec 4.2.7.4 Recovery.Idle): when the higher
        // layer sets the Hot Reset bit, leave Recovery.Idle for Hot Reset, not for L0.
        if (item != null && item.link_ctrl_hot_reset) begin
-          `uvm_info("EP_RECOVERY","HOT_RESET_DIRECTED_IN_RECOVERY_IDLE_TO_HOT_RESET",UVM_LOW)
+          `uvm_info("EP_RECOVERY","HOT_RESET_DIRECTED_IN_RECOVERY_IDLE_TO_HOT_RESET",UVM_HIGH)
           ep_main_state = HOT_RESET;
           return;
        end
@@ -2525,12 +2525,12 @@ task ep_state_config_complete();
        ep_build_recovery_idle();
        fork : EP_RECOVERY_IDLE_THREADS
           begin
-             `uvm_info("EP_RECOVERY","STARTING_EP_2_IDLE_TRANSMISSION",UVM_LOW)
+             `uvm_info("EP_RECOVERY","STARTING_EP_2_IDLE_TRANSMISSION",UVM_HIGH)
              send_ordered_set(ep_idle_os,`PCIe_RECOVERY_IDLE_COUNT,"RECOVERY_IDLE");
              tx_idle_done = 1'b1;
           end
            begin
-              `uvm_info("EP_RECOVERY","WAITING_FOR_2_IDLE_FROM_RC",UVM_LOW)
+              `uvm_info("EP_RECOVERY","WAITING_FOR_2_IDLE_FROM_RC",UVM_HIGH)
               ep_wait_rc_idle_os(`PCIe_RECOVERY_IDLE_COUNT, base_idle, rx_idle_done);
            end
            begin
@@ -2555,7 +2555,7 @@ task ep_state_config_complete();
     task scramble(input  bit [7:0] data_in,output bit [7:0] data_out);
       bit scramble_bit;
       data_out = data_in;
-      `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_SCRAMBLER_TASK",  UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_SCRAMBLER_TASK",  UVM_HIGH)
       for(int i = 0; i < 8; i++)
       begin
          scramble_bit = lfsr[22];
@@ -2569,13 +2569,13 @@ task ep_state_config_complete();
             lfsr = (lfsr << 1);
          end
       end
-      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_SCRAMBLER_TASK", UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_SCRAMBLER_TASK", UVM_HIGH)
     endtask
 
    // One PIPE word = 32 bits
     task scramble_32(input  bit [31:0] data_in, output bit [31:0] data_out );
       bit [7:0] temp;
-      `uvm_info("PCIe_PL_MODEL",$sformatf( "SCRAMBLE_32_INPUT = %08h",  data_in),UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL",$sformatf( "SCRAMBLE_32_INPUT = %08h",  data_in),UVM_HIGH)
       scramble( data_in[7:0],temp);
       data_out[7:0] = temp;
       scramble(data_in[15:8],temp);
@@ -2584,14 +2584,14 @@ task ep_state_config_complete();
       data_out[23:16] = temp;
       scramble(data_in[31:24],temp);
       data_out[31:24] = temp;
-      `uvm_info("PCIe_PL_MODEL",$sformatf("SCRAMBLE_32_OUTPUT = %08h",data_out),UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("SCRAMBLE_32_OUTPUT = %08h",data_out),UVM_HIGH)
     endtask
 
     task tx_gray_encode(input  bit [31:0] data_in,output bit [31:0] gray_out);
       bit [1:0] symbol;
       gray_out = 32'b0;
-      `uvm_info("PCIe_PL_MODEL",$sformatf("ENTERED_INTO_GRAY_ENCODE_TASK"),UVM_LOW)
-      `uvm_info("PCIe_PL_MODEL",$sformatf("GRAY_ENCODE_INPUT = %0b",data_in),UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("ENTERED_INTO_GRAY_ENCODE_TASK"),UVM_HIGH)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("GRAY_ENCODE_INPUT = %0b",data_in),UVM_HIGH)
       for(int i = 0; i < 32; i = i + 2)
       begin
          symbol = data_in[i +: 2];
@@ -2608,29 +2608,29 @@ task ep_state_config_complete();
                gray_out[i +: 2] = 2'b00;
          endcase
       end
-      `uvm_info("PCIe_PL_MODEL",$sformatf("GRAY_ENCODE_OUTPUT = %0b",gray_out),UVM_LOW)
-      `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_GRAY_ENCODE_TASK"),UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("GRAY_ENCODE_OUTPUT = %0b",gray_out),UVM_HIGH)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_GRAY_ENCODE_TASK"),UVM_HIGH)
     endtask
 
     task tx_parity_generate(input  bit [31:0] data_in, output bit parity_bit);
-     `uvm_info("PCIe_PL_MODEL",$sformatf("ENTERED_INTO_PARITY_GENERATE_TASK"),UVM_LOW)
+     `uvm_info("PCIe_PL_MODEL",$sformatf("ENTERED_INTO_PARITY_GENERATE_TASK"),UVM_HIGH)
       parity_bit = ^data_in;
-     `uvm_info("PCIe_PL_MODEL",$sformatf("PARITY_INPUT = %08h PARITY = %0b", data_in, parity_bit),UVM_LOW)
-     `uvm_info("PCIe_PL_MODEL",$sformatf("PARITY_GENERATE_OUTPUT =%b",parity_bit),UVM_LOW)
+     `uvm_info("PCIe_PL_MODEL",$sformatf("PARITY_INPUT = %08h PARITY = %0b", data_in, parity_bit),UVM_HIGH)
+     `uvm_info("PCIe_PL_MODEL",$sformatf("PARITY_GENERATE_OUTPUT =%b",parity_bit),UVM_HIGH)
     endtask
   
     task tx_precoder(input bit [31:0] gray_data, output bit [31:0] precoded_data);
       bit [1:0]  current_symbol;
       precoded_data = 32'b0;
-      `uvm_info("PCIe_PL_MODEL",$sformatf("ENTERED_INTO_PRE_ENCODE_TASK"),UVM_LOW)
-      `uvm_info("PCIe_PL_MODEL",$sformatf("PRECODE_INPUT = %0b",gray_data),UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("ENTERED_INTO_PRE_ENCODE_TASK"),UVM_HIGH)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("PRECODE_INPUT = %0b",gray_data),UVM_HIGH)
       for(int i=0;i<32;i=i+2) begin
         current_symbol = gray_data[i+:2];
         precoded_data[i+:2] = current_symbol ^ previous_symbol;
         previous_symbol = precoded_data[i+:2];
       end
-      `uvm_info("PCIe_PL_MODEL",$sformatf("PRECODE_OUTPUT = %0b",precoded_data),UVM_LOW)
-      `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_PRE_ENCODE_TASK"),UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("PRECODE_OUTPUT = %0b",precoded_data),UVM_HIGH)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("EXIT_FROM_PRE_ENCODE_TASK"),UVM_HIGH)
     endtask
 
     //-------------------------------------------------------------------------
@@ -2665,9 +2665,10 @@ task ep_state_config_complete();
              end
           end
        end
-       logger.uvm_report_info("DEBYTE_STRIPE", $sformatf(
+       if (logger.uvm_report_enabled(UVM_HIGH, UVM_INFO, "DEBYTE_STRIPE"))
+         logger.uvm_report_info("DEBYTE_STRIPE", $sformatf(
                  "%s byte-unstriping: %0d lanes -> %0d DWs, %0d stripes",
-                 who, nlanes, enc.size(), buses.size()), UVM_LOW);
+                 who, nlanes, enc.size(), buses.size()), UVM_HIGH);
     endfunction
 
     task tx_process(input  bit [31:0] data_in,output bit [31:0] data_out,input PCIe_sequence_item item);
@@ -2675,42 +2676,42 @@ task ep_state_config_complete();
       bit [31:0] gray_data;
       bit [31:0] pre_data;
       bit        parity;
-      `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_TX_PROCESS_TASK", UVM_LOW)
-      `uvm_info("PCIe_PL_MODEL",$sformatf("The data_in_from PL inside tx_prpcess is %d",data_in), UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL","ENTERED_INTO_TX_PROCESS_TASK", UVM_HIGH)
+      `uvm_info("PCIe_PL_MODEL",$sformatf("The data_in_from PL inside tx_prpcess is %d",data_in), UVM_HIGH)
        tx_process_executed = 1'b1;
       case(item.pkt_mode)
          // NON-FLIT MODE
          NON_FLIT:
          begin
-            `uvm_info("PCIe_PL_MODEL","TX_PROCESS:NON_FLIT_MODE", UVM_LOW)
+            `uvm_info("PCIe_PL_MODEL","TX_PROCESS:NON_FLIT_MODE", UVM_HIGH)
             scramble_32(data_in, scramble_data);
             tx_gray_encode(scramble_data,gray_data);
             tx_parity_generate(gray_data,parity);
             tx_parity_q.push_back(parity);//storing the parity bits in queue in order to check the tx and rx parity is matching
-            `uvm_info("PCIe_PL_MODEL",$sformatf("TX_PARITY = %0b  PARITY_QUEUE_SIZE = %0d",parity,tx_parity_q.size()),UVM_LOW);
+            `uvm_info("PCIe_PL_MODEL",$sformatf("TX_PARITY = %0b  PARITY_QUEUE_SIZE = %0d",parity,tx_parity_q.size()),UVM_HIGH);
             tx_precoder(gray_data,pre_data);
             data_out = pre_data;
          end
          // FLIT MODE
          FLIT:
          begin
-            `uvm_info("PCIe_PL_MODEL","TX_PROCESS:FLIT_MODE", UVM_LOW)
+            `uvm_info("PCIe_PL_MODEL","TX_PROCESS:FLIT_MODE", UVM_HIGH)
             scramble_32(data_in,scramble_data);
             tx_gray_encode(scramble_data,gray_data);
             tx_parity_generate(gray_data,parity);
             tx_parity_q.push_back(parity);//storing the parity bits in queue in order to check the tx and rx parity is matching
-            `uvm_info("PCIe_PL_MODEL",$sformatf("TX_PARITY = %0b  PARITY_QUEUE_SIZE = %0d",parity,tx_parity_q.size()),UVM_LOW);
+            `uvm_info("PCIe_PL_MODEL",$sformatf("TX_PARITY = %0b  PARITY_QUEUE_SIZE = %0d",parity,tx_parity_q.size()),UVM_HIGH);
             tx_precoder(gray_data,pre_data);
             data_out = pre_data;
          end
          default:
          begin
-            `uvm_error("PCIe_PL_MODEL", "INVALID_PCIe_MODE")
+            // `uvm_error("PCIe_PL_MODEL", "INVALID_PCIe_MODE")
             data_out = data_in;
          end
       endcase
-      `uvm_info("PCIe_PL_MODEL", $sformatf("TX_PROCESS_INPUT=%08h OUTPUT=%08h", data_in, data_out),UVM_LOW)
-      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_TX_PROCESS_TASK",  UVM_LOW)
+      `uvm_info("PCIe_PL_MODEL", $sformatf("TX_PROCESS_INPUT=%08h OUTPUT=%08h", data_in, data_out),UVM_HIGH)
+      `uvm_info("PCIe_PL_MODEL","EXIT_FROM_TX_PROCESS_TASK",  UVM_HIGH)
     endtask
 
    // PL model receives the 242-byte DL result.
@@ -2803,7 +2804,7 @@ task ep_state_config_complete();
           calculate_final_fec_256b(ep_flit_crc_body, ep_fec_bytes);
           `uvm_info("EP_PL_MONITOR",
                     $sformatf("EP_TX_FEC_6_BYTES = %p",ep_fec_bytes),
-                    UVM_LOW)
+                    UVM_HIGH)
 
           ep_flit_with_crc_fec_body = {ep_flit_crc_body, ep_fec_bytes};
 
@@ -2853,7 +2854,7 @@ task ep_state_config_complete();
             for(int c = 0; c < 6; c++) line = {line, $sformatf(" %02h", ep_flit_with_crc_fec_body[250+c])};
             dump = {dump, line, "\n"};
             dump = {dump, "        ============================================================"};
-            `uvm_info("EP_TX_256B_DUMP", dump, UVM_LOW)
+            `uvm_info("EP_TX_256B_DUMP", dump, UVM_HIGH)
           end
 
           ep_flit_ready_flag = 1'b1;
@@ -3001,11 +3002,11 @@ task ep_state_config_complete();
      end
 
      crc_result = {rem[0], rem[1], rem[2], rem[3], rem[4], rem[5], rem[6], rem[7]};
-     `uvm_info("EP_PL_MODEL",$sformatf("CRC_RECOMPUTED = 0x%016h",crc_result),UVM_LOW)
+     `uvm_info("EP_PL_MODEL",$sformatf("CRC_RECOMPUTED = 0x%016h",crc_result),UVM_HIGH)
      `uvm_info("EP_PL_MONITOR",
                $sformatf("EP_CRC_BYTES = {%02h %02h %02h %02h %02h %02h %02h %02h}",
                          rem[0],rem[1],rem[2],rem[3],rem[4],rem[5],rem[6],rem[7]),
-               UVM_LOW)
+               UVM_HIGH)
      return crc_result;
    endfunction : calculate_final_crc_250b
 
@@ -3079,9 +3080,9 @@ task ep_state_config_complete();
 
      `uvm_info("EP_PL_MODEL",
                $sformatf("FEC_RECOMPUTED: G0(C=0x%02h,P=0x%02h) G1(C=0x%02h,P=0x%02h) G2(C=0x%02h,P=0x%02h)",
-                         c0, p0, c1, p1, c2, p2), UVM_LOW)
+                         c0, p0, c1, p1, c2, p2), UVM_HIGH)
      `uvm_info("EP_PL_MONITOR",
-               $sformatf("EP_FEC_BYTES = %p",fec_bytes), UVM_LOW)
+               $sformatf("EP_FEC_BYTES = %p",fec_bytes), UVM_HIGH)
 
     // Display the full FEC packet format (byte and per-Group field views).
     `uvm_info("EP_TX_FEC_PACKET",
@@ -3116,7 +3117,7 @@ task ep_state_config_complete();
               "          GROUP2_PARITY [7:0] = %02h\n",
               "        ============================================================"},
               fec_bytes[0],fec_bytes[1],fec_bytes[2],fec_bytes[3],fec_bytes[4],fec_bytes[5],
-              c0,p0,c1,p1,c2,p2), UVM_LOW)
+              c0,p0,c1,p1,c2,p2), UVM_HIGH)
    endfunction : calculate_final_fec_256b
 
    // Convenience: append 6B ECC onto an assembled 250B Flit body queue
@@ -3154,12 +3155,12 @@ task ep_state_config_complete();
 
      `uvm_info("EP_PL_MODEL",
                $sformatf("CRC_CHECK : EXPECTED=0x%016h RECEIVED=0x%016h", expected_crc, received_crc),
-               UVM_LOW)
+               UVM_HIGH)
      `uvm_info("EP_PL_MONITOR",
                $sformatf("EP_EXPECTED_CRC_8_BYTES = {%02h %02h %02h %02h %02h %02h %02h %02h} (0x%016h)",
                          expected_crc[63:56],expected_crc[55:48],expected_crc[47:40],expected_crc[39:32],
                          expected_crc[31:24],expected_crc[23:16],expected_crc[15:8], expected_crc[7:0],
-                         expected_crc), UVM_LOW)
+                         expected_crc), UVM_HIGH)
      `uvm_info("EP_PL_MONITOR",
                $sformatf("EP_RX_CRC_8_BYTES       = {%02h %02h %02h %02h %02h %02h %02h %02h} (0x%016h)",
                          flit_in[`PCIe_DLP_FLIT_BYTE_W+0],flit_in[`PCIe_DLP_FLIT_BYTE_W+1],
@@ -3205,11 +3206,11 @@ task ep_state_config_complete();
 
      `uvm_info("EP_PL_MODEL",
                $sformatf("FEC_CHECK : EXPECTED=%p RECEIVED=%p PASS=%0b",
-                         ecc_expected, ecc_received, fec_pass), UVM_LOW)
+                         ecc_expected, ecc_received, fec_pass), UVM_HIGH)
      `uvm_info("EP_PL_MONITOR",
-               $sformatf("EP_EXPECTED_FEC_6_BYTES = %p",ecc_expected), UVM_LOW)
+               $sformatf("EP_EXPECTED_FEC_6_BYTES = %p",ecc_expected), UVM_HIGH)
      `uvm_info("EP_PL_MONITOR",
-               $sformatf("EP_RX_FEC_6_BYTES       = %p",ecc_received), UVM_LOW)
+               $sformatf("EP_RX_FEC_6_BYTES       = %p",ecc_received), UVM_HIGH)
    endfunction : check_final_fec_256b
 
 endclass

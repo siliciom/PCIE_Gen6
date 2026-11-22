@@ -91,7 +91,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
     endfunction
 
     function void build_phase(uvm_phase phase);
-     `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_BUILD_PHASE",UVM_LOW)
+     `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_BUILD_PHASE",UVM_HIGH)
       super.build_phase(phase);
  	  rc_con_tx_mon_ap =new("rc_con_tx_mon_ap",this);
  	  rc_con_rx_mon_ap =new("rc_con_rx_mon_ap",this);
@@ -123,7 +123,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
         rx_os_dword_count = 0;
         tx_total_rcvd_dwords = 0;
         rx_total_rcvd_dwords = 0;
-        `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_BUILD_PHASE",UVM_LOW)
+        `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_BUILD_PHASE",UVM_HIGH)
     endfunction
   
     //-------------------------------------------------------------------------
@@ -147,7 +147,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
     endfunction
 
     task run_phase(uvm_phase phase);
-       `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
+       `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_RUN_PHASE",UVM_HIGH)
        fork
          forever begin
             receiving_pipe_tx(rc_pipe_intf_tx);
@@ -156,7 +156,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
             receiving_pipe_rx(rc_pipe_intf_rx);
          end
        join
-       `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_RUN_PHASE",UVM_LOW)
+       `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_RUN_PHASE",UVM_HIGH)
     endtask
 
     task receiving_pipe_tx(virtual PCIe_RC_interface rc_pipe_intf_tx);
@@ -176,7 +176,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus_q[$];
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
-      `uvm_info("RC_CONTROLLER", "ENTERED_INTO_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_LOW)
+      `uvm_info("RC_CONTROLLER", "ENTERED_INTO_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_HIGH)
 
       dword_in_os = 0;
 
@@ -232,24 +232,24 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                tx_in_os = 1'b0;
                `uvm_info("RC_CONTROLLER", $sformatf(
                   "[TX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h (training stream length)",
-                  tx_os_dword_count, tx_lfsr), UVM_LOW)
+                  tx_os_dword_count, tx_lfsr), UVM_HIGH)
             end
-            `uvm_info("TX_DATA",$sformatf("tx_data_inside_monitor_rc = %h :: %d ",tx_data,tx_data),UVM_LOW)
+            `uvm_info("TX_DATA",$sformatf("tx_data_inside_monitor_rc = %h :: %d ",tx_data,tx_data),UVM_HIGH)
 
             `uvm_info("RC_CONTROLLER", $sformatf(
                "[TX_DBG] LTSSM=%s IN_OS=%0b DWORD_CNT=%0d DWORD_IN_OS=%0d LFSR=%06h PIPE=%08h",
                rc_pl_model.rc_main_state.name(), tx_in_os,
-               tx_os_dword_count, dword_in_os, tx_lfsr, tx_data), UVM_LOW)
+               tx_os_dword_count, dword_in_os, tx_lfsr, tx_data), UVM_HIGH)
 
             // 1. Reverse PRECODING
             de_precoder_tx(tx_data, deprecoded_data);
             `uvm_info("RC_CONTROLLER", $sformatf("TX DWORD=%0d PIPE=%08h DEPRECODED=%08h",
-                       tx_os_dword_count, tx_data, deprecoded_data), UVM_LOW)
+                       tx_os_dword_count, tx_data, deprecoded_data), UVM_HIGH)
 
             // 2. Reverse GRAY ENCODING
             gray_decode_tx(deprecoded_data, gray_decoded_data);
             `uvm_info("RC_CONTROLLER", $sformatf("TX DWORD=%0d GRAY_DECODED=%08h",
-                       tx_os_dword_count, gray_decoded_data), UVM_LOW)
+                       tx_os_dword_count, gray_decoded_data), UVM_HIGH)
 
             descrambled_data = gray_decoded_data;
 
@@ -264,7 +264,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                   original_symbol = decoded_symbol;
                   `uvm_info("RC_CONTROLLER", $sformatf(
                      "[TX_DBG] BYPASS DWORD=%0d SYM=%0d LFSR_NA=%06h DATA=%02h",
-                     tx_os_dword_count, symbol_idx, tx_lfsr, original_symbol), UVM_LOW)
+                     tx_os_dword_count, symbol_idx, tx_lfsr, original_symbol), UVM_HIGH)
                end
                else begin
                   // NORMAL DESCRAMBLING
@@ -272,19 +272,19 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                   `uvm_info("RC_CONTROLLER", $sformatf(
                      "[TX_DBG] DESCR DWORD=%0d SYM=%0d LFSR_B=%06h LFSR_A=%06h IN=%02h OUT=%02h",
                      tx_os_dword_count, symbol_idx, lfsr_before, tx_lfsr,
-                     decoded_symbol, original_symbol), UVM_LOW)
+                     decoded_symbol, original_symbol), UVM_HIGH)
                end
                descrambled_data[(byte_idx * 8) +: 8] = original_symbol;
             end
 
             `uvm_info("RC_CONTROLLER", $sformatf(
                "[TX_DBG] FINAL DWORD=%0d DATA=%08h LFSR=%06h IN_OS=%0b",
-               tx_os_dword_count, descrambled_data, tx_lfsr, tx_in_os), UVM_LOW)
+               tx_os_dword_count, descrambled_data, tx_lfsr, tx_in_os), UVM_HIGH)
              pcie_seq_item.data_q_rc_mon_con_tx.push_back(descrambled_data);
              tx_total_rcvd_dwords++;
              `uvm_info("RC_CON_MONITOR", $sformatf(
                 "RECEIVED_TX_DATA_IN_RC_CONTROLLER_MONITOR = %08h RC_CONTROLLER_MON_Queue_Size = %0d",
-                descrambled_data, tx_total_rcvd_dwords), UVM_LOW)
+                descrambled_data, tx_total_rcvd_dwords), UVM_HIGH)
             rc_con_tx_mon_ap.write(pcie_seq_item);
 
             // [ADDED] keep only the trailing 64 tx dwords = current 256B flit (RC->EP)
@@ -325,7 +325,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                tx_in_os = 1'b0;
                `uvm_info("RC_CONTROLLER", $sformatf(
                   "[TX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h — full descramble from now on",
-                  tx_os_dword_count, tx_lfsr), UVM_LOW)
+                  tx_os_dword_count, tx_lfsr), UVM_HIGH)
             end
             end // foreach (monitor_logical_dwords)
          end
@@ -337,7 +337,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
      rc_mon_ap_dl.write(pcie_seq_item);
       end
      end 
-      `uvm_info("RC_CONTROLLER", "EXIT_FROM_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_LOW)
+      `uvm_info("RC_CONTROLLER", "EXIT_FROM_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_TX_DATA", UVM_HIGH)
     endtask
 
     task receiving_pipe_rx(virtual PCIe_RC_interface rc_pipe_intf_rx);
@@ -357,7 +357,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus_q[$];
       bit [`PCIE_LANE_BUS_W-1:0] monitor_lane_bus;
 
-      `uvm_info("RC_CONTROLLER", "ENTERED_INTO_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
+      `uvm_info("RC_CONTROLLER", "ENTERED_INTO_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_HIGH)
 
       dword_in_os = 0;
 
@@ -413,23 +413,23 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                rx_in_os = 1'b0;
                `uvm_info("RC_CONTROLLER", $sformatf(
                   "[RX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h (training stream length)",
-                  rx_os_dword_count, rx_lfsr), UVM_LOW)
+                  rx_os_dword_count, rx_lfsr), UVM_HIGH)
             end
 
             `uvm_info("RC_CONTROLLER", $sformatf(
                "[RX_DBG] LTSSM=%s IN_OS=%0b DWORD_CNT=%0d DWORD_IN_OS=%0d LFSR=%06h PIPE=%08h",
                rc_pl_model.rc_main_state.name(), rx_in_os,
-               rx_os_dword_count, dword_in_os, rx_lfsr, rx_data), UVM_LOW)
+               rx_os_dword_count, dword_in_os, rx_lfsr, rx_data), UVM_HIGH)
 
             // 1. Reverse PRECODING
             de_precoder_rx(rx_data, deprecoded_data);
             `uvm_info("RC_CONTROLLER", $sformatf("RX DWORD=%0d PIPE=%08h DEPRECODED=%08h",
-                       rx_os_dword_count, rx_data, deprecoded_data), UVM_LOW)
+                       rx_os_dword_count, rx_data, deprecoded_data), UVM_HIGH)
 
             // 2. Reverse GRAY CODING
             gray_decode_rx(deprecoded_data, gray_decoded_data);
             `uvm_info("RC_CONTROLLER", $sformatf("RX DWORD=%0d GRAY_DECODED=%08h",
-                       rx_os_dword_count, gray_decoded_data), UVM_LOW)
+                       rx_os_dword_count, gray_decoded_data), UVM_HIGH)
 
             descrambled_data = gray_decoded_data;
 
@@ -444,7 +444,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                   original_symbol = decoded_symbol;
                   `uvm_info("RC_CONTROLLER", $sformatf(
                      "[RX_DBG] BYPASS DWORD=%0d SYM=%0d LFSR_NA=%06h DATA=%02h",
-                     rx_os_dword_count, symbol_idx, rx_lfsr, original_symbol), UVM_LOW)
+                     rx_os_dword_count, symbol_idx, rx_lfsr, original_symbol), UVM_HIGH)
                end
                else begin
                   // NORMAL DESCRAMBLING
@@ -452,20 +452,20 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                   `uvm_info("RC_CONTROLLER", $sformatf(
                      "[RX_DBG] DESCR DWORD=%0d SYM=%0d LFSR_B=%06h LFSR_A=%06h IN=%02h OUT=%02h",
                      rx_os_dword_count, symbol_idx, lfsr_before, rx_lfsr,
-                     decoded_symbol, original_symbol), UVM_LOW)
+                     decoded_symbol, original_symbol), UVM_HIGH)
                end
                descrambled_data[(byte_idx * 8) +: 8] = original_symbol;
             end
 
             `uvm_info("RC_CONTROLLER", $sformatf(
                "[RX_DBG] FINAL DWORD=%0d DATA=%08h LFSR=%06h IN_OS=%0b",
-               rx_os_dword_count, descrambled_data, rx_lfsr, rx_in_os), UVM_LOW)
+               rx_os_dword_count, descrambled_data, rx_lfsr, rx_in_os), UVM_HIGH)
 
              pcie_seq_item.data_q_rc_mon_con_rx.push_back(descrambled_data);
              rx_total_rcvd_dwords++;
              `uvm_info("RC_CON_MONITOR", $sformatf(
                 "RECEIVED_RX_DATA_IN_RC_CONTROLLER_MONITOR=%08h RC_CONTROLLER_MON_Queue_Size=%0d",
-                descrambled_data, rx_total_rcvd_dwords), UVM_LOW)
+                descrambled_data, rx_total_rcvd_dwords), UVM_HIGH)
             //pcie_seq_item.data_q_rc_mon_con_rx.push_back(descrambled_data);
             //rc_flit_win.push_back(descrambled_data);
            // if (rc_flit_win.size() > 64) void'(rc_flit_win.pop_front());
@@ -495,7 +495,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                rx_in_os = 1'b0;
                `uvm_info("RC_CONTROLLER", $sformatf(
                   "[RX_DBG] *** EXITED_OS_MODE *** TOTAL_DWORDS=%0d LFSR=%06h — full descramble from now on",
-                  rx_os_dword_count, rx_lfsr), UVM_LOW)
+                  rx_os_dword_count, rx_lfsr), UVM_HIGH)
             end
             end // foreach (monitor_logical_dwords)
          end
@@ -506,7 +506,7 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
     if(rc_pl_model.link_up==1) begin
     // rc_dl_model.handle_incoming_flit(dlp_rc_rx,is_valid);
       pcie_seq_item.dlp=dlp_rc_rx;
-      `uvm_info("RC_CONTROLLER",$sformatf("dlp_rc_rx=%p",pcie_seq_item.dlp),UVM_LOW)
+      `uvm_info("RC_CONTROLLER",$sformatf("dlp_rc_rx=%p",pcie_seq_item.dlp),UVM_HIGH)
 
       rc_ep_mon_ap_dl.write(pcie_seq_item);
       end
@@ -518,26 +518,26 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
     end
       end
       
-      `uvm_info("RC_CONTROLLER", "EXIT_FROM_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_LOW)
+      `uvm_info("RC_CONTROLLER", "EXIT_FROM_RC_CONTROLLER_MONITOR_RECEIVING_PIPE_RX_DATA", UVM_HIGH)
     endtask
 
     task de_precoder_tx(input bit [`PCIe_MON_DATA_W-1:0] data_in, output bit [`PCIe_MON_DATA_W-1:0] decoder_out);
       bit [1:0] current,dec;
           
-      `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_DE_PRECODE_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_DE_PRECODE_TASK",UVM_HIGH)
        for(int i=0;i<`PCIe_MON_DATA_W;i+=2) begin
          current = data_in[i+:2];
          dec = current^tx_previous_symbol;
          decoder_out[i+:2] = dec;
          tx_previous_symbol = current;
        end
-      `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_DE_PRECODE_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_DE_PRECODE_TASK",UVM_HIGH)
     endtask
    
     
     task gray_decode_tx(input  bit [`PCIe_MON_DATA_W-1:0] data_in,output bit [`PCIe_MON_DATA_W-1:0] gray_out);
       bit [1:0] symbol;
-      `uvm_info("RC_CONTROLLE_MON", "ENTERED_INTO_RC_MON_GRAY_DECODE_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLE_MON", "ENTERED_INTO_RC_MON_GRAY_DECODE_TASK",UVM_HIGH)
       
        for (int i = 0; i < `PCIe_MON_DATA_W; i += 2) begin
          symbol = data_in[i +: 2];
@@ -554,14 +554,14 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                    gray_out[i +: 2] = 2'b00;
          endcase
       end
-      `uvm_info("RC_CONTROLLE_MON", "EXIT_FROM_RC_MON_GRAY_DECODE_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLE_MON", "EXIT_FROM_RC_MON_GRAY_DECODE_TASK",UVM_HIGH)
     endtask
 
     task descrambler_tx(input  bit [`PCIe_MON_DATA-1:0] data_in,output bit [`PCIe_MON_DATA-1:0] data_out);
       bit descramble_bit;
       data_out = data_in;
      
-      `uvm_info("RC_CONTROLLER_MON","ENTERED_INTO_DESCRAMBLER_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLER_MON","ENTERED_INTO_DESCRAMBLER_TASK",UVM_HIGH)
          for (int i = 0; i < `PCIe_MON_DATA; i++) begin
            descramble_bit = tx_lfsr[`PCIe_PL_SCRAMBLER_LFSR_W-1];
            data_out[i] = data_in[i] ^ descramble_bit;
@@ -572,25 +572,25 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                tx_lfsr = (tx_lfsr << 1);
            end
         end
-        `uvm_info("PCIe_RC_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_LOW)
-        `uvm_info("PCIe_RC_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_TASK",UVM_LOW )
+        `uvm_info("PCIe_RC_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_HIGH)
+        `uvm_info("PCIe_RC_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_TASK",UVM_HIGH )
     endtask
 
     task de_precoder_rx(input bit [`PCIe_MON_DATA_W-1:0] data_in, output bit [`PCIe_MON_DATA_W-1:0] decoder_out);
       bit [1:0] current,dec;
-      `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_DE_PRECODE_RX_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLER","ENTERED_INTO_RC_CONTROLLER_MONITOR_DE_PRECODE_RX_TASK",UVM_HIGH)
        for(int i=0;i<`PCIe_MON_DATA_W;i+=2) begin
          current = data_in[i+:2];
          dec = current^rx_previous_symbol;
          decoder_out[i+:2] = dec;
          rx_previous_symbol = current;
        end
-      `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_DE_PRECODE_RX_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLER","EXIT_FROM_RC_CONTROLLER_MONITOR_DE_PRECODE_RX_TASK",UVM_HIGH)
     endtask
    
     task gray_decode_rx(input  bit [`PCIe_MON_DATA_W-1:0] data_in,output bit [`PCIe_MON_DATA_W-1:0] gray_out);
       bit [1:0] symbol;
-      `uvm_info("RC_CONTROLLE_MON", "ENTERED_INTO_RC_MON_GRAY_DECODE_RX_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLE_MON", "ENTERED_INTO_RC_MON_GRAY_DECODE_RX_TASK",UVM_HIGH)
       
        for (int i = 0; i < `PCIe_MON_DATA_W; i += 2) begin
          symbol = data_in[i +: 2];
@@ -607,14 +607,14 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                    gray_out[i +: 2] = 2'b00;
          endcase
       end
-      `uvm_info("RC_CONTROLLE_MON", "EXIT_FROM_RC_MON_GRAY_DECODE_RX_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLE_MON", "EXIT_FROM_RC_MON_GRAY_DECODE_RX_TASK",UVM_HIGH)
     endtask
 
     task descrambler_rx(input  bit [`PCIe_MON_DATA-1:0] data_in,output bit [`PCIe_MON_DATA-1:0] data_out);
       bit descramble_bit;
       data_out = data_in;
      
-      `uvm_info("RC_CONTROLLER_MON","ENTERED_INTO_DESCRAMBLER_RX_TASK",UVM_LOW)
+      `uvm_info("RC_CONTROLLER_MON","ENTERED_INTO_DESCRAMBLER_RX_TASK",UVM_HIGH)
          for (int i = 0; i < `PCIe_MON_DATA; i++) begin
            descramble_bit = rx_lfsr[`PCIe_PL_SCRAMBLER_LFSR_W-1];
            data_out[i] = data_in[i] ^ descramble_bit;
@@ -625,8 +625,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
                rx_lfsr = (rx_lfsr << 1);
            end
         end
-        `uvm_info("PCIe_RC_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_LOW)
-        `uvm_info("PCIe_RC_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_RX_TASK",UVM_LOW )
+        `uvm_info("PCIe_RC_CONTROLLER_MON",$sformatf("DESCRAMBLED_DATA = %08h",data_out), UVM_HIGH)
+        `uvm_info("PCIe_RC_CONTROLLER_MON","EXIT_FROM_DESCRAMBLER_RX_TASK",UVM_HIGH )
     endtask
 
   task collect_dlp_RC_tx(output bit[0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp_rc_tx, ref PCIe_sequence_item item);
@@ -648,8 +648,8 @@ class PCIe_RC_controller_monitor extends uvm_monitor;
       dlp_rc_tx[i] = word[8*(idx%4) +: 8];
    end
 
-   `uvm_info("RC_CON_MONITOR",$sformatf("collected tlp_rc_tx from rc monitor is tlp=%p",tlp_rc_tx),UVM_LOW);
-   `uvm_info("RC_CON_MONITOR",$sformatf("collected dlp_rc_tx from rc monitor is dlp=%p",dlp_rc_tx),UVM_LOW);
+   `uvm_info("RC_CON_MONITOR",$sformatf("collected tlp_rc_tx from rc monitor is tlp=%p",tlp_rc_tx),UVM_HIGH);
+   `uvm_info("RC_CON_MONITOR",$sformatf("collected dlp_rc_tx from rc monitor is dlp=%p",dlp_rc_tx),UVM_HIGH);
 endtask
 
    // collect the flit 242 bytes from the pipe interface
@@ -671,8 +671,8 @@ endtask
       dlp_rc_rx[i] = word[8*(idx%4) +: 8];
    end
 
-      `uvm_info("RC_CON_MONITOR",$sformatf("collected tlp_rc_rx from rc monitor is tlp=%p",tlp_rc_rx),UVM_LOW);
-      `uvm_info("RC_CON_MONITOR",$sformatf("collected dlp_rc_rx from rc monitor is dlp=%p",dlp_rc_rx),UVM_LOW);
+      `uvm_info("RC_CON_MONITOR",$sformatf("collected tlp_rc_rx from rc monitor is tlp=%p",tlp_rc_rx),UVM_HIGH);
+      `uvm_info("RC_CON_MONITOR",$sformatf("collected dlp_rc_rx from rc monitor is dlp=%p",dlp_rc_rx),UVM_HIGH);
    endtask
   
         
@@ -980,7 +980,7 @@ endtask
          fec_corrected_cnt_grp[g]++;
          `uvm_info(get_type_name(),
                    $sformatf("FEC_DECODE : GROUP%0d SINGLE_SYMBOL_ERROR CORRECTED : group_byte=%0d flit_byte=%0d error_magnitude=0x%02h SYND_CHECK=0x%02h SYND_PARITY=0x%02h",
-                             g, err_byte, err_flit_pos, err_mag, synd_check, synd_parity), UVM_LOW)
+                             g, err_byte, err_flit_pos, err_mag, synd_check, synd_parity), UVM_HIGH)
        end
        else if(unc_err) begin
          fec_unc_any = 1'b1;
@@ -1005,7 +1005,7 @@ endtask
                          fec_corrected_syms, fec_unc_any,
                          fec_last_synd_check[0], fec_last_synd_parity[0],
                          fec_last_synd_check[1], fec_last_synd_parity[1],
-                         fec_last_synd_check[2], fec_last_synd_parity[2]), UVM_LOW)
+                         fec_last_synd_check[2], fec_last_synd_parity[2]), UVM_HIGH)
    endfunction : fec_decode_flit_256b
 
    // FEC correction counter summary

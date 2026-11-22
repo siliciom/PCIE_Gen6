@@ -39,7 +39,7 @@ class PCIe_base_test extends uvm_test;
     endfunction
   
     function void build_phase(uvm_phase phase);
-      `uvm_info("PCIe_TEST","ENTERED_INTO_TEST_BUILD_PHASE",UVM_LOW)
+      `uvm_info("PCIe_TEST","ENTERED_INTO_TEST_BUILD_PHASE",UVM_HIGH)
        super.build_phase(phase);
          if ($test$plusargs("NO_ENUM_FIRST")) run_enum_first = 1'b0;
          // [ENUM_FIRST] tells the RC driver + enumeration sequence to bring the link up first
@@ -56,7 +56,7 @@ class PCIe_base_test extends uvm_test;
          ep_controller_sequence = PCIe_EP_controller_base_sequence::type_id::create("ep_controller_sequence",this);
          ep_phy_sequence = PCIe_EP_phy_base_sequence::type_id::create("ep_phy_sequence",this);
          rc_phy_sequence = PCIe_RC_phy_base_sequence::type_id::create("rc_phy_sequence",this);
-      `uvm_info("PCIe_TEST","EXIT_FROM_TEST_BUILD_PHASE",UVM_LOW)
+      `uvm_info("PCIe_TEST","EXIT_FROM_TEST_BUILD_PHASE",UVM_HIGH)
      endfunction
   
      function void end_of_elaboration_phase(uvm_phase phase); 
@@ -64,7 +64,7 @@ class PCIe_base_test extends uvm_test;
      endfunction
       
      task run_phase(uvm_phase phase);
-      `uvm_info("PCIe_TEST","ENTERED_INTO_TEST_RUN_PHASE",UVM_LOW)
+      `uvm_info("PCIe_TEST","ENTERED_INTO_TEST_RUN_PHASE",UVM_HIGH)
        phase.raise_objection(this);
          fork
           begin
@@ -84,7 +84,7 @@ class PCIe_base_test extends uvm_test;
 	 join
        #20000;
        phase.drop_objection(this);   
-      `uvm_info("PCIe_TEST","EXIT_FROM_TEST_RUN_PHASE",UVM_LOW)
+      `uvm_info("PCIe_TEST","EXIT_FROM_TEST_RUN_PHASE",UVM_HIGH)
      endtask
     
    virtual function void report_phase(uvm_phase phase);

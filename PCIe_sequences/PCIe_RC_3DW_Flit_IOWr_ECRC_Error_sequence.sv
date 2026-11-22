@@ -77,7 +77,7 @@ class PCIe_RC_3DW_Flit_IOWr_ECRC_Error_sequence extends PCIe_RC_controller_base_
     pcie_seq_item.inject_ecrc_err = 1'b1;   // [TL_ERR_INJ] ECRC + 1 after it is calculated
 
     `uvm_info("PCIE_RC_3DW_FLIT_IOWR_ECRC_ERROR_SEQUENCE", "Sending 3DW Flit IOWr with ECRC + 1 (ECRC error)", UVM_LOW)
-    pcie_seq_item.print();
+    if (uvm_top.uvm_report_enabled(UVM_HIGH, UVM_INFO, "ITEM_PRINT")) pcie_seq_item.print();
     finish_item(pcie_seq_item);
 
     `uvm_info("PCIE_RC_3DW_FLIT_IOWR_ECRC_ERROR_SEQUENCE", "EXIT_FROM_SEQUENCE_BODY", UVM_LOW)

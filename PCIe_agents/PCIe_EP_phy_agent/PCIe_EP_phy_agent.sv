@@ -27,19 +27,19 @@ class PCIe_EP_phy_agent extends uvm_agent;
       endfunction
   
       function void build_phase(uvm_phase phase);
-         `uvm_info("EP_PHY","ENTERED_INTO_EP_PHY_AGENT_BUILD_PHASE",UVM_LOW)
+         `uvm_info("EP_PHY","ENTERED_INTO_EP_PHY_AGENT_BUILD_PHASE",UVM_HIGH)
    	  super.build_phase(phase);   
     	    ep_phy_driver    = PCIe_EP_phy_driver::type_id::create("ep_phy_driver",this);
     	    ep_phy_monitor   = PCIe_EP_phy_monitor::type_id::create("ep_phy_monitor",this);
     	    ep_phy_sequencer = PCIe_EP_phy_sequencer::type_id::create("ep_phy_sequencer",this); 
-          `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_AGENT_BUILD_PHASE",UVM_LOW)
+          `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_AGENT_BUILD_PHASE",UVM_HIGH)
       endfunction
   
       function void connect_phase(uvm_phase phase);
-        `uvm_info("EP_PHY","ENTERED_INTO_EP_PHY_AGENT_CONNECT_PHASE",UVM_LOW)
+        `uvm_info("EP_PHY","ENTERED_INTO_EP_PHY_AGENT_CONNECT_PHASE",UVM_HIGH)
           super.connect_phase(phase);
           ep_phy_driver.seq_item_port.connect(ep_phy_sequencer.seq_item_export);
-        `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_AGENT_CONNECT_PHASE",UVM_LOW)
+        `uvm_info("EP_PHY","EXIT_FROM_EP_PHY_AGENT_CONNECT_PHASE",UVM_HIGH)
       endfunction
   
 endclass
