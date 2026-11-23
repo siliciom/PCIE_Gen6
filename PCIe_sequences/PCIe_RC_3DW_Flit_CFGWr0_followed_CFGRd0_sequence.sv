@@ -56,7 +56,7 @@ class PCIe_RC_3DW_Flit_CFGWr0_followed_CFGRd0_sequence extends PCIe_RC_controlle
 
          ep == 1'b0;
 
-         tag          == 14'h0031;
+         tag          == 14'h0030;
          requester_id == 16'h0100;
 
          tc   == 3'h0;

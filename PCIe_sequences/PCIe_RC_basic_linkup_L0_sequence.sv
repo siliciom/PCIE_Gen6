@@ -37,6 +37,8 @@ class PCIe_RC_basic_linkup_L0_sequence extends PCIe_RC_controller_base_sequence;
       tx_valid             == 1'b0;
       rate                 == 3'b000;
       pkt_mode             == FLIT;
+      txn_type             == PCIe_TL_MEM;
+      length               == `PCIe_TL_LEN_MIN;
     }) begin
       `uvm_error("RC_BASIC_LINKUP_L0_SEQ","RC_basic_linkup_L0_sequence_randomization_failed")
     end

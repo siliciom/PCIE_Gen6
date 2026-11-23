@@ -540,7 +540,7 @@ class PCIe_EP_PL_model extends uvm_component;
        //================Drive Default PIPE Signals=======================
        ep_pipe_intf_tx.tx_elec_idle   <= item.tx_elec_idle;
        ep_pipe_intf_tx.tx_valid      <= 1'b0;
-       ep_pipe_intf_tx.rate          <= item.rate;
+       ep_pipe_intf_tx.rate          <= `PCIe_RATE_NOT_NEGOTIATED;
        `uvm_info("EP_LTSSM","Driving_PIPE_Signals",UVM_HIGH)
        `uvm_info("EP_LTSSM",$sformatf("TxElecIdle  = %0b",item.tx_elec_idle),UVM_HIGH)
        `uvm_info("EP_LTSSM",$sformatf("TxDataValid = %0b",item.tx_valid),UVM_HIGH)

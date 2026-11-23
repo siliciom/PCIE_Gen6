@@ -32,24 +32,24 @@ interface PCIe_RC_interface(input logic pclk);
    //----------------------------------------
    // MAC -> PHY (Transmit)
    //----------------------------------------
-   logic [31:0] tx_data;
+   logic [31:0] tx_data = '0;
    logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_lane;
    logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_striped = '0;
    logic        tx_striped = 1'b0;
-   logic        tx_valid;
-   logic        tx_elec_idle;
-   logic        tx_detect_rx;
-   logic [1:0]  powerdown;
-   logic [2:0]  rate;
+   logic        tx_valid = 1'b0;
+   logic        tx_elec_idle = 1'b1;
+   logic        tx_detect_rx = 1'b0;
+   logic [1:0]  powerdown = 2'b00;
+   logic [2:0]  rate = `PCIe_RATE_NOT_NEGOTIATED;
    //----------------------------------------
    // PHY -> MAC (Receive)
    //----------------------------------------
    logic [31:0] rx_data;
-   logic [`PCIE_NUM_LANES-1:0][31:0] rx_data_lane;
-   logic        rx_valid;
-   logic        phy_status;
-   logic        rx_elec_idle;
-   logic [2:0]  rx_status;
+   logic [`PCIE_NUM_LANES-1:0][31:0] rx_data_lane = '0;
+   logic        rx_valid = 1'b0;
+   logic        phy_status = 1'b0;
+   logic        rx_elec_idle = 1'b1;
+   logic [2:0]  rx_status = 3'b000;
 
    // Ordered Sets / LTSSM traffic : scalar tx_data is broadcast on every lane.
    // FLIT data : the PL/controller drives tx_data_striped and raises tx_striped.
@@ -709,17 +709,8 @@ interface PCIe_RC_interface(input logic pclk);
       pl_poll_active = (pl_main_state == POLLING) && (pl_polling_state == POLLING_ACTIVE);
    end
 
-   PL_RESET_DEFAULTS_CHECK : assert property (disable iff (!pl_assert_en || pl_timeout_test_active)
-      $rose(pl_sample_valid) && !pl_timeout_test_active |->
-          (!tx_valid && (tx_elec_idle || pl_det_active) && (!tx_detect_rx || pl_det_active || ($past(tx_detect_rx) === 1'b1)) &&
-           (rate inside {RATE_NOT_NEGOTIATED, RATE_GEN1, RATE_GEN2, RATE_GEN3, RATE_GEN4, RATE_GEN5, RATE_GEN6})))
-      begin pl_assert_pass_count++; end
-   else begin
-      pl_assert_fail_count++;
-      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RESET_DEFAULTS_CHECK] FAILED : tx_valid=%0b tx_elec_idle=%0b tx_detect_rx=%0b rate=%0b", tx_valid, tx_elec_idle, tx_detect_rx, rate))
-   end
 
-   PL_DETECT_QUIET_TX_VALID_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_DETECT_QUIET_TX_VALID_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       pl_det_quiet |-> !tx_valid)
       begin pl_assert_pass_count++; end
    else begin
@@ -727,15 +718,15 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_TX_VALID_LOW_CHECK] FAILED : DETECT_QUIET tx_valid=%0b", tx_valid))
    end
 
-   PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
-      pl_det_quiet && ($past(tx_detect_rx) !== 1'b1) |-> !tx_detect_rx)
+   PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
+       pl_det_quiet && ($past(tx_detect_rx) !== 1'b1) && !$rose(tx_detect_rx) |-> !tx_detect_rx)
       begin pl_assert_pass_count++; end
    else begin
       pl_assert_fail_count++;
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK] FAILED : DETECT_QUIET tx_detect_rx=%0b", tx_detect_rx))
    end
 
-   PL_DETECT_QUIET_RATE_ZERO_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_DETECT_QUIET_RATE_ZERO_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       pl_det_quiet |-> (rate inside {RATE_NOT_NEGOTIATED, RATE_GEN1, RATE_GEN2, RATE_GEN3, RATE_GEN4, RATE_GEN5, RATE_GEN6}))
       begin pl_assert_pass_count++; end
     else begin
@@ -743,31 +734,17 @@ interface PCIe_RC_interface(input logic pclk);
        `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_RATE_ZERO_CHECK] FAILED : DETECT_QUIET rate=%0b expected a valid encoded rate", rate))
    end
 
-   PL_DETECT_QUIET_TX_ELEC_IDLE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
-      pl_det_quiet |-> tx_elec_idle)
-      begin pl_assert_pass_count++; end
-   else begin
-      pl_assert_fail_count++;
-      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_QUIET_TX_ELEC_IDLE_CHECK] FAILED : DETECT_QUIET tx_elec_idle is not 1")
-   end
 
-   PL_DETECT_ACTIVE_TX_DETECT_RX_HIGH_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
-      pl_det_active |-> tx_detect_rx)
-      begin pl_assert_pass_count++; end
-   else begin
-      pl_assert_fail_count++;
-      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_ACTIVE_TX_DETECT_RX_HIGH_CHECK] FAILED : DETECT_ACTIVE tx_detect_rx is not 1")
-   end
 
-   PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
-      $rose(pl_det_active) && !pl_timeout_test_active |-> ##[1:8] $rose(phy_status))
+   PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
+      $rose(pl_det_active) |-> ##[1:8] $rose(phy_status))
       begin pl_assert_pass_count++; end
    else begin
       pl_assert_fail_count++;
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK] FAILED : phy_status did not rise after DETECT_ACTIVE")
    end
 
-   PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       phy_status |-> (tx_detect_rx || $past(tx_detect_rx)))
       begin pl_assert_pass_count++; end
    else begin
@@ -775,7 +752,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK] FAILED : phy_status asserted before tx_detect_rx")
    end
 
-   PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $rose(phy_status) |=> !phy_status)
       begin pl_assert_pass_count++; end
    else begin
@@ -783,7 +760,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK] FAILED : phy_status stayed high for more than one clock")
    end
 
-   PL_RX_STATUS_VALID_DURING_DETECTION_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RX_STATUS_VALID_DURING_DETECTION_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       phy_status |-> (rx_status inside {3'b000, 3'b011}))
       begin pl_assert_pass_count++; end
    else begin
@@ -791,7 +768,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_STATUS_VALID_DURING_DETECTION_CHECK] FAILED : rx_status=%03b", rx_status))
    end
 
-   PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $fell(phy_status) |-> (rx_status == 3'b000))
       begin pl_assert_pass_count++; end
    else begin
@@ -799,7 +776,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK] FAILED : rx_status=%03b after phy_status fell", rx_status))
    end
 
-   PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $fell(phy_status) |-> !tx_detect_rx)
       begin pl_assert_pass_count++; end
    else begin
@@ -807,7 +784,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK] FAILED : tx_detect_rx not cleared after phy_status fell")
    end
 
-   PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $rose(phy_status) && !pl_no_receiver_test |-> (rx_status == 3'b011))
       begin pl_assert_pass_count++; end
    else begin
@@ -815,7 +792,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK] FAILED : rx_status=%03b expected 011", rx_status))
    end
 
-   PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       pl_poll_active |-> !tx_elec_idle)
       begin pl_assert_pass_count++; end
    else begin
@@ -823,7 +800,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK] FAILED : POLLING_ACTIVE tx_elec_idle is not 0")
    end
 
-   PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       pl_poll_active |-> (rate != RATE_NOT_NEGOTIATED))
       begin pl_assert_pass_count++; end
    else begin
@@ -831,7 +808,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK] FAILED : POLLING_ACTIVE rate=%0b", rate))
    end
 
-   PL_RATE_NOT_RESERVED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RATE_NOT_RESERVED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       !pl_reserved_rate_test |-> (rate != 3'b111))
       begin pl_assert_pass_count++; end
    else begin
@@ -839,7 +816,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RATE_NOT_RESERVED_CHECK] FAILED : rate=%03b is reserved", rate))
    end
 
-   PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $changed(rx_data) |-> rx_valid)
       begin pl_assert_pass_count++; end
    else begin
@@ -847,7 +824,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK] FAILED : rx_data changed to %08h while rx_valid=%0b", rx_data, rx_valid))
    end
 
-   PL_SCALAR_TX_BURST_END_CLEAR_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_SCALAR_TX_BURST_END_CLEAR_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $fell(tx_valid) && ($past(tx_striped) == 1'b0) |-> (tx_data == 32'h00000000))
       begin pl_assert_pass_count++; end
    else begin
@@ -855,7 +832,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_SCALAR_TX_BURST_END_CLEAR_CHECK] FAILED : tx_valid fell with tx_data=%08h", tx_data))
    end
 
-   PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       !(tx_valid && tx_elec_idle))
       begin pl_assert_pass_count++; end
    else begin
@@ -863,7 +840,7 @@ interface PCIe_RC_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK] FAILED : tx_valid and tx_elec_idle are both 1")
    end
 
-   PL_RX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       !(rx_valid && rx_elec_idle))
       begin pl_assert_pass_count++; end
    else begin
@@ -898,25 +875,25 @@ interface PCIe_EP_interface(input logic pclk);
    //----------------------------------------
    // MAC -> PHY (Transmit)
    //----------------------------------------
-   logic [31:0] tx_data;
-   logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_lane;
-   logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_striped = '0;
-   logic        tx_striped = 1'b0;
-   logic        tx_valid;
-   logic        tx_elec_idle;
-   logic        tx_detect_rx;
-   logic [1:0]  powerdown;
-   logic [2:0]  rate;
+    logic [31:0] tx_data = '0;
+    logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_lane;
+    logic [`PCIE_NUM_LANES-1:0][31:0] tx_data_striped = '0;
+    logic        tx_striped = 1'b0;
+    logic        tx_valid = 1'b0;
+    logic        tx_elec_idle = 1'b1;
+    logic        tx_detect_rx = 1'b0;
+    logic [1:0]  powerdown = 2'b00;
+    logic [2:0]  rate = `PCIe_RATE_NOT_NEGOTIATED;
 
-   //----------------------------------------
-   // PHY -> MAC (Receive)
-   //----------------------------------------
-   logic [31:0] rx_data;
-   logic [`PCIE_NUM_LANES-1:0][31:0] rx_data_lane;
-   logic        rx_valid;
-   logic        phy_status;
-   logic        rx_elec_idle;
-   logic [2:0]  rx_status;
+    //----------------------------------------
+    // PHY -> MAC (Receive)
+    //----------------------------------------
+    logic [31:0] rx_data;
+    logic [`PCIE_NUM_LANES-1:0][31:0] rx_data_lane = '0;
+    logic        rx_valid = 1'b0;
+    logic        phy_status = 1'b0;
+    logic        rx_elec_idle = 1'b1;
+    logic [2:0]  rx_status = 3'b000;
 
    // Ordered Sets / LTSSM traffic : scalar tx_data is broadcast on every lane.
    // FLIT data : the PL/controller drives tx_data_striped and raises tx_striped.
@@ -1544,17 +1521,8 @@ interface PCIe_EP_interface(input logic pclk);
       pl_poll_active = (pl_main_state == POLLING) && (pl_polling_state == POLLING_ACTIVE);
    end
 
-   PL_RESET_DEFAULTS_CHECK : assert property (disable iff (!pl_assert_en || pl_timeout_test_active)
-      $rose(pl_sample_valid) && !pl_timeout_test_active |->
-          (!tx_valid && (tx_elec_idle || pl_det_active) && (!tx_detect_rx || pl_det_active || ($past(tx_detect_rx) === 1'b1)) &&
-           (rate inside {RATE_NOT_NEGOTIATED, RATE_GEN1, RATE_GEN2, RATE_GEN3, RATE_GEN4, RATE_GEN5, RATE_GEN6})))
-      begin pl_assert_pass_count++; end
-   else begin
-      pl_assert_fail_count++;
-      `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RESET_DEFAULTS_CHECK] FAILED : tx_valid=%0b tx_elec_idle=%0b tx_detect_rx=%0b rate=%0b", tx_valid, tx_elec_idle, tx_detect_rx, rate))
-   end
 
-   PL_DETECT_QUIET_TX_VALID_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_DETECT_QUIET_TX_VALID_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       pl_det_quiet |-> !tx_valid)
       begin pl_assert_pass_count++; end
    else begin
@@ -1562,15 +1530,15 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_TX_VALID_LOW_CHECK] FAILED : DETECT_QUIET tx_valid=%0b", tx_valid))
    end
 
-   PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
-      pl_det_quiet && ($past(tx_detect_rx) !== 1'b1) |-> !tx_detect_rx)
+   PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
+       pl_det_quiet && ($past(tx_detect_rx) !== 1'b1) && !$rose(tx_detect_rx) |-> !tx_detect_rx)
       begin pl_assert_pass_count++; end
    else begin
       pl_assert_fail_count++;
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_TX_DETECT_RX_LOW_CHECK] FAILED : DETECT_QUIET tx_detect_rx=%0b", tx_detect_rx))
    end
 
-   PL_DETECT_QUIET_RATE_ZERO_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_DETECT_QUIET_RATE_ZERO_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       pl_det_quiet |-> (rate inside {RATE_NOT_NEGOTIATED, RATE_GEN1, RATE_GEN2, RATE_GEN3, RATE_GEN4, RATE_GEN5, RATE_GEN6}))
       begin pl_assert_pass_count++; end
     else begin
@@ -1578,31 +1546,17 @@ interface PCIe_EP_interface(input logic pclk);
        `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_DETECT_QUIET_RATE_ZERO_CHECK] FAILED : DETECT_QUIET rate=%0b expected a valid encoded rate", rate))
    end
 
-   PL_DETECT_QUIET_TX_ELEC_IDLE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
-      pl_det_quiet |-> tx_elec_idle)
-      begin pl_assert_pass_count++; end
-   else begin
-      pl_assert_fail_count++;
-      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_QUIET_TX_ELEC_IDLE_CHECK] FAILED : DETECT_QUIET tx_elec_idle is not 1")
-   end
 
-   PL_DETECT_ACTIVE_TX_DETECT_RX_HIGH_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
-      pl_det_active |-> tx_detect_rx)
-      begin pl_assert_pass_count++; end
-   else begin
-      pl_assert_fail_count++;
-      `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_ACTIVE_TX_DETECT_RX_HIGH_CHECK] FAILED : DETECT_ACTIVE tx_detect_rx is not 1")
-   end
 
-   PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
-      $rose(pl_det_active) && !pl_timeout_test_active |-> ##[1:8] $rose(phy_status))
+   PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
+      $rose(pl_det_active) |-> ##[1:8] $rose(phy_status))
       begin pl_assert_pass_count++; end
    else begin
       pl_assert_fail_count++;
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_DETECT_ACTIVE_PHY_STATUS_EXPECTED_CHECK] FAILED : phy_status did not rise after DETECT_ACTIVE")
    end
 
-   PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       phy_status |-> (tx_detect_rx || $past(tx_detect_rx)))
       begin pl_assert_pass_count++; end
    else begin
@@ -1610,7 +1564,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_PHY_STATUS_NO_EARLY_ASSERT_CHECK] FAILED : phy_status asserted before tx_detect_rx")
    end
 
-   PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $rose(phy_status) |=> !phy_status)
       begin pl_assert_pass_count++; end
    else begin
@@ -1618,7 +1572,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_PHY_STATUS_ONE_CYCLE_PULSE_CHECK] FAILED : phy_status stayed high for more than one clock")
    end
 
-   PL_RX_STATUS_VALID_DURING_DETECTION_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RX_STATUS_VALID_DURING_DETECTION_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       phy_status |-> (rx_status inside {3'b000, 3'b011}))
       begin pl_assert_pass_count++; end
    else begin
@@ -1626,7 +1580,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_STATUS_VALID_DURING_DETECTION_CHECK] FAILED : rx_status=%03b", rx_status))
    end
 
-   PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $fell(phy_status) |-> (rx_status == 3'b000))
       begin pl_assert_pass_count++; end
    else begin
@@ -1634,7 +1588,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_STATUS_CLEAR_AFTER_PHY_STATUS_CHECK] FAILED : rx_status=%03b after phy_status fell", rx_status))
    end
 
-   PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $fell(phy_status) |-> !tx_detect_rx)
       begin pl_assert_pass_count++; end
    else begin
@@ -1642,7 +1596,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_TX_DETECT_RX_CLEAR_AFTER_PHY_STATUS_CHECK] FAILED : tx_detect_rx not cleared after phy_status fell")
    end
 
-   PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $rose(phy_status) && !pl_no_receiver_test |-> (rx_status == 3'b011))
       begin pl_assert_pass_count++; end
    else begin
@@ -1650,7 +1604,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_SUCCESSFUL_DETECTION_RX_STATUS_011_CHECK] FAILED : rx_status=%03b expected 011", rx_status))
    end
 
-   PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       pl_poll_active |-> !tx_elec_idle)
       begin pl_assert_pass_count++; end
    else begin
@@ -1658,7 +1612,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_POLLING_ACTIVE_TX_ELEC_IDLE_LOW_CHECK] FAILED : POLLING_ACTIVE tx_elec_idle is not 0")
    end
 
-   PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       pl_poll_active |-> (rate != RATE_NOT_NEGOTIATED))
       begin pl_assert_pass_count++; end
    else begin
@@ -1666,7 +1620,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_POLLING_ACTIVE_RATE_NEGOTIATED_CHECK] FAILED : POLLING_ACTIVE rate=%0b", rate))
    end
 
-   PL_RATE_NOT_RESERVED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RATE_NOT_RESERVED_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       !pl_reserved_rate_test |-> (rate != 3'b111))
       begin pl_assert_pass_count++; end
    else begin
@@ -1674,7 +1628,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RATE_NOT_RESERVED_CHECK] FAILED : rate=%03b is reserved", rate))
    end
 
-   PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $changed(rx_data) |-> rx_valid)
       begin pl_assert_pass_count++; end
    else begin
@@ -1682,7 +1636,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_RX_DATA_CHANGE_ONLY_WITH_RX_VALID_CHECK] FAILED : rx_data changed to %08h while rx_valid=%0b", rx_data, rx_valid))
    end
 
-   PL_SCALAR_TX_BURST_END_CLEAR_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_SCALAR_TX_BURST_END_CLEAR_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       $fell(tx_valid) && ($past(tx_striped) == 1'b0) |-> (tx_data == 32'h00000000))
       begin pl_assert_pass_count++; end
    else begin
@@ -1690,7 +1644,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, $sformatf("[PL_SCALAR_TX_BURST_END_CLEAR_CHECK] FAILED : tx_valid fell with tx_data=%08h", tx_data))
    end
 
-   PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       !(tx_valid && tx_elec_idle))
       begin pl_assert_pass_count++; end
    else begin
@@ -1698,7 +1652,7 @@ interface PCIe_EP_interface(input logic pclk);
       `uvm_error({SIDE,"_PL_ASSERT"}, "[PL_TX_VALID_ELEC_IDLE_MUTEX_CHECK] FAILED : tx_valid and tx_elec_idle are both 1")
    end
 
-   PL_RX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en || pl_timeout_test_active)
+   PL_RX_VALID_ELEC_IDLE_MUTEX_CHECK : assert property (disable iff (!pl_sample_valid || !pl_assert_en)
       !(rx_valid && rx_elec_idle))
       begin pl_assert_pass_count++; end
    else begin
