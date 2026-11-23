@@ -297,6 +297,9 @@ package PCIe_pkg;
         `include "../PCIe_tests/PCIe_gen6_ltssm_electrical_idle_during_training_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_detect_no_receiver_test.sv"
         `include "../PCIe_tests/PCIe_gen6_ltssm_basic_linkup_L0_test.sv"
+        `include "../PCIe_tests/PCIe_gen6_ltssm_l0p_test.sv"
+        `include "../PCIe_tests/PCIe_gen6_ltssm_l1_test.sv"
+        `include "../PCIe_tests/PCIe_gen6_ltssm_l2_test.sv"
         `include "../PCIe_tests/PCIe_gen6_enumeration_test.sv"   // [ENUM]
 	// [RECOVERY] Directed Recovery / sequential rate negotiation testcase.
 	// One test drives the complete Gen1 -> Gen2 -> ... -> Gen6 walk.
