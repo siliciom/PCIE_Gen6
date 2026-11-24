@@ -1522,7 +1522,8 @@ class PCIe_RC_TL_model extends uvm_component;
                                   output int unsigned trl_dw);
     hb_dw  = tr.is_64bit_addr() ? `PCIe_TL_HDR4DW : `PCIe_TL_HDR3DW;
     tr.determine_ohc_a();
-    ohc_dw = (tr.ohc_a_type != OHC_A_NONE) ? `PCIe_TL_OHC_A_DW : 0;
+    ohc_dw = ((tr.ohc_a_type != OHC_A_NONE) ? `PCIe_TL_OHC_A_DW : 0)
+             + tr.ohc_bce_dw();                     // [OHC_BCE] + OHC-B / OHC-C / OHC-E
     trl_dw = ((tr.ts == `PCIe_TL_TS_1DW_ECRC) || (tr.td == 1'b1)) ? `PCIe_TL_ECRC_DW : 0;
   endfunction
 
@@ -1574,6 +1575,15 @@ class PCIe_RC_TL_model extends uvm_component;
     dst.rate                 = src.rate;
     dst.dllp_content         = src.dllp_content;
     dst.credit               = src.credit;
+    // [OHC_BCE] OHC-B / OHC-C / OHC-E travel with every segment
+    dst.ohc_b_en             = src.ohc_b_en;
+    dst.ohc_b_dw             = src.ohc_b_dw;
+    dst.ohc_c_en             = src.ohc_c_en;
+    dst.ohc_c_dw             = src.ohc_c_dw;
+    dst.ohc_e1_en            = src.ohc_e1_en;
+    dst.ohc_e1_dw            = src.ohc_e1_dw;
+    dst.ohc_e4_en            = src.ohc_e4_en;
+    dst.ohc_e4_dw            = src.ohc_e4_dw;
   endfunction
 
   //--------------------------------------------------------------------------
@@ -1631,7 +1641,7 @@ class PCIe_RC_TL_model extends uvm_component;
       end
 
       // keep OHC-A1 on every segment when the parent needed it (uniform size)
-      seg.flit_seg_keep_ohc = (ohc_dw != 0);
+      seg.flit_seg_keep_ohc = (tr.ohc_a_type != OHC_A_NONE);   // [OHC_BCE] OHC-A1 only (B/C/E copied with the fields)
 
       // Non-Posted (DMWr) : one tag per segment, each gets its own completion
       seg_tag  = non_posted ? (tr.tag + i) : tr.tag;
@@ -2499,6 +2509,29 @@ class PCIe_RC_TL_model extends uvm_component;
     end
 
     //======================================================================
+    // [OHC_BCE] OHC-B (Fig 2-12) : 1 DW, right after OHC-A
+    //======================================================================
+    if (tr.ohc[1] == 1'b1) begin
+      hdr = new[hdr.size() + 1](hdr);
+      hdr[hdr.size() - 1] = tr.ohc_b_dw;
+      ohc_dw = ohc_dw + 1;
+      `uvm_info("FLIT_HEADER", $sformatf("OHC-B added  : DW=%08h (ST=%04h PH=%02b HV=%02b AMA=%03b AV=%0b)",
+                 tr.ohc_b_dw, tr.ohc_b_dw[23:8], tr.ohc_b_dw[7:6], tr.ohc_b_dw[5:4],
+                 tr.ohc_b_dw[3:1], tr.ohc_b_dw[0]), UVM_LOW)
+    end
+
+    //======================================================================
+    // [OHC_BCE] OHC-C (Fig 2-13) : 1 DW, after OHC-A / OHC-B
+    //======================================================================
+    if (tr.ohc[2] == 1'b1) begin
+      hdr = new[hdr.size() + 1](hdr);
+      hdr[hdr.size() - 1] = tr.ohc_c_dw;
+      ohc_dw = ohc_dw + 1;
+      `uvm_info("FLIT_HEADER", $sformatf("OHC-C added  : DW=%08h (ReqSeg=%02h Sub-Stream=%04b RSV=%0b)",
+                 tr.ohc_c_dw, tr.ohc_c_dw[31:24], tr.ohc_c_dw[7:4], tr.ohc_c_dw[3]), UVM_LOW)
+    end
+
+    //======================================================================
     // [TLP_PREFIX] OHC-E1 (Sec 2.2.11) : 1 DW, last in A-B-C-E order
     //======================================================================
     if (tr.ohc[4:3] == 2'b01) begin
@@ -2507,6 +2540,19 @@ class PCIe_RC_TL_model extends uvm_component;
       ohc_dw = ohc_dw + 1;
       `uvm_info("FLIT_HEADER", $sformatf("OHC-E1 added : DW=%08h (E-E Prefix E[3:0]=%04b)",
                  tr.ohc_e1_dw, tr.ohc_e1_dw[27:24]), UVM_LOW)
+    end
+
+    //======================================================================
+    // [OHC_BCE] OHC-E4 (Fig 2-80) : 4 DW, last in A-B-C-E order
+    //======================================================================
+    else if (tr.ohc[4:3] == 2'b11) begin
+      for (i = 0; i < 4; i++) begin
+        hdr = new[hdr.size() + 1](hdr);
+        hdr[hdr.size() - 1] = tr.ohc_e4_dw[i];
+        `uvm_info("FLIT_HEADER", $sformatf("OHC-E4 added : DW%0d=%08h (E-E Prefix E[3:0]=%04b)",
+                   i, tr.ohc_e4_dw[i], tr.ohc_e4_dw[i][27:24]), UVM_LOW)
+      end
+      ohc_dw = ohc_dw + 4;
     end
 
     total_header_dw = hdr.size();

@@ -214,6 +214,25 @@ class PCIe_sequence_item extends uvm_sequence_item;
   rand bit        ohc_e1_en;
   rand bit [31:0] ohc_e1_dw;
 
+  //--------------------------------------------------------------------------
+  // [OHC_BCE] OHC-B / OHC-C / OHC-E4 controls (default OFF, Flit Mode only)
+  //   Order after the Header Base is A -> B -> C -> E (Sec 2.2.1.2)
+  //   ohc_b_en  : 1 => OHC-B (1 DW, Fig 2-12) TLP Processing Hints, OHC[1] = 1
+  //   ohc_b_dw  : [31:24] R  [23:16] ST[15:8]  [15:8] ST[7:0]
+  //               [7:6] PH[1:0]  [5:4] HV[1:0]  [3:1] AMA[2:0]  [0] AV
+  //   ohc_c_en  : 1 => OHC-C (1 DW, Fig 2-13) Requester Segment, OHC[2] = 1
+  //   ohc_c_dw  : [31:24] Requester Segment  [23:16] PR_Sent_Counter
+  //               [15:8] Stream_ID  [7:4] Sub-Stream  [3] RSV  [2] R  [1] K  [0] T
+  //   ohc_e4_en : 1 => OHC-E4 (4 DW, Fig 2-80), OHC[4:3] = 11b
+  //   ohc_e4_dw : 4 DW, each one formatted like OHC-E1 (E-E Prefix DW)
+  //--------------------------------------------------------------------------
+  rand bit        ohc_b_en;
+  rand bit [31:0] ohc_b_dw;
+  rand bit        ohc_c_en;
+  rand bit [31:0] ohc_c_dw;
+  rand bit        ohc_e4_en;
+  rand bit [31:0] ohc_e4_dw[4];
+
   rand logic [2:0] ts;
   rand logic [1:0] at;
 
@@ -510,6 +529,12 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_int  (lprfx_en,       UVM_ALL_ON)               // [TLP_PREFIX]
     `uvm_field_int  (ohc_e1_en,      UVM_ALL_ON)               // [TLP_PREFIX]
     `uvm_field_int  (ohc_e1_dw,      UVM_ALL_ON | UVM_HEX)     // [TLP_PREFIX]
+    `uvm_field_int  (ohc_b_en,       UVM_ALL_ON)               // [OHC_BCE]
+    `uvm_field_int  (ohc_b_dw,       UVM_ALL_ON | UVM_HEX)     // [OHC_BCE]
+    `uvm_field_int  (ohc_c_en,       UVM_ALL_ON)               // [OHC_BCE]
+    `uvm_field_int  (ohc_c_dw,       UVM_ALL_ON | UVM_HEX)     // [OHC_BCE]
+    `uvm_field_int  (ohc_e4_en,      UVM_ALL_ON)               // [OHC_BCE]
+    `uvm_field_sarray_int (ohc_e4_dw, UVM_ALL_ON | UVM_HEX)    // [OHC_BCE]
   `uvm_object_utils_end
 
    function void print_dlp_details(string label,  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp  );
@@ -659,11 +684,14 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     (pkt_mode != FLIT) ->
       (ohc == 5'b00000);
 
-    // FLIT -> B/C not supported, E only as OHC-E1 when ohc_e1_en == 1
+    // [OHC_BCE] FLIT -> OHC-B / OHC-C follow their enables,
+    //           OHC-E : 01b = E1, 11b = E4, 00b = none
     (pkt_mode == FLIT) ->
-      (ohc[2:1] == 2'b00);
+      (ohc[1] == ohc_b_en);
     (pkt_mode == FLIT) ->
-      (ohc[4:3] == (ohc_e1_en ? 2'b01 : 2'b00));
+      (ohc[2] == ohc_c_en);
+    (pkt_mode == FLIT) ->
+      (ohc[4:3] == (ohc_e4_en ? 2'b11 : (ohc_e1_en ? 2'b01 : 2'b00)));
 
     // FLIT Memory Request with explicit BE -> OHC-A1
     // [FLIT_SEG] length == 0 encodes 1024 DW, so "more than 1 DW" is
@@ -729,6 +757,43 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   constraint c_ohc_e1_dw {
     ohc_e1_dw[31:28] == 4'b0001;                 // E-E Prefix DW
     ohc_e1_dw[27:24] inside {4'b1110, 4'b1111};  // VendPrefixE0 / VendPrefixE1
+  }
+
+  // [OHC_BCE] OHC-B / OHC-C / OHC-E4 are OFF unless a sequence turns them on
+  constraint c_ohc_bce_default {
+    soft ohc_b_en  == 1'b0;
+    soft ohc_c_en  == 1'b0;
+    soft ohc_e4_en == 1'b0;
+    (pkt_mode != FLIT) -> (ohc_b_en == 1'b0 && ohc_c_en == 1'b0 && ohc_e4_en == 1'b0);   // Flit Mode only
+    !(ohc_e1_en && ohc_e4_en);                                  // only one OHC-E size per TLP
+    ohc_b_en -> (txn_type == PCIe_TL_MEM);                      // TPH : Memory Requests only
+    ohc_c_en -> (txn_type inside {PCIe_TL_MEM, PCIe_TL_MSG});   // non-IDE Requester Segment
+  }
+
+  // [OHC_BCE] OHC-B DW format (Fig 2-12)
+  constraint c_ohc_b_dw {
+    ohc_b_dw[31:24] == 8'h00;                                   // Reserved
+    ohc_b_dw[5:4] inside {2'b01, 2'b11};                        // HV : 01b PH+ST[7:0], 11b PH+ST[15:0]
+    (ohc_b_dw[5:4] == 2'b01) -> (ohc_b_dw[23:16] == 8'h00);     // ST[15:8] Reserved when HV = 01b
+    (ohc_b_dw[0]   == 1'b0)  -> (ohc_b_dw[3:1]   == 3'b000);    // AV = 0 -> AMA not valid
+  }
+
+  // [OHC_BCE] OHC-C DW format for a non-IDE TLP (Fig 2-13, Segment Rules)
+  constraint c_ohc_c_dw {
+    ohc_c_dw[23:16] == 8'h00;      // PR_Sent_Counter : Reserved (non-IDE)
+    ohc_c_dw[15:8]  == 8'h00;      // Stream_ID       : Reserved (non-IDE)
+    ohc_c_dw[7:4]   == 4'b0111;    // Sub-Stream      : 0111b for non-IDE TLPs
+    ohc_c_dw[3]     == 1'b1;       // RSV : Requester Segment is valid
+    ohc_c_dw[2:0]   == 3'b000;     // R / K / T : Reserved
+  }
+
+  // [OHC_BCE] OHC-E4 : every DW is an E-E Prefix DW (no "No Entry" DWs, else a
+  //           smaller OHC-E would have to be used - Sec 2.2.11)
+  constraint c_ohc_e4_dw {
+    foreach (ohc_e4_dw[i]) {
+      ohc_e4_dw[i][31:28] == 4'b0001;                 // E-E Prefix DW
+      ohc_e4_dw[i][27:24] inside {4'b1110, 4'b1111};  // VendPrefixE0 / VendPrefixE1
+    }
   }
 
   constraint c_atomic_rules {
@@ -1069,6 +1134,23 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     // [TLP_PREFIX] OHC-E1 present -> OHC[4:3] = 01b
     if ((pkt_mode == FLIT) && ohc_e1_en)
       ohc[4:3] = 2'b01;
+
+    // [OHC_BCE] OHC-B -> OHC[1], OHC-C -> OHC[2], OHC-E4 -> OHC[4:3] = 11b
+    if (pkt_mode == FLIT) begin
+      ohc[1] = ohc_b_en;
+      ohc[2] = ohc_c_en;
+      if (ohc_e4_en)
+        ohc[4:3] = 2'b11;
+    end
+  endfunction
+
+  //==========================================================================
+  // [OHC_BCE] number of OHC DWs that follow OHC-A : OHC-B + OHC-C + OHC-E
+  //==========================================================================
+  function int unsigned ohc_bce_dw();
+    if (pkt_mode != FLIT)
+      return 0;
+    return int'(ohc_b_en) + int'(ohc_c_en) + (ohc_e4_en ? 4 : (ohc_e1_en ? 1 : 0));
   endfunction
 
   //--------------------------------------------------------------------------
