@@ -144,6 +144,12 @@ class PCIe_EP_TL_model extends uvm_component;
   typedef enum {RX_ERR_NONE, RX_ERR_MALFORMED, RX_ERR_ECRC, RX_ERR_POISONED} rx_tl_err_e;
   bit [3:0]                             d_rsvd_val;
   bit                                   rx_force_ur;
+  // [MPS_4KB] Max_Payload_Size / 4 KB boundary checks
+  //   d_malformed_why : why the request is Malformed (RSVD / MPS / 4KB)
+  string                                d_malformed_why;
+  int unsigned                          n_rx_mps_viol;   // RX requests with payload > MPS
+  int unsigned                          n_rx_4kb_viol;   // RX Memory Requests crossing 4 KB
+  int unsigned                          n_tx_cpl_mps_viol; // TX CplDs with payload > MPS
   int unsigned                          n_malformed;     // Malformed TLPs dropped (ERR_FATAL)
   int unsigned                          n_poisoned;      // Poisoned requests (EP = 1)
   int unsigned                          n_ecrc_err;      // requests with ECRC Check Failed
@@ -1394,6 +1400,9 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     `uvm_info("EP_TL_ERR",
       $sformatf("EP_TL_ERROR_SUMMARY : malformed(dropped)=%0d poisoned=%0d ecrc_failed=%0d ur_completions_sent=%0d",
                  n_malformed, n_poisoned, n_ecrc_err, n_ur_err_cpl), UVM_HIGH)                       // [TL_ERR_INJ]
+    `uvm_info("EP_TL_MPS_4KB",
+      $sformatf("EP_MPS_4KB_SUMMARY : %s  RX MPS violations=%0d  RX 4KB crossings=%0d  TX CplD MPS violations=%0d",
+                 PCIe_sequence_item::mps_str(), n_rx_mps_viol, n_rx_4kb_viol, n_tx_cpl_mps_viol), UVM_LOW)   // [MPS_4KB]
   endfunction
 
   //==========================================================================
@@ -2519,6 +2528,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
       $sformatf("COMPLETION_SENT_FROM_EP_TL_MODEL_TO_EP_DL_MODEL #%0d", n_cpl_sent), UVM_HIGH)
 
 //    fc_account_cpl(cpl);          // FLOW CONTROL : completion credits consumed
+    tx_cpl_mps_check(cpl);        // [MPS_4KB] CplD payload <= MPS
     tl_ap.write(cpl);
     if (tl_aif != null) tl_aif.tl_np_done_cnt++;    // [TL_ASSERT] Non-Posted request completed
 
@@ -2537,8 +2547,28 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
   //                        -> request not executed, Non-Posted : Cpl UR
   //    Error precedence (Sec 6.2.3.2.3) : Malformed > ECRC > Poisoned
   //==========================================================================
+  //    [MPS_4KB] also Malformed (Sec 2.2.2 / 2.2.7) :
+  //      payload > Max_Payload_Size
+  //      Memory Request whose Address / Length crosses a 4 KB boundary
   function rx_tl_err_e rx_tl_error_check(PCIe_sequence_item item);
-    if ((d_mode == FLIT) && (d_rsvd_val != 4'h0)) return RX_ERR_MALFORMED;
+    int unsigned len_dw;
+    d_malformed_why = "";
+    if ((d_mode == FLIT) && (d_rsvd_val != 4'h0)) begin d_malformed_why = "RSVD"; return RX_ERR_MALFORMED; end
+    // [MPS_4KB] 1) data payload larger than MPS
+    if (d_has_data && PCIe_sequence_item::exceeds_mps(d_payload_dw)) begin
+      n_rx_mps_viol++;
+      d_malformed_why = "MPS";
+      return RX_ERR_MALFORMED;
+    end
+    // [MPS_4KB] 2) Memory Request crossing a 4 KB boundary
+    if (d_txn_type == PCIe_TL_MEM) begin
+      len_dw = (d_length == 10'd0) ? `PCIe_TL_MAX_PAYLOAD_DW : int'(d_length);
+      if (PCIe_sequence_item::crosses_4kb(d_address, len_dw)) begin
+        n_rx_4kb_viol++;
+        d_malformed_why = "4KB";
+        return RX_ERR_MALFORMED;
+      end
+    end
     if (item.ecrc_state == PCIe_ECRC_FAIL)         return RX_ERR_ECRC;
     if (d_ep)                                      return RX_ERR_POISONED;
     return RX_ERR_NONE;
@@ -2548,6 +2578,21 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
     case (err)
       RX_ERR_MALFORMED: begin
         n_malformed++;
+        if (d_malformed_why == "MPS")                                   // [MPS_4KB]
+        `uvm_error("EP_TL_MALFORMED_TLP",
+          $sformatf({"ERR_FATAL : MALFORMED_TLP received - MPS_VIOLATION : %s %s addr=0x%0h tag=0x%0h payload=%0d DW (%0d B) > %s ",
+                     "(Sec 2.2.2) -> TLP dropped, no completion"},
+                     d_txn_type.name(), d_dir.name(), d_address, d_tag,
+                     d_payload_dw, d_payload_dw * `PCIe_TL_DW_BYTES, PCIe_sequence_item::mps_str()))
+        else if (d_malformed_why == "4KB")                              // [MPS_4KB]
+        `uvm_error("EP_TL_MALFORMED_TLP",
+          $sformatf({"ERR_FATAL : MALFORMED_TLP received - 4KB_BOUNDARY_CROSSING : %s %s addr=0x%0h len=%0d DW last byte=0x%0h tag=0x%0h ",
+                     "(Sec 2.2.7) -> TLP dropped, no completion"},
+                     d_txn_type.name(), d_dir.name(), d_address,
+                     (d_length == 10'd0) ? `PCIe_TL_MAX_PAYLOAD_DW : int'(d_length),
+                     PCIe_sequence_item::range_last_byte(d_address, (d_length == 10'd0) ? `PCIe_TL_MAX_PAYLOAD_DW : int'(d_length)),
+                     d_tag))
+        else
         `uvm_error("EP_TL_MALFORMED_TLP",
           $sformatf({"ERR_FATAL : MALFORMED_TLP received - %s %s addr=0x%0h tag=0x%0h has Reserved bits set ",
                      "(DW1[14]=%0b OHC-A1 NW=%0b PMR=%0b ER=%0b) -> TLP dropped, no completion"},
@@ -2805,6 +2850,21 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
   //   last part has Byte Count == its own data; Lower Address = address of
   //   the first byte the part returns.
   //==========================================================================
+  //==========================================================================
+  // [MPS_4KB] tx_cpl_mps_check - a CplD payload must not exceed MPS
+  //   (PCIe Base 6.0 Sec 2.2.2). Run on every completion the EP TL sends.
+  //==========================================================================
+  function void tx_cpl_mps_check(PCIe_sequence_item cpl);
+    int unsigned pl_dw;
+    pl_dw = cpl.cpl_data.size();
+    if (cpl.cpl_has_data && PCIe_sequence_item::exceeds_mps(pl_dw)) begin
+      n_tx_cpl_mps_viol++;
+      `uvm_error("EP_TL_MPS",
+        $sformatf("TX_MPS_VIOLATION : CplD tag=0x%0h payload=%0d DW (%0d B) > %s (Sec 2.2.2)",
+                  cpl.tag, pl_dw, pl_dw * `PCIe_TL_DW_BYTES, PCIe_sequence_item::mps_str()))
+    end
+  endfunction
+
   function void send_split_completions(PCIe_sequence_item req,
                                        bit [`PCIe_TL_DATA_DW_W-1:0] rdata []);
     bit [`PCIe_TL_DATA_DW_W-1:0]        part [];
@@ -2874,6 +2934,7 @@ cfg_ro_mask_t0[`PCIe_TL_CFG_IDX_BAR5] = 32'hFFFF_FFFF;
         $sformatf("SPLIT_CPLD_PART %0d/%0d SENT_TO_EP_DL_MODEL : %0d DW, Byte Count=%0d (completion #%0d)",
                   i + 1, n_part, len_dw, bc_left, n_cpl_sent), UVM_LOW)
   //    fc_account_cpl(cpl);
+      tx_cpl_mps_check(cpl);      // [MPS_4KB] CplD payload <= MPS
       tl_ap.write(cpl);
 
       bytes_this = (len_dw * `PCIe_TL_DW_BYTES) - ((i == 0) ? lead_off : 0);

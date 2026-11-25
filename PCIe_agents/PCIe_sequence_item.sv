@@ -56,6 +56,7 @@ class PCIe_sequence_item extends uvm_sequence_item;
   static int unsigned num_vc     = `PCIe_NUM_VC_DEFAULT;
   static bit [7:0]    vc_en_mask = 8'h01;
   static bit [7:0]    tc_en_mask = 8'h01;
+  static int unsigned mps_bytes  = `PCIe_TL_MPS_BYTES_DEFAULT;   // [MPS_4KB] Max_Payload_Size of the Link (bytes)
   rand bit [`PCIe_TL_ATTR_W-1:0]   attr;          // Attributes {IDO, relaxed, no-snoop}
   rand bit        td;                // TLP Digest present
   rand bit        ep;                // Poisoned / Error present
@@ -232,6 +233,10 @@ class PCIe_sequence_item extends uvm_sequence_item;
   rand bit [31:0] ohc_c_dw;
   rand bit        ohc_e4_en;
   rand bit [31:0] ohc_e4_dw[4];
+  // [OHC_E2] ohc_e2_en : 1 => OHC-E2 (2 DW, Sec 2.2.11), OHC[4:3] = 10b
+  //          ohc_e2_dw : 2 DW, each one formatted like OHC-E1 (E-E Prefix DW)
+  rand bit        ohc_e2_en;
+  rand bit [31:0] ohc_e2_dw[2];
 
   rand logic [2:0] ts;
   rand logic [1:0] at;
@@ -535,6 +540,8 @@ class PCIe_sequence_item extends uvm_sequence_item;
     `uvm_field_int  (ohc_c_dw,       UVM_ALL_ON | UVM_HEX)     // [OHC_BCE]
     `uvm_field_int  (ohc_e4_en,      UVM_ALL_ON)               // [OHC_BCE]
     `uvm_field_sarray_int (ohc_e4_dw, UVM_ALL_ON | UVM_HEX)    // [OHC_BCE]
+    `uvm_field_int  (ohc_e2_en,      UVM_ALL_ON)               // [OHC_E2]
+    `uvm_field_sarray_int (ohc_e2_dw, UVM_ALL_ON | UVM_HEX)    // [OHC_E2]
   `uvm_object_utils_end
 
    function void print_dlp_details(string label,  bit [0:`PCIe_DLP_BYTE_W-1][`PCIe_BYTE_W-1:0] dlp  );
@@ -691,7 +698,7 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     (pkt_mode == FLIT) ->
       (ohc[2] == ohc_c_en);
     (pkt_mode == FLIT) ->
-      (ohc[4:3] == (ohc_e4_en ? 2'b11 : (ohc_e1_en ? 2'b01 : 2'b00)));
+      (ohc[4:3] == (ohc_e4_en ? 2'b11 : (ohc_e2_en ? 2'b10 : (ohc_e1_en ? 2'b01 : 2'b00))));   // [OHC_E2] 10b = E2
 
     // FLIT Memory Request with explicit BE -> OHC-A1
     // [FLIT_SEG] length == 0 encodes 1024 DW, so "more than 1 DW" is
@@ -766,6 +773,9 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     soft ohc_e4_en == 1'b0;
     (pkt_mode != FLIT) -> (ohc_b_en == 1'b0 && ohc_c_en == 1'b0 && ohc_e4_en == 1'b0);   // Flit Mode only
     !(ohc_e1_en && ohc_e4_en);                                  // only one OHC-E size per TLP
+    soft ohc_e2_en == 1'b0;                                     // [OHC_E2] OFF unless a sequence turns it on
+    (pkt_mode != FLIT) -> (ohc_e2_en == 1'b0);                  // [OHC_E2] Flit Mode only
+    (int'(ohc_e1_en) + int'(ohc_e2_en) + int'(ohc_e4_en)) <= 1;  // [OHC_E2] only one OHC-E size (E1 / E2 / E4) per TLP
     ohc_b_en -> (txn_type == PCIe_TL_MEM);                      // TPH : Memory Requests only
     ohc_c_en -> (txn_type inside {PCIe_TL_MEM, PCIe_TL_MSG});   // non-IDE Requester Segment
   }
@@ -793,6 +803,15 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
     foreach (ohc_e4_dw[i]) {
       ohc_e4_dw[i][31:28] == 4'b0001;                 // E-E Prefix DW
       ohc_e4_dw[i][27:24] inside {4'b1110, 4'b1111};  // VendPrefixE0 / VendPrefixE1
+    }
+  }
+
+  // [OHC_E2] OHC-E2 : both DWs are E-E Prefix DWs (no "No Entry" DW, else
+  //          OHC-E1 would have to be used - Sec 2.2.11)
+  constraint c_ohc_e2_dw {
+    foreach (ohc_e2_dw[i]) {
+      ohc_e2_dw[i][31:28] == 4'b0001;                 // E-E Prefix DW
+      ohc_e2_dw[i][27:24] inside {4'b1110, 4'b1111};  // VendPrefixE0 / VendPrefixE1
     }
   }
 
@@ -1084,6 +1103,47 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   endfunction
 
   //==========================================================================
+  // [MPS_4KB] Max_Payload_Size / 4 KB boundary helpers (shared RC / EP TL)
+  //==========================================================================
+  // set the Link MPS (bytes). Returns 0 (MPS unchanged) when not a legal value.
+  static function bit set_mps_bytes(int unsigned b);
+    if ((b < `PCIe_TL_MPS_BYTES_MIN) || (b > `PCIe_TL_MPS_BYTES_MAX) || ((b & (b - 1)) != 0))
+      return 1'b0;
+    mps_bytes = b;
+    return 1'b1;
+  endfunction
+
+  // Device Control[7:5] encoding of the current MPS (000b = 128 B ... 101b = 4096 B)
+  static function bit [2:0] mps_encoding();
+    return 3'($clog2(mps_bytes) - 7);
+  endfunction
+
+  static function string mps_str();
+    return $sformatf("MPS=%0d B (%0d DW, Device Control[7:5]=%03b)",
+                     mps_bytes, mps_bytes / `PCIe_TL_DW_BYTES, mps_encoding());
+  endfunction
+
+  // 1 => a data payload of payload_dw DW is larger than MPS (Sec 2.2.2)
+  static function bit exceeds_mps(int unsigned payload_dw);
+    return ((payload_dw * `PCIe_TL_DW_BYTES) > mps_bytes);
+  endfunction
+
+  // 1 => the DW range [addr, addr + len_dw*4) crosses a 4 KB boundary (Sec 2.2.7)
+  //   The 2 low address bits are not part of the request address (DW aligned).
+  static function bit crosses_4kb(bit [63:0] addr, int unsigned len_dw);
+    bit [63:0] first_b, last_b;
+    if (len_dw == 0) return 1'b0;
+    first_b = {addr[63:2], 2'b00};
+    last_b  = first_b + (64'(len_dw) * `PCIe_TL_DW_BYTES) - 64'd1;
+    return (first_b >> `PCIe_TL_4KB_BOUNDARY_SHIFT) != (last_b >> `PCIe_TL_4KB_BOUNDARY_SHIFT);
+  endfunction
+
+  // end address (last byte) of a DW range - used in the 4 KB error messages
+  static function bit [63:0] range_last_byte(bit [63:0] addr, int unsigned len_dw);
+    return {addr[63:2], 2'b00} + (64'(len_dw) * `PCIe_TL_DW_BYTES) - 64'd1;
+  endfunction
+
+  //==========================================================================
   // Determine OHC-A subtype
   //==========================================================================
   function void determine_ohc_a();
@@ -1141,6 +1201,8 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
       ohc[2] = ohc_c_en;
       if (ohc_e4_en)
         ohc[4:3] = 2'b11;
+      else if (ohc_e2_en)              // [OHC_E2] OHC-E2 -> OHC[4:3] = 10b
+        ohc[4:3] = 2'b10;
     end
   endfunction
 
@@ -1150,7 +1212,7 @@ constraint c_flit_td { (pkt_mode == FLIT) -> (td == (ts == `PCIe_TL_TS_1DW_ECRC)
   function int unsigned ohc_bce_dw();
     if (pkt_mode != FLIT)
       return 0;
-    return int'(ohc_b_en) + int'(ohc_c_en) + (ohc_e4_en ? 4 : (ohc_e1_en ? 1 : 0));
+    return int'(ohc_b_en) + int'(ohc_c_en) + (ohc_e4_en ? 4 : (ohc_e2_en ? 2 : (ohc_e1_en ? 1 : 0)));   // [OHC_E2] E2 = 2 DW
   endfunction
 
   //--------------------------------------------------------------------------

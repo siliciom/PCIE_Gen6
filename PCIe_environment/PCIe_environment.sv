@@ -57,6 +57,9 @@ class PCIe_environment extends uvm_env;
       // [TC_VC] TC -> VC table into every sequence item / model  
       pcie_ecfg.apply_tc2vc_map();
 
+      // [MPS_4KB] Max_Payload_Size into every sequence item / TL model
+      pcie_ecfg.apply_mps();
+
       if(pcie_ecfg.has_rc_top_agent)
       begin
          rc_top_agent = PCIe_RC_top_agent::type_id::create("rc_top_agent", this);

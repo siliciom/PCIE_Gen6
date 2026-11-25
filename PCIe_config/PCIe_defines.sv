@@ -682,6 +682,22 @@
 `define PCIe_TL_MAX_TLP_DW           (`PCIe_TL_HDR4DW + `PCIe_TL_OHC_A_DW + `PCIe_TL_MAX_PAYLOAD_DW)
 
 //==============================================================================
+// [MPS_4KB] Max_Payload_Size and 4 KB address boundary checks
+//   PCIe Base 6.0 Sec 2.2.2   : a TLP data payload must not exceed MPS
+//                               (Device Control[7:5]) -> else Malformed TLP
+//   PCIe Base 6.0 Sec 2.2.7   : a Memory Request must not cross a 4 KB
+//                               address boundary -> else Malformed TLP
+//   MPS encoding (Device Control[7:5]) : 000b 128 B ... 101b 4096 B
+//   Default 4096 B (largest legal MPS) so every existing test stays legal.
+//   Override per run with +PCIe_MPS=<bytes>   (128/256/512/1024/2048/4096)
+//==============================================================================
+`define PCIe_TL_MPS_BYTES_DEFAULT    4096
+`define PCIe_TL_MPS_BYTES_MIN        128
+`define PCIe_TL_MPS_BYTES_MAX        4096
+`define PCIe_TL_4KB_BOUNDARY_BYTES   4096
+`define PCIe_TL_4KB_BOUNDARY_SHIFT   12
+
+//==============================================================================
 // ECRC  -  PCIe Base 6.1 Section 2.7.1 / Table 2-55            [ADDED]
 //   Polynomial 04C1 1DB7h, seed FFFF FFFFh, bit 0 of byte 0 first (LSB first,
 //   hence the reflected polynomial below), result complemented and then

@@ -46,6 +46,17 @@ class PCIe_RC_TL_model extends uvm_component;
   uvm_analysis_port #(PCIe_sequence_item) rx_decoded_ap;
   int unsigned n_tlp_rcvd;   // TLPs received from the DL model
   int unsigned n_cpl_rcvd;   // of which Cpl / CplD
+
+  // [MPS_4KB] Max_Payload_Size / 4 KB boundary checks
+  //   TX : every TLP handed to the DL (each FLIT segment is its own TLP)
+  //   RX : every CplD received from the EP
+  //   +PCIe_MPS_4KB_ERR_INJ : a TX violation is an intended error injection
+  //   (reported as UVM_WARNING, the TLP is still sent so the EP can flag it).
+  bit          mps_4kb_err_inj;
+  int unsigned n_tx_mps_viol;    // TX TLPs whose payload > MPS
+  int unsigned n_tx_4kb_viol;    // TX Memory Requests crossing a 4 KB boundary
+  int unsigned n_rx_mps_viol;    // RX CplDs whose payload > MPS
+  int unsigned n_mps_4kb_chk;    // TX TLPs checked
   int unsigned n_cpl_ur_rcvd; // [TL_ERR_INJ] of which completion status = UR
   // [FLOW_SUM] completion numbers for the end-of-test RC FLIT SUMMARY
   int unsigned n_cpl_status_rcvd [8];   // per Completion Status (SC=0 UR=1 CRS=2 CA=4)
@@ -864,6 +875,7 @@ class PCIe_RC_TL_model extends uvm_component;
      n_seg_txn      = 0;   // [FLIT_SEG]
      n_seg_tlp      = 0;
      n_seg_txn_done = 0;
+     mps_4kb_err_inj = $test$plusargs("PCIe_MPS_4KB_ERR_INJ");   // [MPS_4KB]
      fc_init();
      // [TL_ASSERT] same interface handle the DL assertions use
      if (!uvm_config_db#(virtual PCIe_RC_interface)::get(this, "", "PCIe_RC_INTERFACE", tl_aif))
@@ -895,6 +907,9 @@ class PCIe_RC_TL_model extends uvm_component;
               n_rd_cpl_checked, n_rd_cpl_dw_match, n_rd_cpl_dw_mismatch, n_rd_cpl_dw_unwritten, cpl_partial.size()), UVM_HIGH)
     `uvm_info("RC_TL_ATOMIC", $sformatf("ATOMICOP_SUMMARY : AtomicOp completions checked=%0d  errors=%0d",
               n_atomic_cpl, n_atomic_err), UVM_HIGH)                                     // [ATOMIC]
+    // [MPS_4KB] summary
+    `uvm_info("RC_TL_MPS_4KB", $sformatf("MPS_4KB_SUMMARY : %s  TX TLPs checked=%0d  TX MPS violations=%0d  TX 4KB crossings=%0d  RX CplD MPS violations=%0d",
+              PCIe_sequence_item::mps_str(), n_mps_4kb_chk, n_tx_mps_viol, n_tx_4kb_viol, n_rx_mps_viol), UVM_LOW)
     if (cpl_partial.size() != 0)
       `uvm_error("RC_TL_FULL_CPLD", $sformatf("%0d read completion(s) never received their last CplD part", cpl_partial.size()))
     foreach (seg_cpl_expect[ptag]) begin
@@ -994,6 +1009,16 @@ class PCIe_RC_TL_model extends uvm_component;
     payload_dw = has_data ? ((len == 10'd0) ? `PCIe_TL_MAX_PAYLOAD_DW : int'(len)) : 0;
     d0         = rc_rx_get_dw(item, hdr_dw);
     kind       = has_data ? "CplD (with data)" : "Cpl (no data)";
+
+    // [MPS_4KB] RX : a CplD payload larger than MPS is a Malformed TLP (Sec 2.2.2).
+    //   Reported here; the completion is still processed so the request is
+    //   closed and the run is not stuck on an open tag.
+    if (has_data && PCIe_sequence_item::exceeds_mps(payload_dw)) begin
+      n_rx_mps_viol++;
+      `uvm_error("RC_TL_MPS",
+        $sformatf("RX_MPS_VIOLATION : MALFORMED_TLP - CplD tag=0x%0h payload=%0d DW (%0d B) > %s (Sec 2.2.2)",
+                  tag, payload_dw, payload_dw * `PCIe_TL_DW_BYTES, PCIe_sequence_item::mps_str()))
+    end
 
     `uvm_info("RC_TL_COMPLETION",
       $sformatf({"\n",
@@ -1584,6 +1609,8 @@ class PCIe_RC_TL_model extends uvm_component;
     dst.ohc_e1_dw            = src.ohc_e1_dw;
     dst.ohc_e4_en            = src.ohc_e4_en;
     dst.ohc_e4_dw            = src.ohc_e4_dw;
+    dst.ohc_e2_en            = src.ohc_e2_en;   // [OHC_E2]
+    dst.ohc_e2_dw            = src.ohc_e2_dw;   // [OHC_E2]
   endfunction
 
   //--------------------------------------------------------------------------
@@ -1746,6 +1773,67 @@ class PCIe_RC_TL_model extends uvm_component;
   endfunction
 
   //--------------------------------------------------------------------------
+  // [MPS_4KB] tx_mps_4kb_check - run on every TLP the RC TL sends to the DL.
+  //   1) Max Payload Size (PCIe Base 6.0 Sec 2.2.2) :
+  //        data payload (MWr / DMWr / AtomicOp / IOWr / CfgWr / MsgD) <= MPS
+  //   2) 4 KB address boundary (Sec 2.2.7) :
+  //        a Memory Request (MRd / MRdLk / MWr / DMWr / AtomicOp) must not
+  //        specify an Address / Length that crosses a 4 KB boundary.
+  //   In Flit Mode a long MWr is already split into FLIT segments, each one a
+  //   complete TLP, so each segment is checked on its own (that is what goes
+  //   on the wire).
+  //--------------------------------------------------------------------------
+  function void tx_mps_4kb_check(PCIe_sequence_item tr);
+    int unsigned payload_dw, len_dw;
+    bit [63:0]   addr;
+    string       what;
+    bit          viol;
+
+    viol = 1'b0;
+    n_mps_4kb_chk++;
+    payload_dw = tr.data.size();
+    what       = $sformatf("%s%s", tr.convert2string(),
+                           tr.is_flit_segment ? $sformatf(" [FLIT segment %0d/%0d]", tr.flit_seg_idx + 1, tr.flit_seg_total) : "");
+
+    // ---- 1) Max Payload Size ---------------------------------------------
+    if ((payload_dw != 0) && PCIe_sequence_item::exceeds_mps(payload_dw)) begin
+      n_tx_mps_viol++;
+      viol = 1'b1;
+      if (mps_4kb_err_inj)
+        `uvm_warning("RC_TL_MPS",
+          $sformatf("TX_MPS_VIOLATION (ERR_INJ) : %s payload=%0d DW (%0d B) > %s -> expected at EP : Malformed TLP",
+                    what, payload_dw, payload_dw * `PCIe_TL_DW_BYTES, PCIe_sequence_item::mps_str()))
+      else
+        `uvm_error("RC_TL_MPS",
+          $sformatf("TX_MPS_VIOLATION : %s payload=%0d DW (%0d B) > %s (Sec 2.2.2)",
+                    what, payload_dw, payload_dw * `PCIe_TL_DW_BYTES, PCIe_sequence_item::mps_str()))
+    end
+
+    // ---- 2) 4 KB address boundary (Memory Requests only) -------------------
+    if (tr.txn_type == PCIe_TL_MEM) begin
+      len_dw = tr.get_payload_dw();               // Length field, 0 => 1024 DW
+      addr   = 64'(tr.address);
+      if (PCIe_sequence_item::crosses_4kb(addr, len_dw)) begin
+        n_tx_4kb_viol++;
+        viol = 1'b1;
+        if (mps_4kb_err_inj)
+          `uvm_warning("RC_TL_4KB",
+            $sformatf("TX_4KB_BOUNDARY_CROSSING (ERR_INJ) : %s addr=0x%0h len=%0d DW last byte=0x%0h -> expected at EP : Malformed TLP",
+                      what, addr, len_dw, PCIe_sequence_item::range_last_byte(addr, len_dw)))
+        else
+          `uvm_error("RC_TL_4KB",
+            $sformatf("TX_4KB_BOUNDARY_CROSSING : %s addr=0x%0h len=%0d DW last byte=0x%0h crosses a 4 KB boundary (Sec 2.2.7)",
+                      what, addr, len_dw, PCIe_sequence_item::range_last_byte(addr, len_dw)))
+      end
+    end
+
+    if (!viol)
+      `uvm_info("RC_TL_MPS_4KB",
+        $sformatf("TX_MPS_4KB_CHECK_PASS : %s payload=%0d B (%s)",
+                  what, payload_dw * `PCIe_TL_DW_BYTES, PCIe_sequence_item::mps_str()), UVM_HIGH)
+  endfunction
+
+  //--------------------------------------------------------------------------
   // FUNCTION: write (tx_tl_imp) - entry point from the RC controller driver.
   //--------------------------------------------------------------------------
   virtual function void write(PCIe_sequence_item tr);
@@ -1768,6 +1856,8 @@ class PCIe_RC_TL_model extends uvm_component;
       return;
     end
 
+
+    tx_mps_4kb_check(tr);            // [MPS_4KB] payload <= MPS, Memory Request inside one 4 KB page
 
     serialize_header(tr, hdr);       // Header Base + OHC
     tr.hdr_dw_count = hdr.size();
@@ -2540,6 +2630,19 @@ class PCIe_RC_TL_model extends uvm_component;
       ohc_dw = ohc_dw + 1;
       `uvm_info("FLIT_HEADER", $sformatf("OHC-E1 added : DW=%08h (E-E Prefix E[3:0]=%04b)",
                  tr.ohc_e1_dw, tr.ohc_e1_dw[27:24]), UVM_LOW)
+    end
+
+    //======================================================================
+    // [OHC_E2] OHC-E2 (Sec 2.2.11) : 2 DW, last in A-B-C-E order
+    //======================================================================
+    else if (tr.ohc[4:3] == 2'b10) begin
+      for (i = 0; i < 2; i++) begin
+        hdr = new[hdr.size() + 1](hdr);
+        hdr[hdr.size() - 1] = tr.ohc_e2_dw[i];
+        `uvm_info("FLIT_HEADER", $sformatf("OHC-E2 added : DW%0d=%08h (E-E Prefix E[3:0]=%04b)",
+                   i, tr.ohc_e2_dw[i], tr.ohc_e2_dw[i][27:24]), UVM_LOW)
+      end
+      ohc_dw = ohc_dw + 2;
     end
 
     //======================================================================
