@@ -43,6 +43,8 @@ class PCIe_RC_3DW_Flit_MemRdlock_Random_sequence extends PCIe_RC_controller_base
          txn_type == PCIe_TL_MEM;
          dir      == PCIe_TL_READ;
 
+	  length inside {[2:100]};
+
          mem_locked     == 1'b1;
          mem_deferrable == 1'b0;
    
