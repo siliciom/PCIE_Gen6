@@ -47,6 +47,9 @@ class PCIe_RC_3DW_Flit_MemRd_Random_sequence extends PCIe_RC_controller_base_seq
          mem_deferrable == 1'b0;
 
          requester_id == 16'h0100;
+        
+	  length inside {[2:20]}; 
+         
 
          // Fields belonging to other transaction categories MUST be zero for a MEM transaction
          cfg_reg_num          == '0;

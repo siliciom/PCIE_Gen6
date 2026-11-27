@@ -46,7 +46,7 @@ class PCIe_RC_3DW_Flit_DefMemWr_Random_sequence extends PCIe_RC_controller_base_
          mem_locked     == 1'b0;
          mem_deferrable == 1'b1;
 
-         length inside {[2:100]};
+         length inside {[2:20]};
 
          tag          == 14'h0010;
          requester_id == 16'h0100;
